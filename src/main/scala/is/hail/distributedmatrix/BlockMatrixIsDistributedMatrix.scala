@@ -15,6 +15,12 @@ object BlockMatrixIsDistributedMatrix extends DistributedMatrix[BlockMatrix] {
   def from(rdd: RDD[Array[Double]]): M =
     new IndexedRowMatrix(rdd.zipWithIndex().map { case (x, i) => new IndexedRow(i, new DenseVector(x)) })
       .toBlockMatrixDense()
+  def from(rdd: RDD[Array[Double]], blockSize: Int): M =
+    new IndexedRowMatrix(rdd.zipWithIndex().map { case (x, i) => new IndexedRow(i, new DenseVector(x)) })
+      .toBlockMatrixDense(blockSize, blockSize)
+  def from(rdd: RDD[Array[Double]], blockRowSize: Int, blockColSize: Int): M =
+    new IndexedRowMatrix(rdd.zipWithIndex().map { case (x, i) => new IndexedRow(i, new DenseVector(x)) })
+      .toBlockMatrixDense(blockRowSize, blockColSize)
   def from(bm: BlockMatrix): M = bm
   def from(cm: CoordinateMatrix): M = cm.toBlockMatrix()
 
