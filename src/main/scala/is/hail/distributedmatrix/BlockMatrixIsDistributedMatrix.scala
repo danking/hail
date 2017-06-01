@@ -18,7 +18,8 @@ object BlockMatrixIsDistributedMatrix extends DistributedMatrix[BlockMatrix] {
   def from(bm: BlockMatrix): M = bm
   def from(cm: CoordinateMatrix): M = cm.toBlockMatrix()
 
-  def transpose(m: M): M = m.transpose
+  def transpose(m: M): M =
+    BetterBlockMatrix.transpose(m)
   def diagonal(m: M): Array[Double] = toCoordinateMatrix(m)
     .entries
     .filter(me => me.i == me.j)
@@ -27,7 +28,8 @@ object BlockMatrixIsDistributedMatrix extends DistributedMatrix[BlockMatrix] {
     .sortBy(_._1)
     .map(_._2)
 
-  def multiply(l: M, r: M): M = l.multiply(r)
+  def multiply(l: M, r: M): M =
+    BetterBlockMatrix.multiply(l, r)
   def multiply(l: M, r: DenseMatrix): M = {
     require(l.numCols() == r.numRows,
       s"incompatible matrix dimensions: ${l.numRows()}x${l.numCols()} and ${r.numRows}x${r.numCols}")
