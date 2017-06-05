@@ -34,6 +34,10 @@ object BlockMatrixIsDistributedMatrix extends DistributedMatrix[BlockMatrix] {
     .sortBy(_._1)
     .map(_._2)
 
+  /**
+    * Note that this method requires that the individual blocks of l have the same number of columns as the
+    * blocks of r have rows.
+    */
   def multiply(l: M, r: M): M =
     BetterBlockMatrix.multiply(l, r)
   def multiply(l: M, r: DenseMatrix): M = {
