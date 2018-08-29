@@ -2,6 +2,7 @@ package is.hail.expr.types
 
 import is.hail.annotations.{Annotation, AnnotationPathException, _}
 import is.hail.asm4s.{Code, _}
+import is.hail.expr.ir.EmitMethodBuilder
 import is.hail.expr.{EvalContext, HailRep, Parser}
 import is.hail.utils._
 import org.apache.spark.sql.Row
@@ -63,6 +64,9 @@ final case class TStruct(fields: IndexedSeq[Field], override val required: Boole
 
   val size: Int = fields.length
 
+  override def truncate(newSize: Int): TStruct =
+    TStruct(fields.take(newSize), required)
+
   val missingIdx = new Array[Int](size)
   val nMissing: Int = TBaseStruct.getMissingness(types, missingIdx)
   val nMissingBytes = (nMissing + 7) >>> 3
@@ -71,6 +75,11 @@ final case class TStruct(fields: IndexedSeq[Field], override val required: Boole
   override val alignment: Long = TBaseStruct.alignment(types)
 
   val ordering: ExtendedOrdering = TBaseStruct.getOrdering(types)
+
+  def codeOrdering(mb: EmitMethodBuilder, other: Type): CodeOrdering = {
+    assert(other isOfType this)
+    CodeOrdering.rowOrdering(this, other.asInstanceOf[TStruct], mb)
+  }
 
   def fieldByName(name: String): Field = fields(fieldIdx(name))
 
@@ -100,11 +109,7 @@ final case class TStruct(fields: IndexedSeq[Field], override val required: Boole
 
   def field(name: String): Field = fields(fieldIdx(name))
 
-  override def getOption(path: List[String]): Option[Type] =
-    if (path.isEmpty)
-      Some(this)
-    else
-      selfField(path.head).map(_.typ).flatMap(t => t.getOption(path.tail))
+  def toTTuple: TTuple = new TTuple(types, required)
 
   override def fieldOption(path: List[String]): Option[Field] =
     if (path.isEmpty)
@@ -132,41 +137,6 @@ final case class TStruct(fields: IndexedSeq[Field], override val required: Boole
               q(a.asInstanceOf[Row].get(localIndex)))
         case None => throw new AnnotationPathException(s"struct has no field ${ p.head }")
       }
-    }
-  }
-
-  override def delete(p: List[String]): (Type, Deleter) = {
-    if (p.isEmpty)
-      (TStruct.empty(), a => null)
-    else {
-      val key = p.head
-      val f = selfField(key) match {
-        case Some(f) => f
-        case None => throw new AnnotationPathException(s"$key not found")
-      }
-      val index = f.index
-      val (newFieldType, d) = f.typ.delete(p.tail)
-      val newType: Type =
-        if (newFieldType == TStruct.empty())
-          deleteKey(key, f.index)
-        else
-          updateKey(key, f.index, newFieldType)
-
-      val localDeleteFromRow = newFieldType == TStruct.empty()
-
-      val deleter: Deleter = { a =>
-        if (a == null)
-          null
-        else {
-          val r = a.asInstanceOf[Row]
-
-          if (localDeleteFromRow)
-            r.deleteField(index)
-          else
-            r.update(index, d(r.get(index)))
-        }
-      }
-      (newType, deleter)
     }
   }
 
@@ -271,17 +241,17 @@ final case class TStruct(fields: IndexedSeq[Field], override val required: Boole
     (t.asInstanceOf[TStruct], f)
   }
 
-  def updateKey(key: String, i: Int, sig: Type): Type = {
+  def updateKey(key: String, i: Int, sig: Type): TStruct = {
     assert(fieldIdx.contains(key))
 
     val newFields = Array.fill[Field](fields.length)(null)
     for (i <- fields.indices)
       newFields(i) = fields(i)
     newFields(i) = Field(key, sig, i)
-    TStruct(newFields)
+    TStruct(newFields, required)
   }
 
-  def deleteKey(key: String, index: Int): Type = {
+  def deleteKey(key: String, index: Int): TStruct = {
     assert(fieldIdx.contains(key))
     if (fields.length == 1)
       TStruct.empty()
@@ -291,7 +261,7 @@ final case class TStruct(fields: IndexedSeq[Field], override val required: Boole
         newFields(i) = fields(i)
       for (i <- index + 1 until fields.length)
         newFields(i - 1) = fields(i).copy(index = i - 1)
-      TStruct(newFields)
+      TStruct(newFields, required)
     }
   }
 
@@ -301,42 +271,7 @@ final case class TStruct(fields: IndexedSeq[Field], override val required: Boole
     for (i <- fields.indices)
       newFields(i) = fields(i)
     newFields(fields.length) = Field(key, sig, fields.length)
-    TStruct(newFields)
-  }
-
-  def merge(other: TStruct): (TStruct, Merger) = {
-    val intersect = fields.map(_.name).toSet
-      .intersect(other.fields.map(_.name).toSet)
-
-    if (intersect.nonEmpty)
-      fatal(
-        s"""Invalid merge operation: cannot merge structs with same-name ${ plural(intersect.size, "field") }
-           |  Found these fields in both structs: [ ${
-          intersect.map(s => prettyIdentifier(s)).mkString(", ")
-        } ]
-           |  Hint: use `drop' or `select' to remove these fields from one side""".stripMargin)
-
-    val newStruct = TStruct(fields ++ other.fields.map(f => f.copy(index = f.index + size)))
-
-    val size1 = size
-    val size2 = other.size
-    val targetSize = newStruct.size
-
-    val merger = (a1: Annotation, a2: Annotation) => {
-      if (a1 == null && a2 == null)
-        null
-      else {
-        val s1 = Option(a1).map(_.asInstanceOf[Row].toSeq)
-          .getOrElse(Seq.fill[Any](size1)(null))
-        val s2 = Option(a2).map(_.asInstanceOf[Row].toSeq)
-          .getOrElse(Seq.fill[Any](size2)(null))
-        val newValues = s1 ++ s2
-        assert(newValues.size == targetSize)
-        Annotation.fromSeq(newValues)
-      }
-    }
-
-    (newStruct, merger)
+    TStruct(newFields, required)
   }
 
   def annotate(other: TStruct): (TStruct, Merger) = {
@@ -392,7 +327,16 @@ final case class TStruct(fields: IndexedSeq[Field], override val required: Boole
     newStruct -> annotator
   }
 
-  def filter(set: Set[String], include: Boolean = true): (TStruct, Deleter) = {
+  def rename(m: Map[String, String]): TStruct = {
+    val newFieldsBuilder = new ArrayBuilder[(String, Type)]()
+    fields.foreach { fd =>
+      val n = fd.name
+      newFieldsBuilder += (m.getOrElse(n, n), fd.typ)
+    }
+    TStruct(newFieldsBuilder.result(): _*)
+  }
+
+  def filterSet(set: Set[String], include: Boolean = true): (TStruct, Deleter) = {
     val notFound = set.filter(name => selfField(name).isEmpty).map(prettyIdentifier)
     if (notFound.nonEmpty)
       fatal(
@@ -449,7 +393,7 @@ final case class TStruct(fields: IndexedSeq[Field], override val required: Boole
         Annotation.fromSeq(newValues)
       }
 
-    (TStruct(newFields.zipWithIndex.map { case (f, i) => f.copy(index = i) }), filterer)
+    (TStruct(newFields.zipWithIndex.map { case (f, i) => f.copy(index = i) }, required), filterer)
   }
 
   override def pyString(sb: StringBuilder): Unit = {
@@ -481,22 +425,7 @@ final case class TStruct(fields: IndexedSeq[Field], override val required: Boole
     }
   }
 
-  override def desc: String =
-    """
-    A ``Struct`` is like a Python tuple where the fields are named and the set of fields is fixed.
-
-    An example of constructing and accessing the fields in a ``Struct`` is
-
-    .. code-block:: text
-        :emphasize-lines: 2
-
-        let s = {gene: "ACBD", function: "LOF", nHet: 12} in s.gene
-        result: "ACBD"
-
-    A field of the ``Struct`` can also be another ``Struct``. For example, ``va.info.AC`` selects the struct ``info`` from the struct ``va``, and then selects the array ``AC`` from the struct ``info``.
-    """
-
-  def select(keep: Array[String]): (TStruct, (Row) => Row) = {
+  def select(keep: IndexedSeq[String]): (TStruct, (Row) => Row) = {
     val t = TStruct(keep.map { n =>
       n -> field(n).typ
     }: _*)
@@ -507,6 +436,9 @@ final case class TStruct(fields: IndexedSeq[Field], override val required: Boole
     }
     (t, selectF)
   }
+
+  def typeAfterSelect(keep: IndexedSeq[Int]): TStruct =
+    TStruct(keep.map(i => fieldNames(i) -> types(i)): _*)
 
   override val fundamentalType: TStruct = {
     val fundamentalFieldTypes = fields.map(f => f.typ.fundamentalType)
@@ -522,19 +454,5 @@ final case class TStruct(fields: IndexedSeq[Field], override val required: Boole
   def loadField(region: Code[Region], offset: Code[Long], fieldName: String): Code[Long] = {
     val f = field(fieldName)
     loadField(region, fieldOffset(offset, f.index), f.index)
-  }
-
-  def uniqueFieldName(base: String): String = {
-    val fieldNames = fields.map(_.name).toSet
-    if (fieldNames.contains(base)) {
-      var i = 0
-      var candidate = base + i.toString
-      while (fieldNames.contains(candidate)) {
-        i += 1
-        candidate = base + i.toString
-      }
-      candidate
-    } else
-      base
   }
 }

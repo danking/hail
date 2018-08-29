@@ -1,13 +1,13 @@
-import hail
-import hail as hl
+from typing import *
+
 from hail.expr import expressions
-from hail.expr.expr_ast import *
 from hail.expr.types import *
 from hail.genetics import Locus, Call
+from hail.ir import *
+from hail.typecheck import linked_list
 from hail.utils import Interval, Struct
 from hail.utils.java import *
 from hail.utils.linkedlist import LinkedList
-from hail.utils.misc import plural
 from .indices import *
 
 
@@ -56,7 +56,7 @@ def impute_type(x):
         return ttuple(*(impute_type(element) for element in x))
     elif isinstance(x, list):
         if len(x) == 0:
-            raise ExpressionException('Cannot impute type of empty list.')
+            raise ExpressionException("Cannot impute type of empty list. Use 'hl.empty_array' to create an empty array.")
         ts = {impute_type(element) for element in x}
         unified_type = unify_types_limited(*ts)
         if not unified_type:
@@ -65,7 +65,7 @@ def impute_type(x):
         return tarray(unified_type)
     elif isinstance(x, set):
         if len(x) == 0:
-            raise ExpressionException('Cannot impute type of empty set.')
+            raise ExpressionException("Cannot impute type of empty set. Use 'hl.empty_set' to create an empty set.")
         ts = {impute_type(element) for element in x}
         unified_type = unify_types_limited(*ts)
         if not unified_type:
@@ -74,7 +74,7 @@ def impute_type(x):
         return tset(unified_type)
     elif isinstance(x, dict):
         if len(x) == 0:
-            raise ExpressionException('Cannot impute type of empty dict.')
+            raise ExpressionException("Cannot impute type of empty dict. Use 'hl.empty_dict' to create an empty dict.")
         kts = {impute_type(element) for element in x.keys()}
         vts = {impute_type(element) for element in x.values()}
         unified_key_type = unify_types_limited(*kts)
@@ -88,6 +88,9 @@ def impute_type(x):
         return tdict(unified_key_type, unified_value_type)
     elif x is None:
         raise ExpressionException("Hail cannot impute the type of 'None'")
+    elif isinstance(x, (hl.expr.builders.CaseBuilder, hl.expr.builders.SwitchBuilder)):
+        raise ExpressionException("'switch' and 'case' expressions must end with a call to either"
+                                  "'default' or 'or_missing'")
     else:
         raise ExpressionException("Hail cannot automatically impute type of {}: {}".format(type(x), x))
 
@@ -116,11 +119,13 @@ def _to_expr(e, dtype):
                 return hl.float64(e)
             elif dtype == tfloat32:
                 return hl.float32(e)
-            else:
-                assert dtype == tint64
+            elif dtype == tint64:
                 return hl.int64(e)
+            else:
+                assert dtype == tint32
+                return hl.int32(e)
         return e
-    elif not is_container(dtype):
+    elif not is_compound(dtype):
         # these are not container types and cannot contain expressions if we got here
         return e
     elif isinstance(dtype, tstruct):
@@ -155,9 +160,9 @@ def _to_expr(e, dtype):
             exprs = [element if isinstance(element, Expression)
                      else hl.literal(element, dtype.element_type)
                      for element in elements]
-            indices, aggregations, joins = unify_all(*exprs)
-        return expressions.construct_expr(ArrayDeclaration([expr._ast for expr in exprs]),
-                                          dtype, indices, aggregations, joins)
+            indices, aggregations = unify_all(*exprs)
+        ir = MakeArray([e._ir for e in exprs], dtype)
+        return expressions.construct_expr(ir, dtype, indices, aggregations)
     elif isinstance(dtype, tset):
         elements = []
         found_expr = False
@@ -172,9 +177,9 @@ def _to_expr(e, dtype):
             exprs = [element if isinstance(element, Expression)
                      else hl.literal(element, dtype.element_type)
                      for element in elements]
-            indices, aggregations, joins = unify_all(*exprs)
-            return hl.set(expressions.construct_expr(ArrayDeclaration([expr._ast for expr in exprs]),
-                                                     tarray(dtype.element_type), indices, aggregations, joins))
+            indices, aggregations = unify_all(*exprs)
+            ir = ToSet(MakeArray([e._ir for e in exprs], tarray(dtype.element_type)))
+            return expressions.construct_expr(ir, dtype, indices, aggregations)
     elif isinstance(dtype, ttuple):
         elements = []
         found_expr = False
@@ -189,9 +194,9 @@ def _to_expr(e, dtype):
             exprs = [elements[i] if isinstance(elements[i], Expression)
                      else hl.literal(elements[i], dtype.types[i])
                      for i in range(len(elements))]
-            indices, aggregations, joins = unify_all(*exprs)
-            return expressions.construct_expr(TupleDeclaration(*[expr._ast for expr in exprs]),
-                                              dtype, indices, aggregations, joins)
+            indices, aggregations = unify_all(*exprs)
+            ir = MakeTuple([expr._ir for expr in exprs])
+            return expressions.construct_expr(ir, dtype, indices, aggregations)
     elif isinstance(dtype, tdict):
         keys = []
         values = []
@@ -216,9 +221,10 @@ def _to_expr(e, dtype):
     else:
         raise NotImplementedError(dtype)
 
-def unify_all(*exprs) -> Tuple[Indices, LinkedList, LinkedList]:
+
+def unify_all(*exprs) -> Tuple[Indices, LinkedList]:
     if len(exprs) == 0:
-        return Indices(), LinkedList(Join), LinkedList(Aggregation)
+        return Indices(), LinkedList(Aggregation)
     try:
         new_indices = Indices.unify(*[e._indices for e in exprs])
     except ExpressionException:
@@ -227,20 +233,18 @@ def unify_all(*exprs) -> Tuple[Indices, LinkedList, LinkedList]:
         sources = defaultdict(lambda: [])
         for e in exprs:
             from .expression_utils import get_refs
-            for name, inds in get_refs(e, *e._aggregations.exprs):
+            for name, inds in get_refs(e, *[e for a in e._aggregations for e in a.exprs]).items():
                 sources[inds.source].append(str(name))
         raise ExpressionException("Cannot combine expressions from different source objects."
                                   "\n    Found fields from {n} objects:{fields}".format(
             n=len(sources),
             fields=''.join("\n        {}: {}".format(src, fds) for src, fds in sources.items())
-        ))
+        )) from None
     first, rest = exprs[0], exprs[1:]
     aggregations = first._aggregations
-    joins = first._joins
     for e in rest:
         aggregations = aggregations.push(*e._aggregations)
-        joins = joins.push(*e._joins)
-    return new_indices, aggregations, joins
+    return new_indices, aggregations
 
 
 def unify_types_limited(*ts):
@@ -255,9 +259,11 @@ def unify_types_limited(*ts):
             return tfloat64
         elif tfloat32 in type_set:
             return tfloat32
-        else:
-            assert type_set == {tint32, tint64}
+        elif tint64 in type_set:
             return tint64
+        else:
+            assert type_set == {tint32, tbool}
+            return tint32
     else:
         return None
 
@@ -275,22 +281,36 @@ def unify_types(*ts):
     else:
         return None
 
+def unify_exprs(*exprs: 'Expression') -> Tuple:
+    assert len(exprs) > 0
+    types = {e.dtype for e in exprs}
+
+    # all types are the same
+    if len(types) == 1:
+        return exprs + (True,)
+
+    for t in types:
+        c = expressions.coercer_from_dtype(t)
+        if all(c.can_coerce(e.dtype) for e in exprs):
+            return tuple([c.coerce(e) for e in exprs]) + (True,)
+
+    # cannot coerce all types to the same type
+    return exprs + (False,)
 
 class Expression(object):
     """Base class for Hail expressions."""
 
-    @typecheck_method(ast=AST, type=HailType, indices=Indices, aggregations=LinkedList, joins=LinkedList)
+    @typecheck_method(ir=IR, type=nullable(HailType), indices=Indices, aggregations=linked_list(Aggregation))
     def __init__(self,
-                 ast: AST,
+                 ir: IR,
                  type: HailType,
                  indices: Indices = Indices(),
-                 aggregations: LinkedList = LinkedList(Aggregation),
-                 joins: LinkedList = LinkedList(Join)):
-        self._ast = ast
+                 aggregations: LinkedList = LinkedList(Aggregation)):
+
+        self._ir: IR = ir
         self._type = type
         self._indices = indices
         self._aggregations = aggregations
-        self._joins = joins
 
     def describe(self):
         """Print information about type, index, and dependencies."""
@@ -305,13 +325,6 @@ class Expression(object):
             agg_tag = ''
             agg_str = ''
 
-        if self._joins:
-            n_joins = len(self._joins)
-            word = plural('join or literal', n_joins, 'joins or literals')
-            join_str = f'\nDepends on {n_joins} {word}'
-        else:
-            join_str = ''
-
         bar = '--------------------------------------------------------'
         s = '{bar}\n' \
             'Type:\n' \
@@ -320,15 +333,14 @@ class Expression(object):
             'Source:\n' \
             '    {src}\n' \
             'Index:\n' \
-            '    {inds}{agg_tag}{maybe_bar}{agg}{joins}\n' \
+            '    {inds}{agg_tag}{maybe_bar}{agg}\n' \
             '{bar}'.format(bar=bar,
                            t=self.dtype.pretty(indent=4),
-                           src=self._indices.source.__class__,
+                           src=self._indices.source,
                            inds=list(self._indices.axes),
-                           maybe_bar='\n' + bar + '\n' if join_str or agg_str else '',
+                           maybe_bar='\n' + bar + '\n' if agg_str else '',
                            agg_tag=agg_tag,
-                           agg=agg_str,
-                           joins=join_str)
+                           agg=agg_str)
         print(s)
 
     def __lt__(self, other):
@@ -344,14 +356,17 @@ class Expression(object):
         raise NotImplementedError("'>=' comparison with expression of type {}".format(str(self._type)))
 
     def __nonzero__(self):
-        raise NotImplementedError(
+        raise ExpressionException(
             "The truth value of an expression is undefined\n"
             "    Hint: instead of 'if x', use 'hl.cond(x, ...)'\n"
             "    Hint: instead of 'x and y' or 'x or y', use 'x & y' or 'x | y'\n"
             "    Hint: instead of 'not x', use '~x'")
 
     def __iter__(self):
-        raise TypeError("'Expression' object is not iterable")
+        raise ExpressionException(f"{repr(self)} object is not iterable")
+
+    def _is_scalar(self):
+        return self._indices.source is None
 
     def _promote_scalar(self, typ):
         if typ == tint32:
@@ -365,18 +380,26 @@ class Expression(object):
             return hail.float64(self)
 
     def _promote_numeric(self, typ):
-        if isinstance(typ, tarray):
-            if isinstance(self.dtype, tarray):
-                return hail.map(lambda x: x._promote_scalar(typ.element_type), self)
-            else:
-                return self._promote_scalar(typ.element_type)
-        elif isinstance(self, expressions.Aggregable):
-            return self._map(lambda x: x._promote_scalar(typ))
+        coercer = expressions.coercer_from_dtype(typ)
+        if isinstance(typ, tarray) and not isinstance(self.dtype, tarray):
+            return coercer.ec.coerce(self)
         else:
-            return self._promote_scalar(typ)
+            return coercer.coerce(self)
 
     def _bin_op_numeric_unify_types(self, name, other):
-        t = unify_types(self.dtype._scalar_type(), other.dtype._scalar_type())
+        def numeric_proxy(t):
+            if t == tbool:
+                return tint32
+            else:
+                return t
+
+        def scalar_type(t):
+            if isinstance(t, tarray):
+                return numeric_proxy(t.element_type)
+            else:
+                return numeric_proxy(t)
+
+        t = unify_types(scalar_type(self.dtype), scalar_type(other.dtype))
         if t is None:
             raise NotImplementedError("'{}' {} '{}'".format(
                 self.dtype, name, other.dtype))
@@ -399,79 +422,77 @@ class Expression(object):
         return me._bin_op(name, other, ret_type)
 
     def _bin_op_numeric_reverse(self, name, other, ret_type_f=None):
-        other = to_expr(other)
-        return other._bin_op_numeric(name, self, ret_type_f)
+        return to_expr(other)._bin_op_numeric(name, self, ret_type_f)
 
     def _unary_op(self, name):
-        return expressions.construct_expr(UnaryOperation(self._ast, name),
-                                          self._type, self._indices, self._aggregations, self._joins)
+        return expressions.construct_expr(ApplyUnaryOp(name, self._ir), self._type, self._indices, self._aggregations)
 
     def _bin_op(self, name, other, ret_type):
         other = to_expr(other)
-        indices, aggregations, joins = unify_all(self, other)
-        return expressions.construct_expr(BinaryOperation(self._ast, other._ast, name), ret_type, indices, aggregations,
-                                          joins)
+        indices, aggregations = unify_all(self, other)
+        if (name in {'+', '-', '*', '/', '//'}) and (ret_type in {tint32, tint64, tfloat32, tfloat64}):
+            op = ApplyBinaryOp(name, self._ir, other._ir)
+        elif name in {"==", "!=", "<", "<=", ">", ">="}:
+            op = ApplyComparisonOp(name, self._ir, other._ir)
+        else:
+            op = Apply(name, self._ir, other._ir)
+        return expressions.construct_expr(op, ret_type, indices, aggregations)
 
     def _bin_op_reverse(self, name, other, ret_type):
-        other = to_expr(other)
-        indices, aggregations, joins = unify_all(self, other)
-        return expressions.construct_expr(BinaryOperation(other._ast, self._ast, name), ret_type, indices, aggregations,
-                                          joins)
+        return to_expr(other)._bin_op(name, self, ret_type)
 
     def _field(self, name, ret_type):
-        return expressions.construct_expr(Select(self._ast, name), ret_type, self._indices,
-                                          self._aggregations, self._joins)
+        return expressions.construct_expr(GetField(self._ir, name),
+                                          ret_type, self._indices, self._aggregations)
 
     def _method(self, name, ret_type, *args):
         args = tuple(to_expr(arg) for arg in args)
-        indices, aggregations, joins = unify_all(self, *args)
-        return expressions.construct_expr(ClassMethod(name, self._ast, *(a._ast for a in args)),
-                                          ret_type, indices, aggregations, joins)
+        indices, aggregations = unify_all(self, *args)
+        ir = Apply(name, self._ir, *(a._ir for a in args))
+        return expressions.construct_expr(ir, ret_type, indices, aggregations)
 
     def _index(self, ret_type, key):
         key = to_expr(key)
-        indices, aggregations, joins = unify_all(self, key)
-        return expressions.construct_expr(Index(self._ast, key._ast),
-                                          ret_type, indices, aggregations, joins)
+        return self._method("[]", ret_type, key)
 
     def _slice(self, ret_type, start=None, stop=None, step=None):
+        ir_args = []
         if start is not None:
             start = to_expr(start)
-            start_ast = start._ast
+            ir_args.append(start)
+            start_str = "*"
         else:
-            start_ast = None
+            start_str = ""
         if stop is not None:
             stop = to_expr(stop)
-            stop_ast = stop._ast
+            ir_args.append(stop)
+            stop_str = "*"
         else:
-            stop_ast = None
+            stop_str = ""
         if step is not None:
             raise NotImplementedError('Variable slice step size is not currently supported')
 
-        non_null = [x for x in [start, stop] if x is not None]
-        indices, aggregations, joins = unify_all(self, *non_null)
-        return expressions.construct_expr(Index(self._ast, Slice(start_ast, stop_ast)),
-                                          ret_type, indices, aggregations, joins)
+        mname = "[{}:{}]".format(start_str, stop_str)
+        return self._method(mname, ret_type, *ir_args)
 
-    def _bin_lambda_method(self, name, f, input_type, ret_type_f, *args):
-        args = (to_expr(arg) for arg in args)
+    def _ir_lambda_method(self, irf, f, input_type, ret_type_f, *args):
+        args = (to_expr(arg)._ir for arg in args)
         new_id = Env.get_uid()
         lambda_result = to_expr(
-            f(expressions.construct_expr(VariableReference(new_id), input_type, self._indices, self._aggregations,
-                                         self._joins)))
+            f(expressions.construct_variable(new_id, input_type, self._indices, self._aggregations)))
 
-        indices, aggregations, joins = unify_all(self, lambda_result)
-        ast = LambdaClassMethod(name, new_id, self._ast, lambda_result._ast, *(a._ast for a in args))
-        return expressions.construct_expr(ast, ret_type_f(lambda_result._type), indices, aggregations, joins)
+        indices, aggregations = unify_all(self, lambda_result)
+        ir = irf(self._ir, new_id, lambda_result._ir, *args)
+        return expressions.construct_expr(ir, ret_type_f(lambda_result._type), indices, aggregations)
 
     @property
-    def dtype(self):
+    def dtype(self) -> HailType:
         """The data type of the expression.
 
         Returns
         -------
         :class:`.HailType`
-            Data type.
+
         """
         return self._type
 
@@ -490,17 +511,15 @@ class Expression(object):
         Examples
         --------
 
-        .. doctest::
+        >>> x = hl.literal(5)
+        >>> y = hl.literal(5)
+        >>> z = hl.literal(1)
 
-            >>> x = hl.literal(5)
-            >>> y = hl.literal(5)
-            >>> z = hl.literal(1)
+        >>> (x == y).value
+        True
 
-            >>> hl.eval_expr(x == y)
-            True
-
-            >>> hl.eval_expr(x == z)
-            False
+        >>> (x == z).value
+        False
 
         Notes
         -----
@@ -518,12 +537,11 @@ class Expression(object):
             ``True`` if the two expressions are equal.
         """
         other = to_expr(other)
-        t = unify_types(self._type, other._type)
-        if t is None:
-            raise TypeError("Invalid '==' comparison, cannot compare expressions of type '{}' and '{}'".format(
-                self._type, other._type
-            ))
-        return self._bin_op("==", other, tbool)
+        left, right, success = unify_exprs(self, other)
+        if not success:
+            raise TypeError(f"Invalid '==' comparison, cannot compare expressions "
+                            f"of type '{self.dtype}' and '{other.dtype}'")
+        return left._bin_op("==", right, tbool)
 
     def __ne__(self, other):
         """Returns ``True`` if the two expressions are not equal.
@@ -531,17 +549,15 @@ class Expression(object):
         Examples
         --------
 
-        .. doctest::
+        >>> x = hl.literal(5)
+        >>> y = hl.literal(5)
+        >>> z = hl.literal(1)
 
-            >>> x = hl.literal(5)
-            >>> y = hl.literal(5)
-            >>> z = hl.literal(1)
+        >>> (x != y).value
+        False
 
-            >>> hl.eval_expr(x != y)
-            False
-
-            >>> hl.eval_expr(x != z)
-            True
+        >>> (x != z).value
+        True
 
         Notes
         -----
@@ -559,12 +575,11 @@ class Expression(object):
             ``True`` if the two expressions are not equal.
         """
         other = to_expr(other)
-        t = unify_types(self._type, other._type)
-        if t is None:
-            raise TypeError("Invalid '!=' comparison, cannot compare expressions of type '{}' and '{}'".format(
-                self._type, other._type
-            ))
-        return self._bin_op("!=", other, tbool)
+        left, right, success = unify_exprs(self, other)
+        if not success:
+            raise TypeError(f"Invalid '!=' comparison, cannot compare expressions "
+                            f"of type '{self.dtype}' and '{other.dtype}'")
+        return left._bin_op("!=", right, tbool)
 
     def _to_table(self, name):
         source = self._indices.source
@@ -575,49 +590,61 @@ class Expression(object):
             # scalar expression
             df = Env.dummy_table()
             df = df.select(**{name: self})
-            return df
+            to_return = df
         elif len(axes) == 0:
             uid = Env.get_uid()
             source = source.select_globals(**{uid: self})
             df = Env.dummy_table()
             df = df.select(**{name: source.index_globals()[uid]})
-            return df
+            to_return = df
         elif len(axes) == 1:
             if isinstance(source, hail.Table):
                 df = source
-                df = df.select(*filter(lambda f: f != name, df.key), **{name: self})
-                return df.select_globals()
+                field_name = source._fields_inverse.get(self)
+                if field_name is not None:
+                    if source.key and field_name in source.key:
+                        df = df.select()
+                    else:
+                        df = df.select(field_name)
+                    if field_name != name:
+                        df = df.rename({field_name: name})
+                else:
+                    df = df.select(**{name: self})
+                to_return = df.select_globals()
             else:
                 assert isinstance(source, hail.MatrixTable)
                 if self._indices == source._row_indices:
                     field_name = source._fields_inverse.get(self)
                     if field_name is not None:
                         if field_name in source.row_key:
-                            m = source.select_rows(*source.row_key)
+                            m = source.select_rows()
                         else:
-                            m = source.select_rows(*source.row_key, field_name)
+                            m = source.select_rows(field_name)
                         m = m.rename({field_name: name})
                     else:
-                        m = source.select_rows(*source.row_key, **{name: self})
-                    return m.rows().select_globals()
+                        m = source.select_rows(**{name: self})
+                    to_return = m.rows().select_globals()
                 else:
                     field_name = source._fields_inverse.get(self)
                     if field_name is not None:
                         if field_name in source.col_key:
-                            m = source.select_cols(*source.col_key)
+                            m = source.select_cols()
                         else:
-                            m = source.select_cols(*source.col_key, field_name)
+                            m = source.select_cols(field_name)
                         m = m.rename({field_name: name})
                     else:
-                        m = source.select_cols(*source.col_key, **{name: self})
-                    return m.cols().select_globals()
+                        m = source.select_cols(**{name: self})
+                    to_return = m.cols().select_globals()
         else:
             assert len(axes) == 2
             assert isinstance(source, hail.MatrixTable)
-            source = source.select_entries(**{name: self})
-            source = source.select_rows(*source.row_key)
-            source = source.select_cols(*source.col_key)
-            return source.entries().select_globals()
+            source = source.select_entries(**{name: self}).select_rows().select_cols()
+            to_return = source.entries().select_globals()
+        assert self.dtype == to_return[name].dtype, f'type mismatch:\n' \
+                                                    f'  Actual:    {self.dtype}\n' \
+                                                    f'  Should be: {to_return[name].dtype}'
+        return to_return
+
 
     @typecheck_method(n=int, width=int, truncate=nullable(int), types=bool)
     def show(self, n=10, width=90, truncate=None, types=True):
@@ -625,28 +652,27 @@ class Expression(object):
 
         Examples
         --------
-        .. doctest::
 
-            >>> table1.SEX.show()
-            +-------+-----+
-            |    ID | SEX |
-            +-------+-----+
-            | int32 | str |
-            +-------+-----+
-            |     1 | M   |
-            |     2 | M   |
-            |     3 | F   |
-            |     4 | F   |
-            +-------+-----+
+        >>> table1.SEX.show()
+        +-------+-----+
+        |    ID | SEX |
+        +-------+-----+
+        | int32 | str |
+        +-------+-----+
+        |     1 | M   |
+        |     2 | M   |
+        |     3 | F   |
+        |     4 | F   |
+        +-------+-----+
 
-            >>> hl.literal(123).show()
-            +--------+
-            | <expr> |
-            +--------+
-            |  int32 |
-            +--------+
-            |    123 |
-            +--------+
+        >>> hl.literal(123).show()
+        +--------+
+        | <expr> |
+        +--------+
+        |  int32 |
+        +--------+
+        |    123 |
+        +--------+
 
         Warning
         -------
@@ -664,14 +690,34 @@ class Expression(object):
         types : :obj:`bool`
             Print an extra header line with the type of each field.
         """
+        print(self._show(n, width, truncate, types))
+
+    def _show(self, n=10, width=90, truncate=None, types=True):
         name = '<expr>'
         source = self._indices.source
+        if isinstance(source, hl.Table):
+            if self is source.row:
+                return source._show(n, width, truncate, types)
+            elif self is source.key:
+                return source.select()._show(n, width, truncate, types)
+        elif isinstance(source, hl.MatrixTable):
+            if self is source.row:
+                return source.rows()._show(n, width, truncate, types)
+            elif self is source.row_key:
+                return source.rows().select()._show(n, width, truncate, types)
+            if self is source.col:
+                return source.cols()._show(n, width, truncate, types)
+            elif self is source.col_key:
+                return source.cols().select()._show(n, width, truncate, types)
+            if self is source.entry:
+                return source.select_rows().select_cols().entries()._show(n, width, truncate, types)
         if source is not None:
             name = source._fields_inverse.get(self, name)
         t = self._to_table(name)
-        if name in t.key:
-            t = t.select(name)
-        t.show(n, width, truncate, types)
+        if t.key is not None and name in t.key:
+            t = t.key_by(name).select()
+        return t._show(n, width, truncate, types)
+
 
     @typecheck_method(n=int)
     def take(self, n):
@@ -679,12 +725,11 @@ class Expression(object):
 
         Examples
         --------
+
         Take the first three rows:
 
-        .. doctest::
-
-            >>> first3 = table1.X.take(3)
-            [5, 6, 7]
+        >>> first3 = table1.X.take(3)
+        [5, 6, 7]
 
         Warning
         -------
@@ -707,12 +752,11 @@ class Expression(object):
 
         Examples
         --------
-        Take the first three rows:
 
-        .. doctest::
+        Collect all the values from `C1`:
 
-            >>> first3 = table1.C1.collect()
-            [2, 2, 10, 11]
+        >>> first3 = table1.C1.collect()
+        [2, 2, 10, 11]
 
         Warning
         -------
@@ -728,7 +772,7 @@ class Expression(object):
         """
         uid = Env.get_uid()
         t = self._to_table(uid)
-        return [r[uid] for r in t.select(uid).collect()]
+        return [r[uid] for r in t._select("collect", hl.struct(**{uid: t[uid]}), None).collect()]
 
     @property
     def value(self):
@@ -747,6 +791,20 @@ class Expression(object):
         """
         return hl.eval_expr(self)
 
+    def _aggregation_method(self):
+        src = self._indices.source
+        assert src is not None
+        assert len(self._indices.axes) > 0
+        if isinstance(src, hl.MatrixTable):
+            if self._indices.axes == {'row'}:
+                return src.aggregate_rows
+            elif self._indices.axes == {'col'}:
+                return src.aggregate_cols
+            else:
+                return src.aggregate_entries
+        else:
+            return src.aggregate
+
 
 class Aggregable(object):
     """Expression that can only be aggregated.
@@ -756,12 +814,12 @@ class Aggregable(object):
     cannot otherwise be used in expressions.
     """
 
-    def __init__(self, ast, type, indices, aggregations, joins):
-        self._ast = ast
+    def __init__(self, ir, type, indices, aggregations, transformations=lambda x, cont: cont(x)):
+        self._ir = ir
         self._type = type
         self._indices = indices
         self._aggregations = aggregations
-        self._joins = joins
+        self._transformations = transformations
 
     def __nonzero__(self):
         raise NotImplementedError('Truth value of an aggregable collection is undefined')
@@ -774,19 +832,67 @@ class Aggregable(object):
 
     def _map(self, f):
         uid = Env.get_uid()
-        ref = expressions.construct_expr(
-            VariableReference(uid), self._type, self._indices, self._aggregations, self._joins)
+        ref = expressions.construct_variable(uid, self._type,
+                                             self._indices, self._aggregations)
         mapped = f(ref)
-        indices, aggregations, joins = unify_all(ref, mapped)
-        return expressions.Aggregable(
-            LambdaClassMethod('map', uid, self._ast, mapped._ast), mapped.dtype,
-            indices, aggregations, joins)
+        indices, aggregations = unify_all(ref, mapped)
+        def transform_ir(agg, continuation):
+            indices, aggregations = unify_all(ref, mapped, agg)
+            return continuation(expressions.construct_expr(Let(uid, agg._ir, mapped._ir), mapped._type, indices, aggregations))
+
+
+        return Aggregable(self._ir,
+                          mapped.dtype,
+                          indices, aggregations,
+                          transformations=lambda x, cont: self._transformations(x, lambda x2: transform_ir(x2, cont)))
+
+    def _flatmap(self, f):
+        uid = Env.get_uid()
+        ref = expressions.construct_variable(uid, self._type,
+                                             self._indices, self._aggregations)
+        res_expr = f(ref)
+        indices, aggregations = unify_all(ref, res_expr)
+        def transform_ir(agg, continuation):
+            elt_uid = Env.get_uid()
+            elt_ref = expressions.construct_variable(elt_uid, res_expr.dtype.element_type,
+                                                     res_expr._indices,
+                                                     res_expr._aggregations)
+
+            ir = ArrayFor(ToArray(Let(uid, agg._ir, res_expr._ir)),
+                          elt_uid,
+                          continuation(elt_ref)._ir)
+            return expressions.construct_expr(ir, res_expr.dtype.element_type, indices, aggregations)
+
+        return Aggregable(self._ir,
+                          res_expr.dtype.element_type,
+                          indices,
+                          aggregations,
+                          transformations=lambda x, cont: self._transformations(x, lambda x2: transform_ir(x2, cont)))
+
+    def _filter(self, f):
+        uid = Env.get_uid()
+        ref = expressions.construct_variable(uid, self._type, self._indices, self._aggregations)
+        if callable(f):
+            pred = f(ref)
+        else:
+            pred = f
+        indices, aggregations = unify_all(ref, pred)
+
+        def transform_ir(agg, continuation):
+            agg_uid = Env.get_uid()
+            agg_ref = expressions.construct_variable(agg_uid, self._type, agg._indices, agg._aggregations)
+            ir = Let(agg_uid, agg._ir,
+                     If(Let(uid, agg_ref._ir, pred._ir),
+                        continuation(agg_ref)._ir,
+                        Begin([])))
+            return expressions.construct_expr(ir, self._type, self._indices, self._aggregations)
+
+
+        return Aggregable(self._ir,
+                          self.dtype,
+                          indices, aggregations,
+                          transformations=lambda x, cont: self._transformations(x, lambda x2: transform_ir(x2, cont)))
 
     @property
     def dtype(self) -> HailType:
         return self._type
-
-
-FieldRef = Union[str, Expression]
-FieldRefArgs = Tuple[FieldRef]
-NamedExprs = Dict[str, Expression]

@@ -1,13 +1,16 @@
+from typing import *
+
 import hail as hl
-from hail.expr.expr_ast import *
 from hail.expr.expressions import Expression, to_expr, ExpressionException, \
-    unify_all, Indices, Join, Aggregation
+    unify_all, Indices, Aggregation
 from hail.expr.expressions.expression_typecheck import *
 from hail.expr.types import *
+from hail.ir import *
 from hail.typecheck import *
 from hail.utils.java import *
 from hail.utils.linkedlist import LinkedList
 from hail.utils.misc import get_nice_field_error, get_nice_attr_error
+from hail.genetics.reference_genome import reference_genome_type
 
 
 class CollectionExpression(Expression):
@@ -15,8 +18,15 @@ class CollectionExpression(Expression):
 
     >>> a = hl.literal([1, 2, 3, 4, 5])
 
-    >>> s = hl.literal({'Alice', 'Bob', 'Charlie'})
+    >>> s3 = hl.literal({'Alice', 'Bob', 'Charlie'})
     """
+
+
+    def _filter_missing_method(self, filter_missing: bool, name: str, ret_type: HailType, *args):
+        collection = self
+        if filter_missing:
+            collection = self.filter(hl.is_defined)
+        return collection._method(name, ret_type, *args)
 
     @typecheck_method(f=func_spec(1, expr_bool))
     def any(self, f):
@@ -24,13 +34,12 @@ class CollectionExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(a.any(lambda x: x % 2 == 0))
-            True
+        >>> a.any(lambda x: x % 2 == 0).value
+        True
 
-            >>> hl.eval_expr(s.any(lambda x: x[0] == 'D'))
-            False
+        >>> s3.any(lambda x: x[0] == 'D').value
+        False
 
         Notes
         -----
@@ -47,13 +56,8 @@ class CollectionExpression(Expression):
         :class:`.BooleanExpression`.
             ``True`` if `f` returns ``True`` for any element, ``False`` otherwise.
         """
-
-        def unify_ret(t):
-            if t != tbool:
-                raise TypeError("'exists' expects 'f' to return an expression of type 'bool', found '{}'".format(t))
-            return t
-
-        return self._bin_lambda_method("exists", f, self._type.element_type, unify_ret)
+        f2 = lambda accum, elt: accum | f(elt)
+        return hl.array(self).fold(False, f2)
 
     @typecheck_method(f=func_spec(1, expr_bool))
     def filter(self, f):
@@ -61,13 +65,12 @@ class CollectionExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(a.filter(lambda x: x % 2 == 0))
-            [2, 4]
+        >>> a.filter(lambda x: x % 2 == 0).value
+        [2, 4]
 
-            >>> hl.eval_expr(s.filter(lambda x: ~(x[-1] == 'e')))
-            {'Bob'}
+        >>> s3.filter(lambda x: ~(x[-1] == 'e')).value
+        {'Bob'}
 
         Notes
         -----
@@ -90,9 +93,18 @@ class CollectionExpression(Expression):
         def unify_ret(t):
             if t != tbool:
                 raise TypeError("'filter' expects 'f' to return an expression of type 'bool', found '{}'".format(t))
-            return self._type
+            return hl.tarray(self._type.element_type)
 
-        return self._bin_lambda_method("filter", f, self._type.element_type, unify_ret)
+        def transform_ir(array, name, body):
+            return ArrayFilter(array, name, body)
+
+        array_filter = hl.array(self)._ir_lambda_method(transform_ir, f, self.dtype.element_type, unify_ret)
+
+        if isinstance(self.dtype, tset):
+            return hl.set(array_filter)
+        else:
+            assert isinstance(self.dtype, tarray), self.dtype
+            return array_filter
 
     @typecheck_method(f=func_spec(1, expr_bool))
     def find(self, f):
@@ -100,13 +112,12 @@ class CollectionExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(a.find(lambda x: x ** 2 > 20))
-            5
+        >>> a.find(lambda x: x ** 2 > 20).value
+        5
 
-            >>> hl.eval_expr(s.find(lambda x: x[0] == 'D'))
-            None
+        >>> s3.find(lambda x: x[0] == 'D').value
+        None
 
         Notes
         -----
@@ -129,7 +140,9 @@ class CollectionExpression(Expression):
                 raise TypeError("'find' expects 'f' to return an expression of type 'bool', found '{}'".format(t))
             return self._type.element_type
 
-        return self._bin_lambda_method("find", f, self._type.element_type, unify_ret)
+        # FIXME make more efficient when we can call ArrayFold
+        return hl.bind(lambda fa: hl.cond(hl.len(fa) > 0, fa[0], hl.null(self._type.element_type)),
+                       hl.array(self.filter(f)))
 
     @typecheck_method(f=func_spec(1, expr_any))
     def flatmap(self, f):
@@ -137,13 +150,12 @@ class CollectionExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(a.flatmap(lambda x: hl.range(0, x)))
-            [0, 0, 1, 0, 1, 2, 0, 1, 2, 3, 0, 1, 2, 3, 4]
+        >>> a.flatmap(lambda x: hl.range(0, x)).value
+        [0, 0, 1, 0, 1, 2, 0, 1, 2, 3, 0, 1, 2, 3, 4]
 
-            >>> hl.eval_expr(s.flatmap(lambda x: hl.set(hl.range(0, x.length()).map(lambda i: x[i]))))
-            {'A', 'B', 'C', 'a', 'b', 'c', 'e', 'h', 'i', 'l', 'o', 'r'}
+        >>> s3.flatmap(lambda x: hl.set(hl.range(0, x.length()).map(lambda i: x[i]))).value
+        {'A', 'B', 'C', 'a', 'b', 'c', 'e', 'h', 'i', 'l', 'o', 'r'}
 
         Parameters
         ----------
@@ -157,13 +169,39 @@ class CollectionExpression(Expression):
         :class:`.CollectionExpression`
         """
         expected_type, s = (tarray, 'array') if isinstance(self._type, tarray) else (tset, 'set')
+        value_type = f(construct_variable(Env.get_uid(), self.dtype.element_type)).dtype
 
-        def unify_ret(t):
-            if not isinstance(t, expected_type):
-                raise TypeError("'flatmap' expects 'f' to return an expression of type '{}', found '{}'".format(s, t))
-            return t
+        if not isinstance(value_type, expected_type):
+            raise TypeError("'flatmap' expects 'f' to return an expression of type '{}', found '{}'".format(s, value_type))
 
-        return self._bin_lambda_method("flatMap", f, self._type.element_type, unify_ret)
+        def f2(x):
+            return hl.array(f(x)) if isinstance(value_type, tset) else f(x)
+
+        def transform_ir(array, name, body):
+            return ArrayFlatMap(array, name, body)
+
+        array_flatmap = hl.array(self)._ir_lambda_method(transform_ir, f2, self.dtype.element_type, identity)
+
+        if isinstance(self.dtype, tset):
+            return hl.set(array_flatmap)
+        assert isinstance(self.dtype, tarray), self.dtype
+        return array_flatmap
+
+    @typecheck_method(zero=expr_any, f=func_spec(2, expr_any), unify_ret=nullable(func_spec(1, hail_type)))
+    def fold(self, zero, f, unify_ret=None):
+        indices, aggregations = unify_all(self, zero)
+        accum_name = Env.get_uid()
+        elt_name = Env.get_uid()
+
+        accum_ref = construct_variable(accum_name, zero.dtype, indices, aggregations)
+        elt_ref = construct_variable(elt_name, self.dtype.element_type, self._indices, self._aggregations)
+        body = f(accum_ref, elt_ref)
+
+        ir = ArrayFold(self._ir, zero._ir, accum_name, elt_name, body._ir)
+
+        indices, aggregations = unify_all(self, zero, body)
+        return construct_expr(ir, body.dtype, indices, aggregations)
+
 
     @typecheck_method(f=func_spec(1, expr_bool))
     def all(self, f):
@@ -171,10 +209,9 @@ class CollectionExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(a.all(lambda x: x < 10))
-            True
+        >>> a.all(lambda x: x < 10).value
+        True
 
         Notes
         -----
@@ -191,13 +228,8 @@ class CollectionExpression(Expression):
         :class:`.BooleanExpression`.
             ``True`` if `f` returns ``True`` for every element, ``False`` otherwise.
         """
-
-        def unify_ret(t):
-            if t != tbool:
-                raise TypeError("'forall' expects 'f' to return an expression of type 'bool', found '{}'".format(t))
-            return t
-
-        return self._bin_lambda_method("forall", f, self._type.element_type, unify_ret)
+        f2 = lambda accum, elt: accum & f(elt)
+        return hl.array(self).fold(True, f2)
 
     @typecheck_method(f=func_spec(1, expr_any))
     def group_by(self, f):
@@ -205,13 +237,12 @@ class CollectionExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(a.group_by(lambda x: x % 2 == 0))
-            {False: [1, 3, 5], True: [2, 4]}
+        >>> a.group_by(lambda x: x % 2 == 0).value
+        {False: [1, 3, 5], True: [2, 4]}
 
-            >>> hl.eval_expr(s.group_by(lambda x: x.length()))
-            {3: {'Bob'}, 5: {'Alice'}, 7: {'Charlie'}}
+        >>> s3.group_by(lambda x: x.length()).value
+        {3: {'Bob'}, 5: {'Alice'}, 7: {'Charlie'}}
 
         Parameters
         ----------
@@ -224,7 +255,10 @@ class CollectionExpression(Expression):
         :class:`.DictExpression`.
             Dictionary keyed by results of `f`.
         """
-        return self._bin_lambda_method("groupBy", f, self._type.element_type, lambda t: tdict(t, self._type))
+
+        keyed = hl.array(self).map(lambda x: hl.tuple([f(x), x]))
+        types = keyed.dtype.element_type.types
+        return construct_expr(GroupByKey(keyed._ir), tdict(types[0], tarray(types[1])), keyed._indices, keyed._aggregations)
 
     @typecheck_method(f=func_spec(1, expr_any))
     def map(self, f):
@@ -232,13 +266,12 @@ class CollectionExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(a.map(lambda x: x ** 3))
-            [1.0, 8.0, 27.0, 64.0, 125.0]
+        >>> a.map(lambda x: x ** 3).value
+        [1.0, 8.0, 27.0, 64.0, 125.0]
 
-            >>> hl.eval_expr(s.map(lambda x: x.length()))
-            {3, 5, 7}
+        >>> s3.map(lambda x: x.length()).value
+        {3, 5, 7}
 
         Parameters
         ----------
@@ -250,20 +283,31 @@ class CollectionExpression(Expression):
         :class:`.CollectionExpression`.
             Collection where each element has been transformed according to `f`.
         """
-        return self._bin_lambda_method("map", f, self._type.element_type, lambda t: self._type.__class__(t))
+
+        def transform_ir(array, name, body):
+            a = ArrayMap(array, name, body)
+            if isinstance(self.dtype, tset):
+                a = ToSet(a)
+            return a
+
+        array_map = hl.array(self)._ir_lambda_method(transform_ir, f, self._type.element_type, lambda t: self._type.__class__(t))
+
+        if isinstance(self._type, tset):
+            return hl.set(array_map)
+        assert isinstance(self._type, tarray)
+        return array_map
 
     def length(self):
         """Returns the size of a collection.
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(a.length())
-            5
+        >>> a.length().value
+        5
 
-            >>> hl.eval_expr(s.length())
-            3
+        >>> s3.length().value
+        3
 
         Returns
         -------
@@ -277,13 +321,12 @@ class CollectionExpression(Expression):
 
         Examples
         --------
-        .. doctest::
+        
+        >>> a.size().value
+        5
 
-            >>> hl.eval_expr(a.size())
-            5
-
-            >>> hl.eval_expr(s.size())
-            3
+        >>> s3.size().value
+        3
 
         Returns
         -------
@@ -296,7 +339,7 @@ class CollectionExpression(Expression):
 class ArrayExpression(CollectionExpression):
     """Expression of type :class:`.tarray`.
 
-    >>> a = hl.literal(['Alice', 'Bob', 'Charlie'])
+    >>> names = hl.literal(['Alice', 'Bob', 'Charlie'])
 
     See Also
     --------
@@ -311,20 +354,16 @@ class ArrayExpression(CollectionExpression):
 
         Index with a single integer:
 
-        .. doctest::
+        >>> names[1].value
+        'Bob'
 
-            >>> hl.eval_expr(a[1])
-            'Bob'
-
-            >>> hl.eval_expr(a[-1])
-            'Charlie'
+        >>> names[-1].value
+        'Charlie'
 
         Slicing is also supported:
 
-        .. doctest::
-
-            >>> hl.eval_expr(a[1:])
-            ['Bob', 'Charlie']
+        >>> names[1:].value
+        ['Bob', 'Charlie']
 
         Parameters
         ----------
@@ -352,13 +391,11 @@ class ArrayExpression(CollectionExpression):
         Examples
         --------
 
-        .. doctest::
+        >>> names.contains('Charlie').value
+        True
 
-            >>> hl.eval_expr(a.contains('Charlie'))
-            True
-
-            >>> hl.eval_expr(a.contains('Helen'))
-            False
+        >>> names.contains('Helen').value
+        False
 
         Parameters
         ----------
@@ -387,10 +424,8 @@ class ArrayExpression(CollectionExpression):
         Examples
         --------
 
-        .. doctest::
-
-            >>> hl.eval_expr(a.append('Dan'))
-            ['Alice', 'Bob', 'Charlie', 'Dan']
+        >>> names.append('Dan').value
+        ['Alice', 'Bob', 'Charlie', 'Dan']
 
         Note
         ----
@@ -419,10 +454,8 @@ class ArrayExpression(CollectionExpression):
         Examples
         --------
 
-        .. doctest::
-
-            >>> hl.eval_expr(a.extend(['Dan', 'Edith']))
-            ['Alice', 'Bob', 'Charlie', 'Dan', 'Edith']
+        >>> names.extend(['Dan', 'Edith']).value
+        ['Alice', 'Bob', 'Charlie', 'Dan', 'Edith']
 
         Parameters
         ----------
@@ -462,10 +495,9 @@ class ArrayNumericExpression(ArrayExpression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(-a1)
-            [0, -1, -2, -3, -4, -5]
+        >>> (-a1).value
+        [0, -1, -2, -3, -4, -5]
 
         Returns
         -------
@@ -479,13 +511,12 @@ class ArrayNumericExpression(ArrayExpression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(a1 + 5)
-            [5, 6, 7, 8, 9, 10]
+        >>> (a1 + 5).value
+        [5, 6, 7, 8, 9, 10]
 
-            >>> hl.eval_expr(a1 + a2)
-            [1, 0, 3, 2, 5, 4]
+        >>> (a1 + a2).value
+        [1, 0, 3, 2, 5, 4]
 
         Parameters
         ----------
@@ -507,13 +538,12 @@ class ArrayNumericExpression(ArrayExpression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(a2 - 1)
-            [0, -2, 0, -2, 0, -2]
+        >>> (a2 - 1).value
+        [0, -2, 0, -2, 0, -2]
 
-            >>> hl.eval_expr(a1 - a2)
-            [-1, 2, 1, 4, 3, 6]
+        >>> (a1 - a2).value
+        [-1, 2, 1, 4, 3, 6]
 
         Parameters
         ----------
@@ -535,13 +565,12 @@ class ArrayNumericExpression(ArrayExpression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(a2 * 5)
-            [5, -5, 5, -5, 5, -5]
+        >>> (a2 * 5).value
+        [5, -5, 5, -5, 5, -5]
 
-            >>> hl.eval_expr(a1 * a2)
-            [0, -1, 2, -3, 4, -5]
+        >>> (a1 * a2).value
+        [0, -1, 2, -3, 4, -5]
 
         Parameters
         ----------
@@ -563,13 +592,12 @@ class ArrayNumericExpression(ArrayExpression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(a1 / 10)
-            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
+        >>> (a1 / 10).value
+        [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
 
-            >>> hl.eval_expr(a2 / a1)
-            [inf, -1.0, 0.5, -0.3333333333333333, 0.25, -0.2]
+        >>> (a2 / a1).value
+        [inf, -1.0, 0.5, -0.3333333333333333, 0.25, -0.2]
 
         Parameters
         ----------
@@ -608,10 +636,9 @@ class ArrayNumericExpression(ArrayExpression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(a1 // 2)
-            [0, 0, 1, 1, 2, 2]
+        >>> (a1 // 2).value
+        [0, 0, 1, 1, 2, 2]
 
         Parameters
         ----------
@@ -631,10 +658,9 @@ class ArrayNumericExpression(ArrayExpression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(a1 % 2)
-            [0, 1, 0, 1, 0, 1]
+        >>> (a1 % 2).value
+        [0, 1, 0, 1, 0, 1]
 
         Parameters
         ----------
@@ -654,13 +680,12 @@ class ArrayNumericExpression(ArrayExpression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(a1 ** 2)
-            [0.0, 1.0, 4.0, 9.0, 16.0, 25.0]
+        >>> (a1 ** 2).value
+        [0.0, 1.0, 4.0, 9.0, 16.0, 25.0]
 
-            >>> hl.eval_expr(a1 ** a2)
-            [0.0, 1.0, 2.0, 0.3333333333333333, 4.0, 0.2]
+        >>> (a1 ** a2).value
+        [0.0, 1.0, 2.0, 0.3333333333333333, 4.0, 0.2]
 
         Parameters
         ----------
@@ -687,16 +712,21 @@ class SetExpression(CollectionExpression):
     :class:`.CollectionExpression`
     """
 
+    @typecheck_method(ir=IR, type=HailType, indices=Indices, aggregations=LinkedList)
+    def __init__(self, ir, type, indices=Indices(), aggregations=LinkedList(Aggregation)):
+        super(SetExpression, self).__init__(ir, type, indices, aggregations)
+        assert isinstance(type, tset)
+        self._ec = coercer_from_dtype(type.element_type)
+
     @typecheck_method(item=expr_any)
     def add(self, item):
         """Returns a new set including `item`.
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(s1.add(10))
-            {1, 2, 3, 10}
+        >>> s1.add(10).value
+        {1, 2, 3, 10}
 
         Parameters
         ----------
@@ -708,11 +738,11 @@ class SetExpression(CollectionExpression):
         :class:`.SetExpression`
             Set with `item` added.
         """
-        if not item._type == self._type.element_type:
+        if not self._ec.can_coerce(item.dtype):
             raise TypeError("'SetExpression.add' expects 'item' to be the same type as its elements\n"
                             "    set element type:   '{}'\n"
-                            "    type of arg 'item': '{}'".format(self._type._element_type, item._type))
-        return self._method("add", self._type, item)
+                            "    type of arg 'item': '{}'".format(self.dtype.element_type, item.dtype))
+        return self._method("add", self.dtype, self._ec.coerce(item))
 
     @typecheck_method(item=expr_any)
     def remove(self, item):
@@ -720,10 +750,9 @@ class SetExpression(CollectionExpression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(s1.remove(1))
-            {2, 3}
+        >>> s1.remove(1).value
+        {2, 3}
 
         Parameters
         ----------
@@ -735,11 +764,11 @@ class SetExpression(CollectionExpression):
         :class:`.SetExpression`
             Set with `item` removed.
         """
-        if not item._type == self._type.element_type:
+        if not self._ec.can_coerce(item.dtype):
             raise TypeError("'SetExpression.remove' expects 'item' to be the same type as its elements\n"
                             "    set element type:   '{}'\n"
-                            "    type of arg 'item': '{}'".format(self._type._element_type, item._type))
-        return self._method("remove", self._type, item)
+                            "    type of arg 'item': '{}'".format(self.dtype.element_type, item.dtype))
+        return self._method("remove", self._type, self._ec.coerce(item))
 
     @typecheck_method(item=expr_any)
     def contains(self, item):
@@ -747,13 +776,12 @@ class SetExpression(CollectionExpression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(s1.contains(1))
-            True
+        >>> s1.contains(1).value
+        True
 
-            >>> hl.eval_expr(s1.contains(10))
-            False
+        >>> s1.contains(10).value
+        False
 
         Parameters
         ----------
@@ -765,11 +793,11 @@ class SetExpression(CollectionExpression):
         :class:`.BooleanExpression`
             ``True`` if `item` is in the set.
         """
-        if not item._type == self._type.element_type:
+        if not self._ec.can_coerce(item.dtype):
             raise TypeError("'SetExpression.contains' expects 'item' to be the same type as its elements\n"
                             "    set element type:   '{}'\n"
-                            "    type of arg 'item': '{}'".format(self._type._element_type, item._type))
-        return self._method("contains", tbool, item)
+                            "    type of arg 'item': '{}'".format(self.dtype.element_type, item.dtype))
+        return self._method("contains", tbool, self._ec.coerce(item))
 
     @typecheck_method(s=expr_set())
     def difference(self, s):
@@ -777,13 +805,12 @@ class SetExpression(CollectionExpression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(s1.difference(s2))
-            {2}
+        >>> s1.difference(s2).value
+        {2}
 
-            >>> hl.eval_expr(s2.difference(s1))
-            {5}
+        >>> s2.difference(s1).value
+        {5}
 
         Parameters
         ----------
@@ -807,10 +834,9 @@ class SetExpression(CollectionExpression):
 
         Examples
         --------
-        .. doctest::
-
-            >>> hl.eval_expr(s1.intersection(s2))
-            {1, 3}
+        
+        >>> s1.intersection(s2).value
+        {1, 3}
 
         Parameters
         ----------
@@ -834,13 +860,12 @@ class SetExpression(CollectionExpression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(s1.is_subset(s2))
-            False
+        >>> s1.is_subset(s2).value
+        False
 
-            >>> hl.eval_expr(s1.remove(2).is_subset(s2))
-            True
+        >>> s1.remove(2).is_subset(s2).value
+        True
 
         Parameters
         ----------
@@ -864,10 +889,9 @@ class SetExpression(CollectionExpression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(s1.union(s2))
-            {1, 2, 3, 5}
+        >>> s1.union(s2).value
+        {1, 2, 3, 5}
 
         Parameters
         ----------
@@ -892,16 +916,22 @@ class DictExpression(Expression):
     >>> d = hl.literal({'Alice': 43, 'Bob': 33, 'Charles': 44})
     """
 
+    @typecheck_method(ir=IR, type=HailType, indices=Indices, aggregations=LinkedList)
+    def __init__(self, ir, type, indices=Indices(), aggregations=LinkedList(Aggregation)):
+        super(DictExpression, self).__init__(ir, type, indices, aggregations)
+        assert isinstance(type, tdict)
+        self._kc = coercer_from_dtype(type.key_type)
+        self._vc = coercer_from_dtype(type.value_type)
+
     @typecheck_method(item=expr_any)
     def __getitem__(self, item):
         """Get the value associated with key `item`.
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(d['Alice'])
-            43
+        >>> d['Alice'].value
+        43
 
         Notes
         -----
@@ -918,11 +948,11 @@ class DictExpression(Expression):
         :class:`.Expression`
             Value associated with key `item`.
         """
-        if not item._type == self._type.key_type:
+        if not self._kc.can_coerce(item.dtype):
             raise TypeError("dict encountered an invalid key type\n"
                             "    dict key type:  '{}'\n"
-                            "    type of 'item': '{}'".format(self._type.key_type, item._type))
-        return self._index(self.dtype.value_type, item)
+                            "    type of 'item': '{}'".format(self.dtype.key_type, item.dtype))
+        return self._index(self.dtype.value_type, self._kc.coerce(item))
 
     @typecheck_method(item=expr_any)
     def contains(self, item):
@@ -930,13 +960,12 @@ class DictExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(d.contains('Alice'))
-            True
+        >>> d.contains('Alice').value
+        True
 
-            >>> hl.eval_expr(d.contains('Anne'))
-            False
+        >>> d.contains('Anne').value
+        False
 
         Parameters
         ----------
@@ -948,11 +977,11 @@ class DictExpression(Expression):
         :class:`.BooleanExpression`
             ``True`` if `item` is a key of the dictionary, ``False`` otherwise.
         """
-        if not item._type == self._type.key_type:
+        if not self._kc.can_coerce(item.dtype):
             raise TypeError("'DictExpression.contains' encountered an invalid key type\n"
                             "    dict key type:  '{}'\n"
-                            "    type of 'item': '{}'".format(self._type.key_type, item._type))
-        return self._method("contains", tbool, item)
+                            "    type of 'item': '{}'".format(self._type.key_type, item.dtype))
+        return self._method("contains", tbool, self._kc.coerce(item))
 
     @typecheck_method(item=expr_any, default=nullable(expr_any))
     def get(self, item, default=None):
@@ -960,16 +989,15 @@ class DictExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(d.get('Alice'))
-            43
+        >>> d.get('Alice').value
+        43
 
-            >>> hl.eval_expr(d.get('Anne'))
-            None
+        >>> d.get('Anne').value
+        None
 
-            >>> hl.eval_expr(d.get('Anne', 0))
-            0
+        >>> d.get('Anne', 0).value
+        0
 
         Parameters
         ----------
@@ -983,28 +1011,29 @@ class DictExpression(Expression):
         :class:`.Expression`
             The value associated with `item`, or `default`.
         """
-        if not item.dtype == self.dtype.key_type:
+        if not self._kc.can_coerce(item.dtype):
             raise TypeError("'DictExpression.get' encountered an invalid key type\n"
                             "    dict key type:  '{}'\n"
-                            "    type of 'item': '{}'".format(self.dtype.key_type, item._type))
+                            "    type of 'item': '{}'".format(self.dtype.key_type, item.dtype))
+        key = self._kc.coerce(item)
+
         if default is not None:
-            if not self.dtype.value_type == default.dtype:
+            if not self._vc.can_coerce(default.dtype):
                 raise TypeError("'get' expects parameter 'default' to have the "
                                 "same type as the dictionary value type, found '{}' and '{}'"
                                 .format(self.dtype, default.dtype))
-            return self._method("get", self.dtype.value_type, item, default)
+            return self._method("get", self.dtype.value_type, key, self._vc.coerce(default))
         else:
-            return self._method("get", self.dtype.value_type, item)
+            return self._method("get", self.dtype.value_type, key)
 
     def key_set(self):
         """Returns the set of keys in the dictionary.
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(d.key_set())
-            {'Alice', 'Bob', 'Charles'}
+        >>> d.key_set().value
+        {'Alice', 'Bob', 'Charles'}
 
         Returns
         -------
@@ -1018,10 +1047,9 @@ class DictExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(d.keys())
-            ['Bob', 'Charles', 'Alice']
+        >>> d.keys().value
+        ['Bob', 'Charles', 'Alice']
 
         Returns
         -------
@@ -1036,10 +1064,9 @@ class DictExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(d.map_values(lambda x: x * 10))
-            {'Alice': 430, 'Bob': 330, 'Charles': 440}
+        >>> d.map_values(lambda x: x * 10).value
+        {'Alice': 430, 'Bob': 330, 'Charles': 440}
 
         Parameters
         ----------
@@ -1051,17 +1078,16 @@ class DictExpression(Expression):
         :class:`.DictExpression`
             Dictionary with transformed values.
         """
-        return self._bin_lambda_method("mapValues", f, self.dtype.value_type, lambda t: tdict(self.dtype.key_type, t))
+        return hl.dict(hl.array(self).map(lambda elt: hl.tuple([elt[0], f(elt[1])])))
 
     def size(self):
         """Returns the size of the dictionary.
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(d.size())
-            3
+        >>> d.size().value
+        3
 
         Returns
         -------
@@ -1075,10 +1101,9 @@ class DictExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(d.values())
-            [33, 44, 43]
+        >>> d.values().value
+        [33, 44, 43]
 
         Returns
         -------
@@ -1091,22 +1116,18 @@ class DictExpression(Expression):
 class StructExpression(Mapping, Expression):
     """Expression of type :class:`.tstruct`.
 
-    >>> s = hl.struct(a=5, b='Foo')
+    >>> struct = hl.struct(a=5, b='Foo')
 
     Struct fields are accessible as attributes and keys. It is therefore
     possible to access field `a` of struct `s` with dot syntax:
 
-    .. doctest::
-
-        >>> hl.eval_expr(s.a)
-        5
+    >>> struct.a.value
+    5
 
     However, it is recommended to use square brackets to select fields:
 
-    .. doctest::
-
-        >>> hl.eval_expr(s['a'])
-        5
+    >>> struct['a'].value
+    5
 
     The latter syntax is safer, because fields that share their name with
     an existing attribute of :class:`.StructExpression` (`keys`, `values`,
@@ -1117,29 +1138,29 @@ class StructExpression(Mapping, Expression):
     """
 
     @classmethod
-    def _from_fields(cls, fields: Dict[str, Expression]):
+    def _from_fields(cls, fields: 'Dict[str, Expression]'):
         t = tstruct(**{k: v.dtype for k, v in fields.items()})
-        ast = StructDeclaration(list(fields), list(expr._ast for expr in fields.values()))
-        indices, aggregations, joins = unify_all(*fields.values())
+        ir = MakeStruct([(n, expr._ir) for (n, expr) in fields.items()])
+        indices, aggregations = unify_all(*fields.values())
         s = StructExpression.__new__(cls)
         s._fields = {}
         for k, v in fields.items():
             s._set_field(k, v)
-        super(StructExpression, s).__init__(ast, t, indices, aggregations, joins)
+        super(StructExpression, s).__init__(ir, t, indices, aggregations)
         return s
 
-    @typecheck_method(ast=AST, type=HailType, indices=Indices, aggregations=LinkedList, joins=LinkedList)
-    def __init__(self, ast, type, indices=Indices(), aggregations=LinkedList(Aggregation), joins=LinkedList(Join)):
-        super(StructExpression, self).__init__(ast, type, indices, aggregations, joins)
+    @typecheck_method(ir=IR, type=HailType, indices=Indices, aggregations=LinkedList)
+    def __init__(self, ir, type, indices=Indices(), aggregations=LinkedList(Aggregation)):
+        super(StructExpression, self).__init__(ir, type, indices, aggregations)
         self._fields: Dict[str, Expression] = {}
 
         for i, (f, t) in enumerate(self.dtype.items()):
-            if isinstance(self._ast, StructDeclaration):
-                expr = construct_expr(self._ast.values[i], t, self._indices,
-                                      self._aggregations, self._joins)
+            if isinstance(self._ir, MakeStruct):
+                expr = construct_expr(self._ir.fields[i][1], t, self._indices,
+                                          self._aggregations)
             else:
-                expr = construct_expr(Select(self._ast, f), t, self._indices,
-                                      self._aggregations, self._joins)
+                expr = construct_expr(GetField(self._ir, f), t, self._indices,
+                                          self._aggregations)
             self._set_field(f, expr)
 
     def _set_field(self, key, value):
@@ -1168,13 +1189,12 @@ class StructExpression(Mapping, Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(s['a'])
-            5
+        >>> struct['a'].value
+        5
 
-            >>> hl.eval_expr(s[1])
-            'Foo'
+        >>> struct[1].value
+        'Foo'
 
         Parameters
         ----------
@@ -1212,10 +1232,9 @@ class StructExpression(Mapping, Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(s.annotate(a=10, c=2*2*2))
-            Struct(a=10, b='Foo', c=8)
+        >>> struct.annotate(a=10, c=2*2*2).value
+        Struct(a=10, b='Foo', c=8)
 
         Notes
         -----
@@ -1233,23 +1252,16 @@ class StructExpression(Mapping, Expression):
         :class:`.StructExpression`
             Struct with new or updated fields.
         """
-        names = []
-        types = []
-        for f, t in self.dtype.items():
-            names.append(f)
-            types.append(t)
-        kwargs_struct = hl.struct(**named_exprs)
+        new_types = {n: t for (n, t) in self.dtype.items()}
 
-        for f, t in kwargs_struct.dtype.items():
-            if not f in self._fields:
-                names.append(f)
-                types.append(t)
+        for f, e in named_exprs.items():
+            new_types[f] = e.dtype
 
-        result_type = tstruct(**dict(zip(names, types)))
-        indices, aggregations, joins = unify_all(self, kwargs_struct)
+        result_type = tstruct(**new_types)
+        indices, aggregations = unify_all(self, *[x for (f, x) in named_exprs.items()])
 
-        return construct_expr(ApplyMethod('annotate', self._ast, kwargs_struct._ast), result_type,
-                              indices, aggregations, joins)
+        return construct_expr(InsertFields(self._ir, list(map(lambda x: (x[0], x[1]._ir), named_exprs.items()))),
+                              result_type, indices, aggregations)
 
     @typecheck_method(fields=str, named_exprs=expr_any)
     def select(self, *fields, **named_exprs):
@@ -1257,10 +1269,9 @@ class StructExpression(Mapping, Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(s.select('a', c=['bar', 'baz']))
-            Struct(a=5, c=[u'bar', u'baz'])
+        >>> struct.select('a', c=['bar', 'baz']).value
+        Struct(a=5, c=[u'bar', u'baz'])
 
         Notes
         -----
@@ -1282,9 +1293,8 @@ class StructExpression(Mapping, Expression):
         :class:`.StructExpression`
             Struct containing specified existing fields and computed fields.
         """
-        names = []
+
         name_set = set()
-        types = []
         for a in fields:
             if not a in self._fields:
                 raise KeyError("Struct has no field '{}'\n"
@@ -1292,24 +1302,18 @@ class StructExpression(Mapping, Expression):
             if a in name_set:
                 raise ExpressionException("'StructExpression.select' does not support duplicate identifiers.\n"
                                           "    Identifier '{}' appeared more than once".format(a))
-            names.append(a)
             name_set.add(a)
-            types.append(self[a].dtype)
-        select_names = names[:]
-        select_name_set = set(select_names)
+        for (n, _) in named_exprs.items():
+            if n in name_set:
+                raise ExpressionException("Cannot select and assign '{}' in the same 'select' call".format(n))
 
-        kwargs_struct = hl.struct(**named_exprs)
-        for f, t in kwargs_struct.dtype.items():
-            if f in select_name_set:
-                raise ExpressionException("Cannot select and assign '{}' in the same 'select' call".format(f))
-            names.append(f)
-            types.append(t)
-        result_type = tstruct(**dict(zip(names, types)))
+        selected_type = tstruct(**{f:self.dtype[f] for f in fields})
+        selected_expr = construct_expr(SelectFields(self._ir, fields), selected_type, self._indices, self._aggregations)
 
-        indices, aggregations, joins = unify_all(self, kwargs_struct)
-
-        return construct_expr(ApplyMethod('merge', StructOp('select', self._ast, *select_names), kwargs_struct._ast),
-                              result_type, indices, aggregations, joins)
+        if len(named_exprs) == 0:
+            return selected_expr
+        else:
+            return selected_expr.annotate(**named_exprs)
 
     @typecheck_method(fields=str)
     def drop(self, *fields):
@@ -1317,10 +1321,9 @@ class StructExpression(Mapping, Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(s.drop('b'))
-            Struct(a=5)
+        >>> struct.drop('b').value
+        Struct(a=5)
 
         Parameters
         ----------
@@ -1341,21 +1344,14 @@ class StructExpression(Mapping, Expression):
                 warn("Found duplicate field name in 'StructExpression.drop': '{}'".format(a))
             to_drop.add(a)
 
-        names = []
-        types = []
-        for f, t in self.dtype.items():
-            if not f in to_drop:
-                names.append(f)
-                types.append(t)
-        result_type = tstruct(**dict(zip(names, types)))
-        return construct_expr(StructOp('drop', self._ast, *to_drop), result_type,
-                              self._indices, self._aggregations, self._joins)
+        to_keep = [f for f in self.dtype.keys() if f not in to_drop]
+        return self.select(*to_keep)
 
 
 class TupleExpression(Expression, Sequence):
     """Expression of type :class:`.ttuple`.
 
-    >>> t = hl.literal(("a", 1, [1, 2, 3]))
+    >>> tup = hl.literal(("a", 1, [1, 2, 3]))
     """
 
     @typecheck_method(item=int)
@@ -1364,10 +1360,9 @@ class TupleExpression(Expression, Sequence):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(t[1])
-            1
+        >>> tup[1].value
+        1
 
         Parameters
         ----------
@@ -1387,10 +1382,9 @@ class TupleExpression(Expression, Sequence):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(len(t))
-            3
+        >>> len(tup)
+        3
 
         Returns
         -------
@@ -1401,142 +1395,6 @@ class TupleExpression(Expression, Sequence):
     def __iter__(self):
         for i in range(len(self)):
             yield self[i]
-
-
-class BooleanExpression(Expression):
-    """Expression of type :py:data:`.tbool`.
-
-    >>> t = hl.literal(True)
-    >>> f = hl.literal(False)
-    >>> na = hl.null(hl.tbool)
-
-    .. doctest::
-
-        >>> hl.eval_expr(t)
-        True
-
-        >>> hl.eval_expr(f)
-        False
-
-        >>> hl.eval_expr(na)
-        None
-
-    """
-
-    def _bin_op_logical(self, name, other):
-        other = to_expr(other)
-        return self._bin_op(name, other, tbool)
-
-    @typecheck_method(other=expr_bool)
-    def __rand__(self, other):
-        return self.__and__(other)
-
-    @typecheck_method(other=expr_bool)
-    def __ror__(self, other):
-        return self.__or__(other)
-
-    @typecheck_method(other=expr_bool)
-    def __and__(self, other):
-        """Return ``True`` if the left and right arguments are ``True``.
-
-        Examples
-        --------
-        .. doctest::
-
-            >>> hl.eval_expr(t & f)
-            False
-
-            >>> hl.eval_expr(t & na)
-            None
-
-            >>> hl.eval_expr(f & na)
-            False
-
-        The ``&`` and ``|`` operators have higher priority than comparison
-        operators like ``==``, ``<``, or ``>``. Parentheses are often
-        necessary:
-
-        .. doctest::
-
-            >>> x = hl.literal(5)
-
-            >>> hl.eval_expr((x < 10) & (x > 2))
-            True
-
-        Parameters
-        ----------
-        other : :class:`.BooleanExpression`
-            Right-side operand.
-
-        Returns
-        -------
-        :class:`.BooleanExpression`
-            ``True`` if both left and right are ``True``.
-        """
-        return self._bin_op_logical("&&", other)
-
-    @typecheck_method(other=expr_bool)
-    def __or__(self, other):
-        """Return ``True`` if at least one of the left and right arguments is ``True``.
-
-        Examples
-        --------
-        .. doctest::
-
-            >>> hl.eval_expr(t | f)
-            True
-
-            >>> hl.eval_expr(t | na)
-            True
-
-            >>> hl.eval_expr(f | na)
-            None
-
-        The ``&`` and ``|`` operators have higher priority than comparison
-        operators like ``==``, ``<``, or ``>``. Parentheses are often
-        necessary:
-
-        .. doctest::
-
-            >>> x = hl.literal(5)
-
-            >>> hl.eval_expr((x < 10) | (x > 20))
-            True
-
-        Parameters
-        ----------
-        other : :class:`.BooleanExpression`
-            Right-side operand.
-
-        Returns
-        -------
-        :class:`.BooleanExpression`
-            ``True`` if either left or right is ``True``.
-        """
-        return self._bin_op_logical("||", other)
-
-    def __invert__(self):
-        """Return the boolean negation.
-
-        Examples
-        --------
-        .. doctest::
-
-            >>> hl.eval_expr(~t)
-            False
-
-            >>> hl.eval_expr(~f)
-            True
-
-            >>> hl.eval_expr(~na)
-            None
-
-        Returns
-        -------
-        :class:`.BooleanExpression`
-            Boolean negation.
-        """
-        return self._unary_op("!")
 
 
 class NumericExpression(Expression):
@@ -1553,10 +1411,9 @@ class NumericExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(x < 5)
-            True
+        >>> (x < 5).value
+        True
 
         Parameters
         ----------
@@ -1576,10 +1433,9 @@ class NumericExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(x <= 3)
-            True
+        >>> (x <= 3).value
+        True
 
         Parameters
         ----------
@@ -1599,10 +1455,9 @@ class NumericExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(y > 4)
-            True
+        >>> (y > 4).value
+        True
 
         Parameters
         ----------
@@ -1622,10 +1477,9 @@ class NumericExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(y >= 4)
-            True
+        >>> (y >= 4).value
+        True
 
         Parameters
         ----------
@@ -1647,30 +1501,29 @@ class NumericExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(-x)
-            -3
+        >>> (-x).value
+        -3
 
         Returns
         -------
         :class:`.NumericExpression`
             Negated number.
         """
-        return self._unary_op("-")
+
+        return expr_numeric.coerce(self)._unary_op("-")
 
     def __add__(self, other):
         """Add two numbers.
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(x + 2)
-            5
+        >>> (x + 2).value
+        5
 
-            >>> hl.eval_expr(x + y)
-            7.5
+        >>> (x + y).value
+        7.5
 
         Parameters
         ----------
@@ -1692,13 +1545,12 @@ class NumericExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(x - 2)
-            1
+        >>> (x - 2).value
+        1
 
-            >>> hl.eval_expr(x - y)
-            -1.5
+        >>> (x - y).value
+        -1.5
 
         Parameters
         ----------
@@ -1720,13 +1572,12 @@ class NumericExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(x * 2)
-            6
+        >>> (x * 2).value
+        6
 
-            >>> hl.eval_expr(x * y)
-            9.0
+        >>> (x * y).value
+        9.0
 
         Parameters
         ----------
@@ -1748,13 +1599,12 @@ class NumericExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(x / 2)
-            1.5
+        >>> (x / 2).value
+        1.5
 
-            >>> hl.eval_expr(y / 0.1)
-            45.0
+        >>> (y / 0.1).value
+        45.0
 
         Parameters
         ----------
@@ -1793,13 +1643,12 @@ class NumericExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(x // 2)
-            1
+        >>> (x // 2).value
+        1
 
-            >>> hl.eval_expr(y // 2)
-            2.0
+        >>> (y // 2).value
+        2.0
 
         Parameters
         ----------
@@ -1821,13 +1670,12 @@ class NumericExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(32 % x)
-            2
+        >>> (32 % x).value
+        2
 
-            >>> hl.eval_expr(7 % y)
-            2.5
+        >>> (7 % y).value
+        2.5
 
         Parameters
         ----------
@@ -1849,16 +1697,15 @@ class NumericExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(x ** 2)
-            9.0
+        >>> (x ** 2).value
+        9.0
 
-            >>> hl.eval_expr(x ** -2)
-            0.1111111111111111
+        >>> (x ** -2).value
+        0.1111111111111111
 
-            >>> hl.eval_expr(y ** 1.5)
-            9.545941546018392
+        >>> (y ** 1.5).value
+        9.545941546018392
 
         Parameters
         ----------
@@ -1875,6 +1722,129 @@ class NumericExpression(Expression):
 
     def __rpow__(self, other):
         return self._bin_op_numeric_reverse('**', other, lambda _: tfloat64)
+
+
+class BooleanExpression(NumericExpression):
+    """Expression of type :py:data:`.tbool`.
+
+    >>> t = hl.literal(True)
+    >>> f = hl.literal(False)
+    >>> na = hl.null(hl.tbool)
+
+    >>> t.value
+    True
+
+    >>> f.value
+    False
+
+    >>> na.value
+    None
+
+    """
+
+    @typecheck_method(other=expr_bool)
+    def __rand__(self, other):
+        return self.__and__(other)
+
+    @typecheck_method(other=expr_bool)
+    def __ror__(self, other):
+        return self.__or__(other)
+
+    @typecheck_method(other=expr_bool)
+    def __and__(self, other):
+        """Return ``True`` if the left and right arguments are ``True``.
+
+        Examples
+        --------
+
+        >>> (t & f).value
+        False
+
+        >>> (t & na).value
+        None
+
+        >>> (f & na).value
+        False
+
+        The ``&`` and ``|`` operators have higher priority than comparison
+        operators like ``==``, ``<``, or ``>``. Parentheses are often
+        necessary:
+
+        >>> x = hl.literal(5)
+
+        >>> ((x < 10) & (x > 2)).value
+        True
+
+        Parameters
+        ----------
+        other : :class:`.BooleanExpression`
+            Right-side operand.
+
+        Returns
+        -------
+        :class:`.BooleanExpression`
+            ``True`` if both left and right are ``True``.
+        """
+        return self._method("&&", tbool, other)
+
+    @typecheck_method(other=expr_bool)
+    def __or__(self, other):
+        """Return ``True`` if at least one of the left and right arguments is ``True``.
+
+        Examples
+        --------
+
+        >>> (t | f).value
+        True
+
+        >>> (t | na).value
+        True
+
+        >>> (f | na).value
+        None
+
+        The ``&`` and ``|`` operators have higher priority than comparison
+        operators like ``==``, ``<``, or ``>``. Parentheses are often
+        necessary:
+
+        >>> x = hl.literal(5)
+
+        >>> ((x < 10) | (x > 20)).value
+        True
+
+        Parameters
+        ----------
+        other : :class:`.BooleanExpression`
+            Right-side operand.
+
+        Returns
+        -------
+        :class:`.BooleanExpression`
+            ``True`` if either left or right is ``True``.
+        """
+        return self._method("||", tbool, other)
+
+    def __invert__(self):
+        """Return the boolean negation.
+
+        Examples
+        --------
+
+        >>> (~t).value
+        False
+
+        >>> (~f).value
+        True
+
+        >>> (~na).value
+        None
+
+        Returns
+        -------
+        :class:`.BooleanExpression`
+            Boolean negation.
+        """
+        return self._unary_op("!")
 
 
 class Float64Expression(NumericExpression):
@@ -1908,13 +1878,12 @@ class StringExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(s[:15])
-            'The quick brown'
+        >>> s[:15].value
+        'The quick brown'
 
-            >>> hl.eval_expr(s[0])
-            'T'
+        >>> s[0].value
+        'T'
 
         Parameters
         ----------
@@ -1940,10 +1909,9 @@ class StringExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(s + ' jumped over the lazy dog')
-            'The quick brown fox jumped over the lazy dog'
+        >>> (s + ' jumped over the lazy dog').value
+        'The quick brown fox jumped over the lazy dog'
 
         Parameters
         ----------
@@ -1971,10 +1939,9 @@ class StringExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(s.length())
-            19
+        >>> s.length().value
+        19
 
         Returns
         -------
@@ -1989,10 +1956,9 @@ class StringExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(s.replace(' ', '_'))
-            'The_quick_brown_fox'
+        >>> s.replace(' ', '_').value
+        'The_quick_brown_fox'
 
         Notes
         -----
@@ -2016,13 +1982,12 @@ class StringExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(s.split('\\s+'))
-            ['The', 'quick', 'brown', 'fox']
+        >>> s.split('\\s+').value
+        ['The', 'quick', 'brown', 'fox']
 
-            >>> hl.eval_expr(s.split('\\s+', 2))
-            ['The', 'quick brown fox']
+        >>> s.split('\\s+', 2).value
+        ['The', 'quick brown fox']
 
         Notes
         -----
@@ -2048,6 +2013,161 @@ class StringExpression(Expression):
         else:
             return self._method("split", tarray(tstr), delim, n)
 
+    def lower(self):
+        """Returns a copy of the string, but with upper case letters converted
+        to lower case.
+
+        Examples
+        --------
+
+        >>> s.lower().value
+        'the quick brown fox'
+
+        Returns
+        -------
+        :class:`.StringExpression`
+        """
+        return self._method("lower", tstr)
+
+    def upper(self):
+        """Returns a copy of the string, but with lower case letters converted
+        to upper case.
+
+        Examples
+        --------
+
+        >>> s.upper().value
+        'THE QUICK BROWN FOX'
+
+        Returns
+        -------
+        :class:`.StringExpression`
+        """
+        return self._method("upper", tstr)
+
+    def strip(self):
+        r"""Returns a copy of the string with whitespace removed from the start
+        and end.
+
+        Examples
+        --------
+
+        >>> s2 = hl.str('  once upon a time\n')
+        >>> s2.strip().value
+        'once upon a time'
+
+        Returns
+        -------
+        :class:`.StringExpression`
+        """
+        return self._method("strip", tstr)
+
+    @typecheck_method(substr=expr_str)
+    def contains(self, substr):
+        """Returns whether `substr` is contained in the string.
+
+        Examples
+        --------
+
+        >>> s.contains('fox').value
+        True
+
+        >>> s.contains('dog').value
+        False
+
+        Note
+        ----
+        This method is case-sensitive.
+
+        Parameters
+        ----------
+        substr : :class:`.StringExpression`
+
+        Returns
+        -------
+        :class:`.BooleanExpression`
+        """
+        return self._method("contains", tbool, substr)
+
+    @typecheck_method(substr=expr_str)
+    def startswith(self, substr):
+        """Returns whether `substr` is a prefix of the string.
+
+        Examples
+        --------
+
+        >>> s.startswith('The').value
+        True
+
+        >>> s.startswith('the').value
+        False
+
+        Note
+        ----
+        This method is case-sensitive.
+
+        Parameters
+        ----------
+        substr : :class:`.StringExpression`
+
+        Returns
+        -------
+        :class:`.StringExpression`
+        """
+        return self._method('startswith', tbool, substr)
+
+
+    @typecheck_method(substr=expr_str)
+    def endswith(self, substr):
+        """Returns whether `substr` is a suffix of the string.
+
+        Examples
+        --------
+
+        >>> s.endswith('dog').value
+        True
+
+        Note
+        ----
+        This method is case-sensitive.
+
+        Parameters
+        ----------
+        substr : :class:`.StringExpression`
+
+        Returns
+        -------
+        :class:`.StringExpression`
+        """
+        return self._method('endswith', tbool, substr)
+
+    @typecheck_method(regex=str)
+    def first_match_in(self, regex):
+        """Returns an array containing the capture groups of the first match of
+        `regex` in the given character sequence.
+
+        Examples
+        --------
+
+        >>> s.first_match_in("The quick (\\w+) fox").value
+        ["brown"]
+
+        >>> s.first_match_in("The (\\w+) (\\w+) (\\w+)").value
+        ["quick", "brown", "fox"]
+
+        >>> s.first_match_in("(\\w+) (\\w+)").value
+        None
+
+        Parameters
+        ----------
+        regex : :class:`.StringExpression`
+
+        Returns
+        -------
+        :class:`.ArrayExpression` with element type :py:data:`.tstr`
+        """
+        return self._method('firstMatchIn', tarray(tstr), regex)
+
     @typecheck_method(regex=str)
     def matches(self, regex):
         """Returns ``True`` if the string contains any match for the given regex.
@@ -2059,17 +2179,13 @@ class StringExpression(Expression):
 
         The `regex` parameter does not need to match the entire string:
 
-        .. doctest::
-
-            >>> hl.eval_expr(string.matches('12'))
-            True
+        >>> string.matches('12').value
+        True
 
         Regex motifs can be used to match sequences of characters:
 
-        .. doctest::
-
-            >>> hl.eval_expr(string.matches(r'NA\\\\d+'))
-            True
+        >>> string.matches(r'NA\\\\d+').value
+        True
 
         Notes
         -----
@@ -2088,32 +2204,7 @@ class StringExpression(Expression):
         :class:`.BooleanExpression`
             ``True`` if the string contains any match for the regex, otherwise ``False``.
         """
-        return construct_expr(RegexMatch(self._ast, regex), tbool,
-                              self._indices, self._aggregations, self._joins)
-
-    def to_boolean(self):
-        """Parse the string to a Boolean.
-
-        Examples
-        --------
-        .. doctest::
-
-            >>> s = hl.literal('TRUE')
-            >>> hl.eval_expr(s.to_boolean())
-            True
-
-        Notes
-        -----
-        Acceptable values are: ``True``, ``true``, ``TRUE``, ``False``,
-        ``false``, and ``FALSE``.
-
-        Returns
-        -------
-        :class:`.BooleanExpression`
-            Parsed Boolean expression.
-        """
-
-        return self._method("toBoolean", tbool)
+        return to_expr(regex, tstr)._method("~", tbool, self)
 
 
 class CallExpression(Expression):
@@ -2130,13 +2221,11 @@ class CallExpression(Expression):
 
         Index with a single integer:
 
-        .. doctest::
+        >>> call[0].value
+        0
 
-            >>> hl.eval_expr(call[0])
-            0
-
-            >>> hl.eval_expr(call[1])
-            1
+        >>> call[1].value
+        1
 
         Parameters
         ----------
@@ -2162,10 +2251,9 @@ class CallExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(call.ploidy)
-            2
+        >>> call.ploidy.value
+        2
 
         Returns
         -------
@@ -2179,10 +2267,9 @@ class CallExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(call.phased)
-            False
+        >>> call.phased.value
+        False
 
         Returns
         -------
@@ -2195,10 +2282,9 @@ class CallExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(call.is_haploid())
-            False
+        >>> call.is_haploid().value
+        False
 
         Returns
         -------
@@ -2211,10 +2297,9 @@ class CallExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(call.is_diploid())
-            True
+        >>> call.is_diploid().value
+        True
 
         Returns
         -------
@@ -2227,10 +2312,9 @@ class CallExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(call.is_non_ref())
-            True
+        >>> call.is_non_ref().value
+        True
 
         Returns
         -------
@@ -2244,10 +2328,9 @@ class CallExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(call.is_het())
-            True
+        >>> call.is_het().value
+        True
 
         Returns
         -------
@@ -2256,15 +2339,14 @@ class CallExpression(Expression):
         """
         return self._method("isHet", tbool)
 
-    def is_het_nonref(self):
+    def is_het_non_ref(self):
         """Evaluate whether the call includes two different alleles, neither of which is reference.
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(call.is_het_nonref())
-            False
+        >>> call.is_het_non_ref().value
+        False
 
         Returns
         -------
@@ -2278,10 +2360,9 @@ class CallExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(call.is_het_ref())
-            True
+        >>> call.is_het_ref().value
+        True
 
         Returns
         -------
@@ -2295,10 +2376,9 @@ class CallExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(call.is_hom_ref())
-            False
+        >>> call.is_hom_ref().value
+        False
 
         Returns
         -------
@@ -2312,10 +2392,9 @@ class CallExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(call.is_hom_var())
-            False
+        >>> call.is_hom_var().value
+        False
 
         Returns
         -------
@@ -2329,10 +2408,9 @@ class CallExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(call.n_alt_alleles())
-            1
+        >>> call.n_alt_alleles().value
+        1
 
         Returns
         -------
@@ -2348,10 +2426,9 @@ class CallExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(call.one_hot_alleles(['A', 'T']))
-            [1, 1]
+        >>> call.one_hot_alleles(['A', 'T']).value
+        [1, 1]
 
         This one-hot representation is the positional sum of the one-hot
         encoding for each called allele. For a biallelic variant, the one-hot
@@ -2370,17 +2447,16 @@ class CallExpression(Expression):
         :class:`.ArrayInt32Expression`
             An array of summed one-hot encodings of allele indices.
         """
-        return self._method("oneHotAlleles", tarray(tint32), alleles)
+        return self._method("oneHotAlleles", tarray(tint32), hl.len(alleles))
 
     def unphased_diploid_gt_index(self):
         """Return the genotype index for unphased, diploid calls.
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(call.unphased_diploid_gt_index())
-            1
+        >>> call.unphased_diploid_gt_index().value
+        1
 
         Returns
         -------
@@ -2392,7 +2468,7 @@ class CallExpression(Expression):
 class LocusExpression(Expression):
     """Expression of type :class:`.tlocus`.
 
-    >>> locus = hl.locus('1', 100000)
+    >>> locus = hl.locus('1', 1034245)
     """
 
     @property
@@ -2401,17 +2477,16 @@ class LocusExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(locus.contig)
-            '1'
+        >>> locus.contig.value
+        '1'
 
         Returns
         -------
         :class:`.StringExpression`
             The chromosome for this locus.
         """
-        return self._field("contig", tstr)
+        return self._method("contig", tstr)
 
     @property
     def position(self):
@@ -2419,17 +2494,52 @@ class LocusExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(locus.position)
-            100000
+        >>> locus.position.value
+        1034245
 
         Returns
         -------
         :class:`.Expression` of type :py:data:`.tint32`
             This locus's position along its chromosome.
         """
-        return self._field("position", tint32)
+        return self._method("position", tint32)
+
+    def global_position(self):
+        """Returns a zero-indexed absolute position along the reference genome.
+
+        The global position is computed as :py:attr:`~position` - 1 plus the sum
+        of the lengths of all the contigs that precede this locus's :py:attr:`~contig`
+        in the reference genome's ordering of contigs.
+
+        See also :func:`.locus_from_global_position`.
+
+        Examples
+        --------
+        A locus with position 1 along chromosome 1 will have a global position of 0 along
+        the reference genome GRCh37.
+
+        >>> hl.locus('1', 1).global_position().value
+        0
+
+        A locus with position 1 along chromosome 2 will have a global position of (1-1) + 249250621,
+        where 249250621 is the length of chromosome 1 on GRCh37.
+
+        >>> hl.locus('2', 1).global_position().value
+        249250621
+
+        A different reference genome than the default results in a different global position.
+
+        >>> hl.locus('chr2', 1, 'GRCh38').global_position().value
+        248956422
+
+        Returns
+        -------
+        :class:`.Expression` of type :py:data:`.tint64`
+            Global base position of locus along the reference genome.
+        """
+        name = 'locusToGlobalPos({})'.format(self.dtype.reference_genome)
+        return self._method(name, tint64)
 
     def in_x_nonpar(self):
         """Returns ``True`` if the locus is in a non-pseudoautosomal
@@ -2437,10 +2547,9 @@ class LocusExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(locus.in_x_nonpar())
-            False
+        >>> locus.in_x_nonpar().value
+        False
 
         Returns
         -------
@@ -2454,10 +2563,9 @@ class LocusExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(locus.in_x_par())
-            False
+        >>> locus.in_x_par().value
+        False
 
         Returns
         -------
@@ -2471,10 +2579,9 @@ class LocusExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(locus.in_y_nonpar())
-            False
+        >>> locus.in_y_nonpar().value
+        False
 
         Note
         ----
@@ -2494,10 +2601,9 @@ class LocusExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(locus.in_y_par())
-            False
+        >>> locus.in_y_par().value
+        False
 
         Note
         ----
@@ -2521,10 +2627,9 @@ class LocusExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(locus.in_autosome())
-            True
+        >>> locus.in_autosome().value
+        True
 
         Returns
         -------
@@ -2538,10 +2643,9 @@ class LocusExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(locus.in_autosome_or_par())
-            True
+        >>> locus.in_autosome_or_par().value
+        True
 
         Returns
         -------
@@ -2554,10 +2658,9 @@ class LocusExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(locus.in_mito())
-            True
+        >>> locus.in_mito().value
+        True
 
         Returns
         -------
@@ -2574,19 +2677,13 @@ class LocusExpression(Expression):
 
         Get the reference allele at a locus:
 
-        .. doctest::
-            :options: +SKIP
-
-            >>> hl.eval_expr(locus.sequence_context())
-            "C"
+        >>> locus.sequence_context().value # doctest: +SKIP
+        "G"
 
         Get the reference sequence at a locus including the previous 5 bases:
 
-        .. doctest::
-            :options: +SKIP
-
-            >>> hl.eval_expr(locus.sequence_context(before=5))
-            "ACACTC"
+        >>> locus.sequence_context(before=5).value # doctest: +SKIP
+        "ACTCGG"
 
         Notes
         -----
@@ -2611,7 +2708,7 @@ class LocusExpression(Expression):
         rg = self.dtype.reference_genome
         if not rg.has_sequence():
             raise TypeError("Reference genome '{}' does not have a sequence loaded. Use 'add_sequence' to load the sequence from a FASTA file.".format(rg.name))
-        return hl.get_sequence(rg, self.contig, self.position, before, after)
+        return hl.get_sequence(self.contig, self.position, before, after, rg)
 
 
 class IntervalExpression(Expression):
@@ -2627,13 +2724,12 @@ class IntervalExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(interval.contains(3))
-            True
+        >>> interval.contains(3).value
+        True
 
-            >>> hl.eval_expr(interval.contains(11))
-            False
+        >>> interval.contains(11).value
+        False
 
         Parameters
         ----------
@@ -2655,13 +2751,12 @@ class IntervalExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(interval.overlaps(hl.interval(5, 9)))
-            True
+        >>> interval.overlaps(hl.interval(5, 9)).value
+        True
 
-            >>> hl.eval_expr(interval.overlaps(hl.interval(11, 20)))
-            False
+        >>> interval.overlaps(hl.interval(11, 20)).value
+        False
 
         Parameters
         ----------
@@ -2682,16 +2777,15 @@ class IntervalExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(interval.end)
-            11
+        >>> interval.end.value
+        11
 
         Returns
         -------
         :class:`.Expression`
         """
-        return self._field("end", self.dtype.point_type)
+        return self._method("end", self.dtype.point_type)
 
     @property
     def start(self):
@@ -2699,16 +2793,15 @@ class IntervalExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(interval.start)
-            3
+        >>> interval.start.value
+        3
 
         Returns
         -------
         :class:`.Expression`
         """
-        return self._field("start", self.dtype.point_type)
+        return self._method("start", self.dtype.point_type)
 
     @property
     def includes_start(self):
@@ -2716,16 +2809,15 @@ class IntervalExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(interval.includes_start)
-            True
+        >>> interval.includes_start.value
+        True
 
         Returns
         -------
         :class:`.BooleanExpression`
         """
-        return self._field("includesStart", tbool)
+        return self._method("includesStart", tbool)
 
     @property
     def includes_end(self):
@@ -2733,16 +2825,15 @@ class IntervalExpression(Expression):
 
         Examples
         --------
-        .. doctest::
 
-            >>> hl.eval_expr(interval.includes_end)
-            False
+        >>> interval.includes_end.value
+        False
 
         Returns
         -------
         :class:`.BooleanExpression`
         """
-        return self._field("includesEnd", tbool)
+        return self._method("includesEnd", tbool)
 
 
 scalars = {tbool: BooleanExpression,
@@ -2765,18 +2856,19 @@ typ_to_expr = {
 }
 
 
-@typecheck(ast=AST, type=HailType, indices=Indices, aggregations=LinkedList, joins=LinkedList)
-def construct_expr(ast: AST,
+@typecheck(ir=IR, type=nullable(HailType), indices=Indices, aggregations=LinkedList)
+def construct_expr(ir: IR,
                    type: HailType,
                    indices: Indices = Indices(),
-                   aggregations: LinkedList = LinkedList(Aggregation),
-                   joins: LinkedList = LinkedList(Join)):
+                   aggregations: LinkedList = LinkedList(Aggregation)):
+    if type is None:
+        return Expression(ir, None, indices, aggregations)
     if isinstance(type, tarray) and is_numeric(type.element_type):
-        return ArrayNumericExpression(ast, type, indices, aggregations, joins)
+        return ArrayNumericExpression(ir, type, indices, aggregations)
     elif type in scalars:
-        return scalars[type](ast, type, indices, aggregations, joins)
+        return scalars[type](ir, type, indices, aggregations)
     elif type.__class__ in typ_to_expr:
-        return typ_to_expr[type.__class__](ast, type, indices, aggregations, joins)
+        return typ_to_expr[type.__class__](ir, type, indices, aggregations)
     else:
         raise NotImplementedError(type)
 
@@ -2784,7 +2876,13 @@ def construct_expr(ast: AST,
 @typecheck(name=str, type=HailType, indices=Indices, prefix=nullable(str))
 def construct_reference(name, type, indices, prefix=None):
     if prefix is not None:
-        ast = Select(TopLevelReference(prefix, indices), name)
+        ir = GetField(TopLevelReference(prefix), name)
     else:
-        ast = TopLevelReference(name, indices)
-    return construct_expr(ast, type, indices)
+        ir = TopLevelReference(name)
+    return construct_expr(ir, type, indices)
+
+@typecheck(name=str, type=HailType, indices=Indices, aggregations=LinkedList)
+def construct_variable(name, type,
+                       indices: Indices = Indices(),
+                       aggregations: LinkedList = LinkedList(Aggregation)):
+    return construct_expr(Ref(name, type), type, indices, aggregations)

@@ -28,12 +28,16 @@ The ``aggregators`` module is exposed as ``hl.agg``, e.g. ``hl.agg.sum``.
     stats
     product
     fraction
-    hardy_weinberg
+    hardy_weinberg_test
     explode
     filter
     inbreeding
     call_stats
+    info_score
     hist
+    linreg
+    group_by
+    downsample
 
 .. autofunction:: collect
 .. autofunction:: collect_as_set
@@ -51,9 +55,13 @@ The ``aggregators`` module is exposed as ``hl.agg``, e.g. ``hl.agg.sum``.
 .. autofunction:: stats
 .. autofunction:: product
 .. autofunction:: fraction
-.. autofunction:: hardy_weinberg
+.. autofunction:: hardy_weinberg_test
 .. autofunction:: explode
 .. autofunction:: filter
 .. autofunction:: inbreeding
 .. autofunction:: call_stats
+.. autofunction:: info_score
 .. autofunction:: hist
+.. autofunction:: linreg
+.. autofunction:: group_by
+.. autofunction:: downsample

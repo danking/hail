@@ -1,32 +1,17 @@
 package is.hail.vds
 
 import is.hail.SparkSuite
-import is.hail.annotations.UnsafeRow
+import is.hail.annotations._
 import is.hail.expr.types.{TLocus, TStruct}
 import is.hail.table.Table
-import is.hail.variant.{Locus, MatrixTable, ReferenceGenome}
-import is.hail.utils._
 import is.hail.testUtils._
-
-import scala.language.implicitConversions
+import is.hail.variant.{Locus, MatrixTable, ReferenceGenome}
 import org.apache.spark.sql.Row
 import org.testng.annotations.Test
 
+import scala.language.implicitConversions
+
 class JoinSuite extends SparkSuite {
-  @Test def test() {
-    val joined = hc.importVCF("src/test/resources/joined.vcf")
-
-    val joinedPath = tmpDir.createTempFile("joined", "vds")
-
-    val left = hc.importVCF("src/test/resources/joinleft.vcf")
-    val right = hc.importVCF("src/test/resources/joinright.vcf")
-
-    // make sure joined VDS writes
-    left.unionCols(right).write(joinedPath)
-
-    assert(joined.same(hc.readVDS(joinedPath)))
-  }
-
   @Test def testIterator() {
     val leftVariants = Array(
       Locus("1", 1),
@@ -67,25 +52,24 @@ class JoinSuite extends SparkSuite {
     val localRowType = left.rvRowType
 
     // Inner distinct ordered join
-    val jInner = left.rvd.orderedJoinDistinct(right.rvd, "inner")
+    val jInner = left.rvd.orderedJoinDistinct(right.rvd, "inner", (_, it) => it.map(_._1), left.rvd.typ)
     val jInnerOrdRDD1 = left.rdd.join(right.rdd.distinct)
 
     assert(jInner.count() == jInnerOrdRDD1.count())
-    assert(jInner.forall(jrv => jrv.rvLeft != null && jrv.rvRight != null))
-    assert(jInner.map { jrv =>
-      val ur = new UnsafeRow(localRowType, jrv.rvLeft)
-      ur.getAs[Locus](0)
+    assert(jInner.map { rv =>
+      val r = SafeRow(localRowType, rv)
+      r.getAs[Locus](0)
     }.collect() sameElements jInnerOrdRDD1.map(_._1.asInstanceOf[Row].get(0)).collect().sorted(vType.ordering.toOrdering))
 
     // Left distinct ordered join
-    val jLeft = left.rvd.orderedJoinDistinct(right.rvd, "left")
+    val jLeft = left.rvd.orderedJoinDistinct(right.rvd, "left", (_, it) => it.map(_._1), left.rvd.typ)
     val jLeftOrdRDD1 = left.rdd.leftOuterJoin(right.rdd.distinct)
 
     assert(jLeft.count() == jLeftOrdRDD1.count())
-    assert(jLeft.forall(jrv => jrv.rvLeft != null))
-    assert(jLeft.map { jrv =>
-      val ur = new UnsafeRow(localRowType, jrv.rvLeft)
-      ur.getAs[Locus](0)
+    assert(jLeft.forall(rv => rv != null))
+    assert(jLeft.map { rv =>
+      val r = SafeRow(localRowType, rv)
+      r.getAs[Locus](0)
     }.collect() sameElements jLeftOrdRDD1.map(_._1.asInstanceOf[Row].get(0)).collect().sorted(vType.ordering.toOrdering))
   }
 }

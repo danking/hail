@@ -1,10 +1,13 @@
 package is.hail.methods
 
 import is.hail.HailContext
-import is.hail.expr.EvalContext
+import is.hail.expr._
+import is.hail.expr.ir._
 import is.hail.table.Table
 import is.hail.annotations._
 import is.hail.expr.types._
+import is.hail.rvd.RVDContext
+import is.hail.sparkextras.ContextRDD
 import is.hail.variant.{Call, Genotype, HardCallView, MatrixTable}
 import is.hail.stats.RegressionUtils
 import org.apache.spark.rdd.RDD
@@ -71,7 +74,7 @@ case class ExtendedIBDInfo(ibd: IBDInfo, ibs0: Long, ibs1: Long, ibs2: Long) {
 
   def hasNaNs: Boolean = ibd.hasNaNs
 
-  def toAnnotation: Annotation = Annotation(ibd.toAnnotation, ibs0, ibs1, ibs2)
+  def makeRow(i: Any, j: Any): Row = Row(i, j, ibd.toAnnotation, ibs0, ibs1, ibs2)
 
   def toRegionValue(rvb: RegionValueBuilder) {
     rvb.startStruct()
@@ -207,7 +210,7 @@ object IBD {
     min: Option[Double],
     max: Option[Double],
     sampleIds: IndexedSeq[String],
-    bounded: Boolean): RDD[RegionValue] = {
+    bounded: Boolean): ContextRDD[RVDContext, RegionValue] = {
 
     val nSamples = vds.numCols
 
@@ -253,7 +256,7 @@ object IBD {
       })
       .map { case ((s, v), gs) => (v, (s, IBSFFI.pack(chunkSize, chunkSize, gs))) }
 
-    chunkedGenotypeMatrix.join(chunkedGenotypeMatrix)
+    val joined = ContextRDD.weaken[RVDContext](chunkedGenotypeMatrix.join(chunkedGenotypeMatrix)
       // optimization: Ignore chunks below the diagonal
       .filter { case (_, ((i, _), (j, _))) => j >= i }
       .map { case (_, ((s1, gs1), (s2, gs2))) =>
@@ -266,9 +269,11 @@ object IBD {
           i += 1
         }
         a
-      }
-      .mapPartitions { it =>
-        val region = Region()
+      })
+
+    joined
+      .cmapPartitions { (ctx, it) =>
+        val region = ctx.region
         val rv = RegionValue(region)
         val rvb = new RegionValueBuilder(region)
         for {
@@ -282,7 +287,6 @@ object IBD {
           eibd = calculateIBDInfo(ibses(idx * 3), ibses(idx * 3 + 1), ibses(idx * 3 + 2), ibse, bounded)
           if min.forall(eibd.ibd.PI_HAT >= _) && max.forall(eibd.ibd.PI_HAT <= _)
         } yield {
-          region.clear()
           rvb.start(ibdSignature)
           rvb.startStruct()
           rvb.addString(sampleIds(i))
@@ -296,7 +300,7 @@ object IBD {
   }
 
   def apply(vds: MatrixTable,
-    computeMafExpr: Option[String] = None,
+    mafFieldName: Option[String] = None,
     bounded: Boolean = true,
     min: Option[Double] = None,
     max: Option[Double] = None): Table = {
@@ -311,18 +315,18 @@ object IBD {
       }
     }
 
-    val computeMaf = computeMafExpr.map(generateComputeMaf(vds, _))
+    val computeMaf = mafFieldName.map(generateComputeMaf(vds, _))
     val sampleIds = vds.stringSampleIds
 
     val ktRdd2 = computeIBDMatrix(vds, computeMaf, min, max, sampleIds, bounded)
-    new Table(vds.hc, ktRdd2, ibdSignature, Array("i", "j"))
+    new Table(vds.hc, ktRdd2, ibdSignature, Some(IndexedSeq("i", "j")))
   }
 
-  private val (ibdSignature, ibdMerger) = TStruct(("i", TString()), ("j", TString())).merge(ExtendedIBDInfo.signature)
+  private val ibdSignature = TStruct(("i", TString()), ("j", TString())) ++ ExtendedIBDInfo.signature
 
   def toKeyTable(sc: HailContext, ibdMatrix: RDD[((Annotation, Annotation), ExtendedIBDInfo)]): Table = {
-    val ktRdd = ibdMatrix.map { case ((i, j), eibd) => ibdMerger(Annotation(i, j), eibd.toAnnotation).asInstanceOf[Row] }
-    Table(sc, ktRdd, ibdSignature, Array("i", "j"))
+    val ktRdd = ibdMatrix.map { case ((i, j), eibd) => eibd.makeRow(i, j) }
+    Table(sc, ktRdd, ibdSignature, Some(IndexedSeq("i", "j")))
   }
 
   def toRDD(kt: Table): RDD[((Annotation, Annotation), ExtendedIBDInfo)] = {
@@ -340,28 +344,26 @@ object IBD {
     }
   }
 
-  private[methods] def generateComputeMaf(vds: MatrixTable,
-    computeMafExpr: String): (RegionValue) => Double = {
-
-    val mafSymbolTable = Map("va" -> (0, vds.rowType))
-    val mafEc = EvalContext(mafSymbolTable)
-    val computeMafThunk = RegressionUtils.parseFloat64Expr(computeMafExpr, mafEc)
-    val rowType = vds.rvRowType
-
+  private[methods] def generateComputeMaf(vds: MatrixTable, fieldName: String): (RegionValue) => Double = {
+    val rvRowType = vds.rvRowType
+    val field = rvRowType.field(fieldName)
+    assert(field.typ.isOfType(TFloat64()))
     val rowKeysF = vds.rowKeysF
-    val localRowType = vds.rowType
+    val entriesIdx = vds.entriesIndex
 
-    { (rv: RegionValue) =>
-      val row = new UnsafeRow(localRowType, rv)
-      mafEc.setAll(row)
-      val maf = computeMafThunk()
+    val idx = rvRowType.fieldIdx(fieldName)
 
-      if (maf == null)
-        fatal(s"The minor allele frequency expression evaluated to NA at ${rowKeysF(row)}.")
-
-      if (maf < 0.0 || maf > 1.0)
-        fatal(s"The minor allele frequency expression for ${rowKeysF(row)} evaluated to $maf which is not in [0,1].")
-
+    (rv: RegionValue) => {
+      val isDefined = rvRowType.isFieldDefined(rv, idx)
+      val maf = rv.region.loadDouble(rvRowType.loadField(rv, idx))
+      if (!isDefined) {
+        val row = new UnsafeRow(rvRowType, rv).deleteField(entriesIdx)
+        fatal(s"The minor allele frequency expression evaluated to NA at ${ rowKeysF(row) }.")
+      }
+      if (maf < 0.0 || maf > 1.0) {
+        val row = new UnsafeRow(rvRowType, rv).deleteField(entriesIdx)
+        fatal(s"The minor allele frequency expression for ${ rowKeysF(row) } evaluated to $maf which is not in [0,1].")
+      }
       maf
     }
   }

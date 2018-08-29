@@ -9,6 +9,9 @@ on the Python programming interface.
 
 Use ``import hail as hl`` to access this functionality.
 
+Classes
+~~~~~~~
+
 .. autosummary::
     :nosignatures:
     :toctree: ./
@@ -19,7 +22,8 @@ Use ``import hail as hl`` to access this functionality.
     hail.MatrixTable
     hail.GroupedMatrixTable
 
-.. rubric:: Modules
+Modules
+~~~~~~~
 
 .. toctree::
     :maxdepth: 1
@@ -28,16 +32,21 @@ Use ``import hail as hl`` to access this functionality.
     types <types>
     functions <functions/index>
     aggregators <aggregators>
+    scans <scans>
     methods <methods/index>
     utils <utils/index>
     linalg <linalg/index>
     stats <stats/index>
     genetics <genetics/index>
+    plot <plot>
+    experimental <experimental>
 
-.. rubric:: Module functions
+Top-Level Functions
+~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: hail.init
 .. autofunction:: hail.stop
 .. autofunction:: hail.spark_context
 .. autofunction:: hail.default_reference
 .. autofunction:: hail.get_reference
+.. autofunction:: hail.set_global_seed

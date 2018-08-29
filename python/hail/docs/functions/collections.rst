@@ -22,6 +22,7 @@ Collection functions
     map
     flatmap
     zip
+    zip_with_index
     flatten
     any
     all
@@ -29,12 +30,12 @@ Collection functions
     sorted
     find
     group_by
-    index
 
 .. autofunction:: len
 .. autofunction:: map
 .. autofunction:: flatmap
 .. autofunction:: zip
+.. autofunction:: zip_with_index
 .. autofunction:: flatten
 .. autofunction:: any
 .. autofunction:: all
@@ -42,4 +43,3 @@ Collection functions
 .. autofunction:: sorted
 .. autofunction:: find
 .. autofunction:: group_by
-.. autofunction:: index

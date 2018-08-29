@@ -1,6 +1,7 @@
 from pyspark import SparkContext
 from pyspark.sql import SQLContext
 
+import hail
 from hail.genetics.reference_genome import ReferenceGenome
 from hail.typecheck import nullable, typecheck, typecheck_method, enumeration
 from hail.utils import wrap_to_list, get_env_or_default
@@ -20,15 +21,21 @@ class HailContext(object):
                       min_block_size=int,
                       branching_factor=int,
                       tmp_dir=nullable(str),
-                      default_reference=str)
+                      default_reference=str,
+                      idempotent=bool,
+                      global_seed=nullable(int))
     def __init__(self, sc=None, app_name="Hail", master=None, local='local[*]',
                  log='hail.log', quiet=False, append=False,
                  min_block_size=1, branching_factor=50, tmp_dir=None,
-                 default_reference="GRCh37"):
+                 default_reference="GRCh37", idempotent=False,
+                 global_seed=6348563392232659379):
 
         if Env._hc:
-            raise FatalError('Hail Context has already been created, restart session '
-                             'or stop Hail context to change configuration.')
+            if idempotent:
+                return
+            else:
+                raise FatalError('Hail has already been initialized, restart session '
+                                 'or stop Hail to change configuration.')
 
         SparkContext._ensure_initialized()
 
@@ -47,15 +54,20 @@ class HailContext(object):
 
         # we always pass 'quiet' to the JVM because stderr output needs
         # to be routed through Python separately.
-        self._jhc = self._hail.HailContext.apply(
-            jsc, app_name, joption(master), local, log, True, append,
-            min_block_size, branching_factor, tmp_dir)
+        # if idempotent:
+        if idempotent:
+            self._jhc = self._hail.HailContext.getOrCreate(
+                jsc, app_name, joption(master), local, log, True, append,
+                min_block_size, branching_factor, tmp_dir)
+        else:
+            self._jhc = self._hail.HailContext.apply(
+                jsc, app_name, joption(master), local, log, True, append,
+                min_block_size, branching_factor, tmp_dir)
 
         self._jsc = self._jhc.sc()
         self.sc = sc if sc else SparkContext(gateway=self._gateway, jsc=self._jvm.JavaSparkContext(self._jsc))
         self._jsql_context = self._jhc.sqlContext()
         self._sql_context = SQLContext(self.sc, jsqlContext=self._jsql_context)
-        self._counter = 1
 
         super(HailContext, self).__init__()
 
@@ -64,6 +76,9 @@ class HailContext(object):
 
         self._default_ref = None
         Env.hail().variant.ReferenceGenome.setDefaultReference(self._jhc, default_reference)
+
+        version = self._jhc.version()
+        hail.__version__ = version
 
         if not quiet:
             sys.stderr.write('Running on Apache Spark version {}\n'.format(self.sc.version))
@@ -79,17 +94,15 @@ class HailContext(object):
                 '     __  __     <>__\n'
                 '    / /_/ /__  __/ /\n'
                 '   / __  / _ `/ / /\n'
-                '  /_/ /_/\_,_/_/_/   version {}\n'.format(self.version))
+                '  /_/ /_/\_,_/_/_/   version {}\n'.format(version))
 
-            if self.version.startswith('devel'):
-                sys.stderr.write('WARNING: This is an unstable development build.\n')
+            if version.startswith('devel'):
+                sys.stderr.write('NOTE: This is a beta version. Interfaces may change\n'
+                                 '  during the beta period. We recommend pulling\n'
+                                 '  the latest changes weekly.\n')
 
         install_exception_handler()
-
-
-    @property
-    def version(self):
-        return self._jhc.version()
+        Env.set_seed(global_seed)
 
     @property
     def default_reference(self):
@@ -98,6 +111,7 @@ class HailContext(object):
         return self._default_ref
 
     def stop(self):
+        Env.hail().HailContext.clear()
         self.sc.stop()
         self.sc = None
         Env._jvm = None
@@ -105,6 +119,7 @@ class HailContext(object):
         Env._hc = None
         uninstall_exception_handler()
         Env._dummy_table = None
+        Env._seed_generator = None
 
 @typecheck(sc=nullable(SparkContext),
            app_name=str,
@@ -116,11 +131,14 @@ class HailContext(object):
            min_block_size=int,
            branching_factor=int,
            tmp_dir=str,
-           default_reference=enumeration('GRCh37', 'GRCh38'))
+           default_reference=enumeration('GRCh37', 'GRCh38'),
+           idempotent=bool,
+           global_seed=nullable(int))
 def init(sc=None, app_name='Hail', master=None, local='local[*]',
-             log='hail.log', quiet=False, append=False,
-             min_block_size=1, branching_factor=50, tmp_dir='/tmp',
-             default_reference='GRCh37'):
+         log='hail.log', quiet=False, append=False,
+         min_block_size=1, branching_factor=50, tmp_dir='/tmp',
+         default_reference='GRCh37', idempotent=False,
+         global_seed=6348563392232659379):
     """Initialize Hail and Spark.
 
     Parameters
@@ -149,10 +167,14 @@ def init(sc=None, app_name='Hail', master=None, local='local[*]',
         Temporary directory for Hail files. Must be a network-visible
         file path.
     default_reference : :obj:`str`
-        Default reference genome. Either ``'GRCh37'`` or ``'GRCh38'``.
+        Default reference genome. Either ``'GRCh37'``, ``'GRCh38'``,
+        or ``'GRCm38'``.
+    idempotent : :obj:`bool`
+        If ``True``, calling this function is a no-op if Hail has already been initialized.
     """
     HailContext(sc, app_name, master, local, log, quiet, append,
-                min_block_size, branching_factor, tmp_dir, default_reference)
+                min_block_size, branching_factor, tmp_dir,
+                default_reference, idempotent, global_seed)
 
 def stop():
     """Stop the currently running Hail session."""
@@ -177,16 +199,19 @@ def default_reference():
     """
     return Env.hc().default_reference
 
-def get_reference(name):
+def get_reference(name) -> 'hail.ReferenceGenome':
     """Returns the reference genome corresponding to `name`.
 
     Notes
     -----
 
-    Hail's built-in references are ``'GRCh37'`` and ``GRCh38'``. The contig names
-    and lengths come from the GATK resource bundle:
-    `human_g1k_v37.dict <ftp://gsapubftp-anonymous@ftp.broadinstitute.org/bundle/b37/human_g1k_v37.dict>`__
-    and `Homo_sapiens_assembly38.dict <ftp://gsapubftp-anonymous@ftp.broadinstitute.org/bundle/hg38/Homo_sapiens_assembly38.dict>`__.
+    Hail's built-in references are ``'GRCh37'``, ``GRCh38'``, and ``'GRCm38'``.
+    The contig names and lengths come from the GATK resource bundle:
+    `human_g1k_v37.dict
+    <ftp://gsapubftp-anonymous@ftp.broadinstitute.org/bundle/b37/human_g1k_v37.dict>`__
+    and `Homo_sapiens_assembly38.dict
+    <ftp://gsapubftp-anonymous@ftp.broadinstitute.org/bundle/hg38/Homo_sapiens_assembly38.dict>`__.
+
 
     If ``name='default'``, the value of :func:`.default_reference` is returned.
 
@@ -194,18 +219,33 @@ def get_reference(name):
     ----------
     name : :obj:`str`
         Name of a previously loaded reference genome or one of Hail's built-in
-        references: ``'GRCh37'``, ``'GRCh38'``, and ``'default'``.
+        references: ``'GRCh37'``, ``'GRCh38'``, ``'GRCm38'``, and ``'default'``.
 
     Returns
     -------
     :class:`.ReferenceGenome`
     """
-    from hail import ReferenceGenome
-
     if name == 'default':
         return default_reference()
     else:
-        return ReferenceGenome._references.get(
+        return hail.ReferenceGenome._references.get(
             name,
-            ReferenceGenome._from_java(Env.hail().variant.ReferenceGenome.getReference(name))
+            hail.ReferenceGenome._from_java(Env.hail().variant.ReferenceGenome.getReference(name))
         )
+
+
+@typecheck(seed=int)
+def set_global_seed(seed):
+    """Sets Hail's global seed to `seed`.
+
+    Parameters
+    ----------
+    seed : :obj:`int`
+        Integer used to seed Hail's random number generator
+
+    Returns
+    -------
+    :class:`.ReferenceGenome`
+    """
+
+    Env.set_seed(seed)

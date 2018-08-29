@@ -1,20 +1,25 @@
-.. _sec-getting_started_developing:
+For Software Developers
+-----------------------
 
-==========================
-Getting Started Developing
-==========================
+Hail is an open-source project. We welcome contributions to the repository. If you're interested
+in contributing to Hail, you will need to build your own Hail JAR and set up the testing environment.
+
+Requirements
+~~~~~~~~~~~~
 
 You'll need:
 
-- `Java 8 JDK <http://www.oracle.com/technetwork/java/javase/downloads/index.html>`_
-- `Spark 2.0.2 <http://spark.apache.org/downloads.html>`_
-- `Anaconda <https://www.continuum.io/downloads>`_
+- `Java 8 JDK <http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html>`_
+- `Spark 2.2.0 <https://www.apache.org/dyn/closer.lua/spark/spark-2.2.0/spark-2.2.0-bin-hadoop2.7.tgz>`_
 
--------------------
+  - Hail will work with other bug fix versions of Spark 2.2.x, but it *will not* work with Spark 1.x.x, 2.0.x, or 2.1.x.
+
+- `Anaconda for Python 3 <https://www.continuum.io/downloads>`_
+
 Building a Hail JAR
--------------------
+~~~~~~~~~~~~~~~~~~~
 
-The minimal set of tools necessary to build Hail from source is a C++ compiler. On a Debian-based OS like Ubuntu, a C++ compiler can be installed with apt-get::
+The only additional tool necessary to build Hail from source is a C++ compiler. On a Debian-based OS like Ubuntu, a C++ compiler can be installed with apt-get::
 
     sudo apt-get install g++
 
@@ -22,17 +27,15 @@ On Mac OS X, a C++ compiler is provided by the Apple Xcode::
 
     xcode-select --install
 
-The Hail source code is hosted `on GitHub <https://github.com/broadinstitute/hail>`_::
+The Hail source code is hosted `on GitHub <https://github.com/hail-is/hail>`_::
 
-    git clone https://github.com/broadinstitute/hail.git
+    git clone https://github.com/hail-is/hail.git
     cd hail
 
-You may also want to install `Seaborn <http://seaborn.pydata.org>`_, a Python library for statistical data visualization, using ``conda install seaborn`` or ``pip install seaborn``. While not technically necessary, Seaborn is used in the tutorials to make prettier plots.
-
-A Hail JAR can be built using Gradle, note that every Hail JAR is specific to
+A Hail JAR can be built using Gradle. Note that every Hail JAR is specific to
 one version of Spark::
 
-    ./gradlew -Dspark.version=2.0.2 shadowJar
+    ./gradlew -Dspark.version=2.2.0 shadowJar
 
 Finally, some environment variables must be set so that Hail can find Spark, Spark can find Hail, and Python can find Hail. Add these lines to your ``.bashrc`` or equivalent setting ``SPARK_HOME`` to the root directory of a Spark installation and ``HAIL_HOME`` to the root of the Hail repository::
 
@@ -43,28 +46,33 @@ Finally, some environment variables must be set so that Hail can find Spark, Spa
 
 Now you can import hail from a python interpreter::
 
-    # python
-    Python 2.7.12 |Anaconda custom (x86_64)| (default, Jul  2 2016, 17:43:17) 
-    [GCC 4.2.1 (Based on Apple Inc. build 5658) (LLVM build 2336.11.00)] on darwin
+    $ python
+    Python 3.6.5 |Anaconda, Inc.| (default, Mar 29 2018, 13:14:23)
+    [GCC 4.2.1 Compatible Clang 4.0.1 (tags/RELEASE_401/final)] on darwin
     Type "help", "copyright", "credits" or "license" for more information.
-    Anaconda is brought to you by Continuum Analytics.
-    Please check out: http://continuum.io/thanks and https://anaconda.org
-    >>> from hail import *
-    >>> hc = HailContext()
+
+    >>> import hail as hl
+
+    >>> hl.init() # doctest: +SKIP
     Using Spark's default log4j profile: org/apache/spark/log4j-defaults.properties
     Setting default log level to "WARN".
-    To adjust logging level use sc.setLogLevel(newLevel).
-    hail: info: SparkUI: http://10.1.1.163:4040
+    To adjust logging level use sc.setLogLevel(newLevel). For SparkR, use setLogLevel(newLevel).
+    Running on Apache Spark version 2.2.0
+    SparkUI available at http://10.1.6.36:4041
     Welcome to
          __  __     <>__
         / /_/ /__  __/ /
        / __  / _ `/ / /
-      /_/ /_/\_,_/_/_/   version devel-b2394a4
-    >>> 
+      /_/ /_/\_,_/_/_/   version devel-9f866ba
+    NOTE: This is a beta version. Interfaces may change
+      during the beta period. We also recommend pulling
+      the latest changes weekly.
 
------------------
+    >>>
+
+
 Building the Docs
------------------
+~~~~~~~~~~~~~~~~~
 
 Hail uses `conda environments <https://conda.io/docs/using/envs.html>`_ to
 manage the doc build process's python dependencies. First, create a conda
@@ -72,7 +80,7 @@ environment for hail:
 
 .. code-block:: bash
 
-    conda env create haildoc -f ./python/hail/environment.yml
+    conda env create haildoc -f ./python/hail/dev-environment.yml
 
 Activate the environment
 
@@ -81,12 +89,12 @@ Activate the environment
     source activate haildoc
 
 Now the shell prompt should include the name of the environment, in this case
-"haildoc". Within the environment, run the ``createDocs`` gradle task in the
+"haildoc". Within the environment, run the ``makeDocs`` gradle task in the
 environment:
 
 .. code-block:: bash
 
-    ./gradlew createDocs
+    ./gradlew makeDocs
 
 The generated docs are located at ``./build/www/hail/index.html``.
 
@@ -96,17 +104,17 @@ When you are finished developing hail, disable the environment
 
     source deactivate haildoc
 
-The ``environment.yml`` file may change without warning; therefore, after
+The ``dev-environment.yml`` file may change without warning; therefore, after
 pulling new changes from a remote repository, we always recommend updating the
 conda environment
 
 .. code-block:: bash
 
-    conda env update haildoc -f ./python/hail/environment.yml
+    conda env update haildoc -f ./python/hail/dev-environment.yml
 
------------------
+
 Running the tests
------------------
+~~~~~~~~~~~~~~~~~
 
 Several Hail tests have additional dependencies:
 
@@ -114,9 +122,18 @@ Several Hail tests have additional dependencies:
 
  - `QCTOOL 1.4 <http://www.well.ox.ac.uk/~gav/qctool>`_
 
- - `R 3.3.1 <http://www.r-project.org/>`_ with packages ``jsonlite``, ``SKAT`` and ``logistf``.
+ - `R 3.3.4 <http://www.r-project.org/>`_ with CRAN packages ``jsonlite``, ``SKAT`` and ``logistf``,
+   as well as `pcrelate <https://www.rdocumentation.org/packages/GENESIS/versions/2.2.2/topics/pcrelate>`__
+   from the `GENESIS <https://bioconductor.org/packages/release/bioc/html/GENESIS.html>`__ *Bioconductor* package.
+   These can be installed within R using:
 
-Other recent versions of QCTOOL and R should suffice, but PLINK 1.7 will not.
+   .. code-block:: R
+
+      install.packages(c("jsonlite", "SKAT", "logistf"))
+      source("https://bioconductor.org/biocLite.R")
+      biocLite("GENESIS")
+      biocLite("SNPRelate")
+      biocLite("GWASTools")
 
 To execute all Hail tests, run:
 
@@ -124,3 +141,20 @@ To execute all Hail tests, run:
 
     ./gradlew -Dspark.version=${SPARK_VERSION} -Dspark.home=${SPARK_HOME} test
 
+Contributing
+~~~~~~~~~~~~
+
+Chat with the dev team on our `Zulip chatroom <https://hail.zulipchat.com>`_ if
+you have an idea for a contribution. We can help you determine if your
+project is a good candidate for merging.
+
+Keep in mind the following principles when submitting a pull request:
+
+- A PR should focus on a single feature. Multiple features should be split into multiple PRs.
+- Before submitting your PR, you should rebase onto the latest master.
+- PRs must pass all tests before being merged. See the section above on `Running the tests`_ locally.
+- PRs require a review before being merged. We will assign someone from our dev team to review your PR.
+- Code in PRs should be formatted according to the style in ``code_style.xml``.
+  This file can be loaded into Intellij to automatically format your code.
+- When you make a PR, include a short message that describes the purpose of the
+  PR and any necessary context for the changes you are making.

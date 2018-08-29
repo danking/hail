@@ -14,6 +14,4 @@ stats
     :toctree: ./
     :template: class.rst
 
-    BetaDist
-    TruncatedBetaDist
-    UniformDist
+    LinearMixedModel

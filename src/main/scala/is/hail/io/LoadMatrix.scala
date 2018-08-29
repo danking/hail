@@ -3,20 +3,21 @@ package is.hail.io
 import is.hail.HailContext
 import is.hail.annotations._
 import is.hail.expr.types._
-import is.hail.rvd.{OrderedRVD, OrderedRVDPartitioner}
+import is.hail.rvd.{OrderedRVD, OrderedRVDPartitioner, RVDContext}
+import is.hail.sparkextras.ContextRDD
 import is.hail.utils._
 import is.hail.variant._
 import org.apache.hadoop.conf.Configuration
 import org.apache.spark.sql.Row
 
 import scala.language.implicitConversions
+import scala.language.existentials
 import scala.io.Source
 
-class LoadMatrixParser(rvb: RegionValueBuilder, fieldTypes: Array[Type], entryType: TStruct, nCols: Int, missingValue: String, file: String) {
+class LoadMatrixParser(rvb: RegionValueBuilder, fieldTypes: Array[Type], entryType: TStruct, nCols: Int, missingValue: String, file: String, sep: Char) {
 
   assert(entryType.size == 1)
 
-  val sep = '\t'
   val nFields: Int = fieldTypes.length
   val cellf: (String, Long, Int, Int) => Int = addType(entryType.types(0))
 
@@ -78,7 +79,7 @@ class LoadMatrixParser(rvb: RegionValueBuilder, fieldTypes: Array[Type], entryTy
       newoff = line.length
     }
     val v = line.substring(off, newoff)
-    if (v == missingValue){
+    if (v == missingValue) {
       rvb.setMissing()
     } else rvb.addString(v)
     newoff + 1
@@ -113,7 +114,7 @@ class LoadMatrixParser(rvb: RegionValueBuilder, fieldTypes: Array[Type], entryTy
     } else if (line.length == newoff || line(newoff) == sep) {
       if (isNegative) rvb.addInt(-v) else rvb.addInt(v)
     } else {
-      fatal(s"Error parsing matrix. $v Invalid Int32 at column: $colNum, row: $rowNum in file: $file")
+      fatal(s"Error parsing matrix. Invalid Int32 at column: $colNum, row: $rowNum in file: $file")
     }
     newoff + 1
   }
@@ -205,10 +206,10 @@ object LoadMatrix {
       val lines = hConf.readFile(file) { s => Source.fromInputStream(s).getLines().take(2).toArray }
       lines match {
         case Array(header, first) =>
-          val nCols = first.split(sep).length - nRowFields
+          val nCols = first.split(charRegex(sep), -1).length - nRowFields
           if (nCols <= 0)
             fatal(s"More row fields ($nRowFields) than columns (${ nRowFields + nCols }) in file: $file")
-          (header.split(sep), nCols)
+          (header.split(charRegex(sep), -1), nCols)
         case _ =>
           fatal(s"file in import_matrix contains no data: $file")
       }
@@ -229,21 +230,20 @@ object LoadMatrix {
            """.stripMargin)
   }
 
-  def makePartitionerFromCounts(partitionCounts: Array[Long], pkType: TStruct): (OrderedRVDPartitioner, Array[Int]) = {
+  def makePartitionerFromCounts(partitionCounts: Array[Long], kType: TStruct): (OrderedRVDPartitioner, Array[Int]) = {
     var includesStart = true
     val keepPartitions = new ArrayBuilder[Int]()
     val rangeBoundIntervals = partitionCounts.zip(partitionCounts.tail).zipWithIndex.flatMap { case ((s, e), i) =>
-      val interval = Interval(Row(if (includesStart) s else s - 1), Row(e - 1), includesStart, true)
+      val interval = Interval.orNone(kType.ordering,
+        Row(if (includesStart) s else s - 1),
+        Row(e - 1),
+        includesStart, true)
       includesStart = false
-      if (interval.definitelyEmpty(pkType.ordering))
-        None
-      else {
-        keepPartitions += i
-        Some(interval)
-      }
+      if (interval.isDefined) keepPartitions += i
+      interval
     }
-    val ranges = UnsafeIndexedSeq(TArray(TInterval(pkType)), rangeBoundIntervals)
-    (new OrderedRVDPartitioner(Array(pkType.fieldNames(0)), pkType, ranges), keepPartitions.result())
+    val ranges = rangeBoundIntervals
+    (new OrderedRVDPartitioner(Array(kType.fieldNames(0)), kType, ranges), keepPartitions.result())
   }
 
   def verifyRowFields(fieldNames: Array[String], fieldTypes: Map[String, Type]): TStruct = {
@@ -273,20 +273,20 @@ object LoadMatrix {
     cellType: TStruct = TStruct("x" -> TInt64()),
     missingValue: String = "NA",
     nPartitions: Option[Int] = None,
-    noHeader: Boolean = false): MatrixTable = {
+    noHeader: Boolean = false,
+    sep: Char = '\t'): MatrixTable = {
 
     require(cellType.size == 1, "cellType can only have 1 field")
 
-    val sep = '\t'
     val nAnnotations = rowFields.size
 
-      assert(rowFields.values.forall { t =>
-        t.isOfType(TString()) ||
-          t.isOfType(TInt32()) ||
-          t.isOfType(TInt64()) ||
-          t.isOfType(TFloat32()) ||
-          t.isOfType(TFloat64())
-      })
+    assert(rowFields.values.forall { t =>
+      t.isOfType(TString()) ||
+        t.isOfType(TInt32()) ||
+        t.isOfType(TInt64()) ||
+        t.isOfType(TFloat32()) ||
+        t.isOfType(TFloat64())
+    })
     val sc = hc.sc
     val hConf = hc.hadoopConf
 
@@ -341,7 +341,7 @@ object LoadMatrix {
     val useIndex = keyFields.isEmpty
     val (rowKey, rowType) =
       if (useIndex)
-        (Array("row_id"),TStruct("row_id" -> TInt64()) ++ rowFieldType)
+        (Array("row_id"), TStruct("row_id" -> TInt64()) ++ rowFieldType)
       else (keyFields, rowFieldType)
 
     if (!keyFields.forall(rowType.fieldNames.contains))
@@ -360,44 +360,43 @@ object LoadMatrix {
       rowPartitionKey = rowKey.toFastIndexedSeq,
       entryType = cellType)
 
-    val rdd = lines.filter(l => l.value.nonEmpty)
-      .mapPartitionsWithIndex { (i, it) =>
-        val region = Region()
+    val rdd = ContextRDD.weaken[RVDContext](lines.filter(l => l.value.nonEmpty))
+      .cmapPartitionsWithIndex { (i, ctx, it) =>
+        val region = ctx.region
         val rvb = new RegionValueBuilder(region)
         val rv = RegionValue(region)
 
         if (firstPartitions(i) == i && !noHeader) { it.next() }
 
         val partitionStartInFile = partitionCounts(i) - partitionCounts(firstPartitions(i))
-        val parser = new LoadMatrixParser(rvb, rowFieldType.types, cellType, nCols, missingValue, fileByPartition(i))
+        val parser = new LoadMatrixParser(rvb, rowFieldType.types, cellType, nCols, missingValue, fileByPartition(i), sep)
 
         it.zipWithIndex.map { case (v, row) =>
           val fileRowNum = partitionStartInFile + row
-          val line = v.value
-
-          region.clear()
-          rvb.start(matrixType.rvRowType)
-          rvb.startStruct()
-          if (useIndex) {
-            rvb.addLong(partitionCounts(i) + row)
+          v.wrap { line =>
+            rvb.start(matrixType.rvRowType)
+            rvb.startStruct()
+            if (useIndex) {
+              rvb.addLong(partitionCounts(i) + row)
+            }
+            parser.parseLine(line, fileRowNum)
+            rvb.endStruct()
+            rv.setOffset(rvb.end())
+            rv
           }
-          parser.parseLine(line, fileRowNum)
-          rvb.endStruct()
-          rv.setOffset(rvb.end())
-          rv
         }
       }
 
     val orderedRVD = if (useIndex) {
-      val (partitioner, keepPartitions) = makePartitionerFromCounts(partitionCounts, matrixType.orvdType.pkType)
+      val (partitioner, keepPartitions) = makePartitionerFromCounts(partitionCounts, matrixType.orvdType.kType)
       OrderedRVD(matrixType.orvdType, partitioner, rdd.subsetPartitions(keepPartitions))
     } else
-      OrderedRVD(matrixType.orvdType, rdd, None, None)
+      OrderedRVD.coerce(matrixType.orvdType, rdd)
 
     new MatrixTable(hc,
       matrixType,
-      BroadcastValue(Annotation.empty, matrixType.globalType, hc.sc),
-      colIDs.map(x => Annotation(x)),
+      BroadcastRow(Row(), matrixType.globalType, hc.sc),
+      BroadcastIndexedSeq(colIDs.map(x => Annotation(x)), TArray(matrixType.colType), hc.sc),
       orderedRVD)
   }
 }

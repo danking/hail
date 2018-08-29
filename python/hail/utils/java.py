@@ -5,8 +5,7 @@ import re
 from threading import Thread
 
 import py4j
-import numpy as np
-
+import hail
 
 class FatalError(Exception):
     """:class:`.FatalError` is an error thrown by Hail method failures"""
@@ -19,6 +18,7 @@ class Env:
     _jutils = None
     _hc = None
     _counter = 0
+    _seed_generator = None
 
     @staticmethod
     def get_uid():
@@ -71,9 +71,18 @@ class Env:
     def dummy_table():
         if Env._dummy_table is None:
             import hail
-            Env._dummy_table = hail.utils.range_table(1, 1).cache()
+            Env._dummy_table = hail.utils.range_table(1, 1).key_by(None).cache()
         return Env._dummy_table
 
+    @staticmethod
+    def set_seed(seed):
+        Env._seed_generator = hail.utils.HailSeedGenerator(seed)
+
+    @staticmethod
+    def next_seed():
+        if Env._seed_generator is None:
+            Env.set_seed(None)
+        return Env._seed_generator.next_seed()
 
 
 def jarray(jtype, lst):
@@ -126,7 +135,7 @@ def jset_args(x):
 
 
 def jiterable_to_list(it):
-    if it:
+    if it is not None:
         return list(Env.jutils().iterableToArrayList(it))
     else:
         return None
@@ -134,6 +143,10 @@ def jiterable_to_list(it):
 
 def escape_str(s):
     return Env.jutils().escapePyString(s)
+
+def parsable_strings(strs):
+    strs = ' '.join(f'"{escape_str(s)}"' for s in strs)
+    return f"({strs})"
 
 
 _parsable_str = re.compile(r'[\w_]+')
@@ -194,11 +207,11 @@ def handle_java_exception(f):
             deepest, full = tpl._1(), tpl._2()
             raise FatalError('%s\n\nJava stack trace:\n%s\n'
                              'Hail version: %s\n'
-                             'Error summary: %s' % (deepest, full, Env.hc().version, deepest)) from None
+                             'Error summary: %s' % (deepest, full, hail.__version__, deepest)) from None
         except pyspark.sql.utils.CapturedException as e:
             raise FatalError('%s\n\nJava stack trace:\n%s\n'
                              'Hail version: %s\n'
-                             'Error summary: %s' % (e.desc, e.stackTrace, Env.hc().version, e.desc)) from None
+                             'Error summary: %s' % (e.desc, e.stackTrace, hail.__version__, e.desc)) from None
 
     return deco
 

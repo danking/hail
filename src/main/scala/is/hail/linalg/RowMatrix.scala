@@ -2,11 +2,13 @@ package is.hail.linalg
 
 import breeze.linalg.DenseMatrix
 import is.hail.HailContext
+import is.hail.expr.types.{TInt64, TStruct}
 import is.hail.io.InputBuffer
+import is.hail.rvd.OrderedRVDPartitioner
 import is.hail.utils._
 import org.apache.spark.{Partition, Partitioner, SparkContext, TaskContext}
 import org.apache.spark.rdd.RDD
-import org.json4s.jackson
+import org.apache.spark.sql.Row
 
 object RowMatrix {
   def apply(hc: HailContext, rows: RDD[(Long, Array[Double])], nCols: Int): RowMatrix =
@@ -17,22 +19,7 @@ object RowMatrix {
   
   def apply(hc: HailContext, rows: RDD[(Long, Array[Double])], nCols: Int, nRows: Long, partitionCounts: Array[Long]): RowMatrix =
     new RowMatrix(hc, rows, nCols, Some(nRows), Some(partitionCounts))
-    
-  def readGridPartitioner(hc: HailContext, uri: String): GridPartitioner = {
-    val hadoop = hc.hadoopConf
-    
-    if (!hadoop.exists(uri + "/_SUCCESS"))
-      fatal("Write failed: no success indicator found")
-    
-    val BlockMatrixMetadata(blockSize, nRows, nCols) =
-      hadoop.readTextFile(uri + BlockMatrix.metadataRelativePath) { isr  =>
-        implicit val formats = defaultJSONFormats
-        jackson.Serialization.read[BlockMatrixMetadata](isr)
-      }
-    
-    GridPartitioner(blockSize, nRows, nCols)
-  }
-
+  
   def computePartitionCounts(partSize: Long, nRows: Long): Array[Long] = {
     val nParts = ((nRows - 1) / partSize).toInt + 1
     val partitionCounts = Array.fill[Long](nParts)(partSize)
@@ -40,17 +27,21 @@ object RowMatrix {
     
     partitionCounts
   }
-  
-  def readBlockMatrix(hc: HailContext, uri: String, partSize: Int): RowMatrix = {
-    val gp = readGridPartitioner(hc, uri)
-    readBlockMatrix(hc, uri, gp, computePartitionCounts(partSize, gp.nRows))
+
+  def readBlockMatrix(hc: HailContext, uri: String, maybePartSize: Option[Int]): RowMatrix = {
+    val BlockMatrixMetadata(blockSize, nRows, nCols, maybeFiltered, partFiles) = BlockMatrix.readMetadata(hc, uri)
+    if (nCols >= Int.MaxValue) {
+      fatal(s"Number of columns must be less than 2^31, found $nCols")
+    }
+    val gp = GridPartitioner(blockSize, nRows, nCols, maybeFiltered)
+    val partSize = maybePartSize.getOrElse(blockSize)
+    val partitionCounts = computePartitionCounts(partSize, gp.nRows)
+    RowMatrix(hc, 
+      new ReadBlocksAsRowsRDD(uri, hc.sc, partFiles, partitionCounts, gp),
+      gp.nCols.toInt,
+      gp.nRows,
+      partitionCounts)
   }
-  
-  def readBlockMatrix(hc: HailContext, uri: String, partitionCounts: Array[Long]): RowMatrix =
-    readBlockMatrix(hc, uri, readGridPartitioner(hc, uri), partitionCounts)
-  
-  def readBlockMatrix(hc: HailContext, uri: String, gp: GridPartitioner, partitionCounts: Array[Long]): RowMatrix =
-    RowMatrix(hc, new ReadBlocksAsRowsRDD(uri, hc.sc, partitionCounts, gp), gp.nCols.toInt, gp.nRows, partitionCounts)
 }
 
 class RowMatrix(val hc: HailContext,
@@ -77,7 +68,21 @@ class RowMatrix(val hc: HailContext,
   
   // length nPartitions + 1, first element 0, last element rdd2 count
   def partitionStarts(): Array[Long] = partitionCounts().scanLeft(0L)(_ + _)
+
+  def orderedRVDPartitioner(
+    partitionKey: Array[String] = Array("idx"),
+    kType: TStruct = TStruct("idx" -> TInt64())): OrderedRVDPartitioner = {
     
+    val partStarts = partitionStarts()
+
+    new OrderedRVDPartitioner(partitionKey, kType,
+      Array.tabulate(partStarts.length - 1) { i =>
+        val start = partStarts(i)
+        val end = partStarts(i + 1)
+        Interval(Row(start), Row(end), includesStart = true, includesEnd = false)
+      })
+  }
+  
   def toBreezeMatrix(): DenseMatrix[Double] = {
     require(_nRows.forall(_ <= Int.MaxValue), "The number of rows of this matrix should be less than or equal to " +
         s"Int.MaxValue. Currently numRows: ${ _nRows.get }")
@@ -91,43 +96,48 @@ class RowMatrix(val hc: HailContext,
     new DenseMatrix[Double](nRowsInt, nCols, a.flatten, 0, nCols, isTranspose = true)
   }
   
-  def export(path: String, columnDelimiter: String, header: Option[String], exportType: Int) {
+  def export(path: String, columnDelimiter: String, header: Option[String], addIndex: Boolean, exportType: Int) {
     val localNCols = nCols
-    exportDelimitedRowSlices(path, columnDelimiter, header, exportType, _ => 0, _ => localNCols)
+    exportDelimitedRowSlices(path, columnDelimiter, header, addIndex, exportType, _ => 0, _ => localNCols)
   }
 
   // includes the diagonal
-  def exportLowerTriangle(path: String, columnDelimiter: String, header: Option[String], exportType: Int) {
+  def exportLowerTriangle(path: String, columnDelimiter: String, header: Option[String], addIndex: Boolean, exportType: Int) {
     val localNCols = nCols
-    exportDelimitedRowSlices(path, columnDelimiter, header, exportType, _ => 0, i => math.min(i + 1, localNCols.toLong).toInt)
+    exportDelimitedRowSlices(path, columnDelimiter, header, addIndex, exportType, _ => 0, i => math.min(i + 1, localNCols.toLong).toInt)
   }
 
-  def exportStrictLowerTriangle(path: String, columnDelimiter: String, header: Option[String], exportType: Int) {
+  def exportStrictLowerTriangle(path: String, columnDelimiter: String, header: Option[String], addIndex: Boolean, exportType: Int) {
     val localNCols = nCols
-    exportDelimitedRowSlices(path, columnDelimiter, header, exportType, _ => 0, i => math.min(i, localNCols.toLong).toInt)
+    exportDelimitedRowSlices(path, columnDelimiter, header, addIndex, exportType, _ => 0, i => math.min(i, localNCols.toLong).toInt)
   }
 
   // includes the diagonal
-  def exportUpperTriangle(path: String, columnDelimiter: String, header: Option[String], exportType: Int) {
+  def exportUpperTriangle(path: String, columnDelimiter: String, header: Option[String], addIndex: Boolean, exportType: Int) {
     val localNCols = nCols
-    exportDelimitedRowSlices(path, columnDelimiter, header, exportType, i => math.min(i, localNCols.toLong).toInt, _ => localNCols)
+    exportDelimitedRowSlices(path, columnDelimiter, header, addIndex, exportType, i => math.min(i, localNCols.toLong).toInt, _ => localNCols)
   }  
-    
-  def exportStrictUpperTriangle(path: String, columnDelimiter: String, header: Option[String], exportType: Int) {
+  
+  def exportStrictUpperTriangle(path: String, columnDelimiter: String, header: Option[String], addIndex: Boolean, exportType: Int) {
     val localNCols = nCols
-    exportDelimitedRowSlices(path, columnDelimiter, header, exportType, i => math.min(i + 1, localNCols.toLong).toInt, _ => localNCols)
+    exportDelimitedRowSlices(path, columnDelimiter, header, addIndex, exportType, i => math.min(i + 1, localNCols.toLong).toInt, _ => localNCols)
   }
   
   // convert elements in [start, end) of each array to a string, delimited by columnDelimiter, and export
   def exportDelimitedRowSlices(
     path: String, 
     columnDelimiter: String,
-    header: Option[String], 
+    header: Option[String],
+    addIndex: Boolean,
     exportType: Int, 
     start: (Long) => Int, 
     end: (Long) => Int) {
     
     genericExport(path, header, exportType, { (sb, i, v) =>
+      if (addIndex) {
+        sb.append(i)
+        sb.append(columnDelimiter)
+      }
       val l = start(i)
       val r = end(i)
       var j = l
@@ -163,6 +173,7 @@ case class ReadBlocksAsRowsRDDPartition(index: Int, start: Long, end: Long) exte
 
 class ReadBlocksAsRowsRDD(path: String,
   sc: SparkContext,
+  partFiles: Array[String],
   partitionCounts: Array[Long],
   gp: GridPartitioner) extends RDD[(Long, Array[Double])](sc, Nil) {
   
@@ -178,7 +189,6 @@ class ReadBlocksAsRowsRDD(path: String,
   private val nBlockCols = gp.nBlockCols
   private val blockSize = gp.blockSize
 
-  private val d = digitsNeeded(gp.numPartitions)
   private val sHadoopBc = sc.broadcast(new SerializableHadoopConfiguration(sc.hadoopConfiguration))
 
   protected def getPartitions: Array[Partition] = Array.tabulate(partitionStarts.length - 1)(pi => 
@@ -186,10 +196,8 @@ class ReadBlocksAsRowsRDD(path: String,
 
   def compute(split: Partition, context: TaskContext): Iterator[(Long, Array[Double])] = {
     val ReadBlocksAsRowsRDDPartition(_, start, end) = split.asInstanceOf[ReadBlocksAsRowsRDDPartition]
-
-    var inPerBlockCol = new Array[InputBuffer](nBlockCols)
-    val buf = new Array[Byte](blockSize << 3)
-
+    
+    var inPerBlockCol: IndexedSeq[(InputBuffer, Int, Int)] = null
     var i = start
 
     new Iterator[(Long, Array[Double])] {
@@ -200,46 +208,46 @@ class ReadBlocksAsRowsRDD(path: String,
           val blockRow = (i / blockSize).toInt
           val nRowsInBlock = gp.blockRowNRows(blockRow)
           
-          inPerBlockCol = Array.tabulate(gp.nBlockCols) { blockCol =>
-            val pi = gp.coordinatesBlock(blockRow, blockCol)
-            val filename = path + "/parts/" + partFile(d, pi)
+          inPerBlockCol = (0 until nBlockCols)
+            .flatMap { blockCol =>
+              val pi = gp.coordinatesPart(blockRow, blockCol)
+              if (pi >= 0) {
+                val filename = path + "/parts/" + partFiles(pi)
 
-            val is = sHadoopBc.value.value.unsafeReader(filename)
-            val in = BlockMatrix.bufferSpec.buildInputBuffer(is)
+                val is = sHadoopBc.value.value.unsafeReader(filename)
+                val in = BlockMatrix.bufferSpec.buildInputBuffer(is)
 
-            val nColsInBlock = gp.blockColNCols(blockCol)
+                val nColsInBlock = gp.blockColNCols(blockCol)
 
-            assert(in.readInt() == nRowsInBlock)
-            assert(in.readInt() == nColsInBlock)
-            val isTranspose = in.readBoolean()
-            if (!isTranspose)
-              fatal("BlockMatrix must be stored row major on disk in order to be read as a RowMatrix")
+                assert(in.readInt() == nRowsInBlock)
+                assert(in.readInt() == nColsInBlock)
+                val isTranspose = in.readBoolean()
+                if (!isTranspose)
+                  fatal("BlockMatrix must be stored row major on disk in order to be read as a RowMatrix")
 
-            if (i == start) {
-              val skip = (start % blockSize).toInt * (nColsInBlock << 3)
-              in.skipBytes(skip)
+                if (i == start) {
+                  val skip = (start % blockSize).toInt * (nColsInBlock << 3)
+                  in.skipBytes(skip)
+                }
+
+                Some((in, blockCol, nColsInBlock))
+              } else
+                None
             }
-
-            in
-          }
         }
 
         val row = new Array[Double](nCols)
-        var offset = 0
-        var blockCol = 0
-        while (blockCol < nBlockCols) {
-          val n = gp.blockColNCols(blockCol)
-          
-          inPerBlockCol(blockCol).readDoubles(row, offset, n)
-          
-          offset += n
-          blockCol += 1
+        
+        inPerBlockCol.foreach { case (in, blockCol, nColsInBlock) =>
+          in.readDoubles(row, blockCol * blockSize, nColsInBlock)
         }
+        
         val iRow = (i, row)
+        
         i += 1
         
         if (i % blockSize == 0 || i == end)
-          inPerBlockCol.foreach(_.close())
+          inPerBlockCol.foreach(_._1.close())
         
         iRow
       }

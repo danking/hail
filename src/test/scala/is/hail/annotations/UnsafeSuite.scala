@@ -13,10 +13,45 @@ import org.apache.spark.serializer.KryoSerializer
 import org.apache.spark.sql.Row
 import org.testng.annotations.Test
 
+import scala.util.Random
+
 class UnsafeSuite extends SparkSuite {
+  def subsetType(t: Type): Type = {
+    t match {
+      case t: TStruct =>
+        TStruct(t.required,
+          t.fields.filter(_ => Random.nextDouble() < 0.4)
+            .map(f => f.name -> f.typ): _*)
+
+      case t: TArray =>
+        TArray(subsetType(t.elementType), t.required)
+
+      case _ => t
+    }
+  }
+
+  def subset(t: Type, requestedType: Type, a: Annotation): Annotation = {
+    t match {
+      case t2: TStruct =>
+        val requestedType2 = requestedType.asInstanceOf[TStruct]
+        if (a == null)
+          null
+        else {
+          val a2 = a.asInstanceOf[Row]
+          Row.fromSeq(requestedType2.fields.map { rf =>
+            val f = t2.field(rf.name)
+            subset(f.typ, rf.typ, a2.get(f.index))
+          })
+        }
+
+      case _ => a
+    }
+  }
+
   @Test def testCodec() {
     val region = Region()
     val region2 = Region()
+    val region3 = Region()
     val rvb = new RegionValueBuilder(region)
 
     val path = tmpDir.createTempFile(extension = "ser")
@@ -25,7 +60,11 @@ class UnsafeSuite extends SparkSuite {
       .flatMap(t => Gen.zip(Gen.const(t), t.genValue))
       .filter { case (t, a) => a != null }
     val p = Prop.forAll(g) { case (t, a) =>
-      t.typeCheck(a)
+      assert(t.typeCheck(a))
+
+      val requestedType = subsetType(t).asInstanceOf[TStruct]
+      val a2 = subset(t, requestedType, a)
+      assert(requestedType.typeCheck(a2))
 
       CodecSpec.codecSpecs.foreach { codecSpec =>
         region.clear()
@@ -35,17 +74,25 @@ class UnsafeSuite extends SparkSuite {
         val ur = new UnsafeRow(t, region, offset)
 
         val aos = new ByteArrayOutputStream()
-        val en = codecSpec.buildEncoder(aos)
-        en.writeRegionValue(t, region, offset)
+        val en = codecSpec.buildEncoder(t)(aos)
+        en.writeRegionValue(region, offset)
         en.flush()
 
         region2.clear()
         val ais = new ByteArrayInputStream(aos.toByteArray)
-        val dec = codecSpec.buildDecoder(ais)
-        val offset2 = dec.readRegionValue(t, region2)
+        val dec = codecSpec.buildDecoder(t, t)(ais)
+        val offset2 = dec.readRegionValue(region2)
         val ur2 = new UnsafeRow(t, region2, offset2)
+        assert(t.typeCheck(ur2))
 
-        assert(t.valuesSimilar(a, ur2))
+        region3.clear()
+        val ais3 = new ByteArrayInputStream(aos.toByteArray)
+        val dec3 = codecSpec.buildDecoder(t, requestedType)(ais3)
+        val offset3 = dec3.readRegionValue(region3)
+        val ur3 = new UnsafeRow(requestedType, region3, offset3)
+        assert(requestedType.typeCheck(ur3))
+
+        assert(requestedType.valuesSimilar(a2, ur3))
       }
 
       true
@@ -156,19 +203,19 @@ class UnsafeSuite extends SparkSuite {
   @Test def testRegion() {
     val buff = Region()
 
-    buff.appendLong(124L)
-    buff.appendByte(2)
-    buff.appendByte(1)
-    buff.appendByte(4)
-    buff.appendInt(1234567)
-    buff.appendDouble(1.1)
+    val addrA = buff.appendLong(124L)
+    val addrB = buff.appendByte(2)
+    val addrC = buff.appendByte(1)
+    val addrD = buff.appendByte(4)
+    val addrE = buff.appendInt(1234567)
+    val addrF = buff.appendDouble(1.1)
 
-    assert(buff.loadLong(0) == 124L)
-    assert(buff.loadByte(8) == 2)
-    assert(buff.loadByte(9) == 1)
-    assert(buff.loadByte(10) == 4)
-    assert(buff.loadInt(12) == 1234567)
-    assert(buff.loadDouble(16) == 1.1)
+    assert(buff.loadLong(addrA) == 124L)
+    assert(buff.loadByte(addrB) == 2)
+    assert(buff.loadByte(addrC) == 1)
+    assert(buff.loadByte(addrD) == 4)
+    assert(buff.loadInt(addrE) == 1234567)
+    assert(buff.loadDouble(addrF) == 1.1)
   }
 
   val g = (for {
@@ -277,120 +324,8 @@ class UnsafeSuite extends SparkSuite {
     }
     p.check()
   }
-
-  @Test def unsafeSer() {
-    val region = Region()
-    val rvb = new RegionValueBuilder(region)
-
-    val path = tmpDir.createTempFile(extension = "ser")
-
-    val g = Type.genStruct
-      .flatMap(t => Gen.zip(Gen.const(t), t.genValue))
-      .filter { case (t, a) => a != null }
-    val p = Prop.forAll(g) { case (t, a) =>
-      region.clear()
-      rvb.start(t)
-      rvb.addRow(t, a.asInstanceOf[Row])
-      val offset = rvb.end()
-      val ur = new UnsafeRow(t, region, offset)
-
-      hadoopConf.writeObjectFile(path) { out =>
-        out.writeObject(ur)
-      }
-
-      val ur2 = hadoopConf.readObjectFile(path) { in =>
-        in.readObject().asInstanceOf[UnsafeRow]
-      }
-
-      assert(t.valuesSimilar(ur, ur2))
-
-      true
-    }
-    p.check()
-  }
-
-  @Test def unsafeKryo() {
-    val conf = sc.getConf // force sc
-    val ser = SparkEnv.get.serializer.asInstanceOf[KryoSerializer]
-    val kryo = ser.newKryo()
-
-    val region = Region()
-    val rvb = new RegionValueBuilder(region)
-    val path = tmpDir.createTempFile(extension = "ser")
-    val g = Type.genStruct
-      .flatMap(t => Gen.zip(Gen.const(t), t.genValue))
-      .filter { case (t, a) => a != null }
-    val p = Prop.forAll(g) { case (t, a) =>
-      region.clear()
-      rvb.start(t)
-      rvb.addRow(t, a.asInstanceOf[Row])
-      val offset = rvb.end()
-      val ur = new UnsafeRow(t, region, offset)
-
-      hadoopConf.writeKryoFile(path) { out =>
-        kryo.writeObject(out, ur)
-      }
-
-      val ur2 = hadoopConf.readKryoFile(path) { in =>
-        kryo.readObject[UnsafeRow](in, classOf[UnsafeRow])
-      }
-
-      assert(t.valuesSimilar(ur, ur2))
-
-      true
-    }
-    p.check()
-  }
-
-  @Test def testRegionSer() {
-    val region = Region()
-    val path = tmpDir.createTempFile(extension = "ser")
-    val g = Gen.buildableOf[Array](arbitrary[Byte])
-    val p = Prop.forAll(g) { (a: Array[Byte]) =>
-      region.clear()
-      region.appendBytes(a)
-
-      hadoopConf.writeObjectFile(path) { out =>
-        out.writeObject(region)
-      }
-
-      val region2 = hadoopConf.readObjectFile(path) { in =>
-        in.readObject().asInstanceOf[Region]
-      }
-
-      assert(region2.size.toInt == a.length)
-      val a2 = region2.loadBytes(0, region2.size.toInt)
-      assert(a2 sameElements a)
-
-      true
-    }
-  }
-
-  @Test def testRegionKryo() {
-    val conf = sc.getConf // force sc
-    val ser = SparkEnv.get.serializer.asInstanceOf[KryoSerializer]
-    val kryo = ser.newKryo()
-
-    val region = Region()
-    val path = tmpDir.createTempFile(extension = "ser")
-    val g = Gen.buildableOf[Array](arbitrary[Byte])
-    val p = Prop.forAll(g) { (a: Array[Byte]) =>
-      region.clear()
-      region.appendBytes(a)
-
-      hadoopConf.writeKryoFile(path) { out =>
-        kryo.writeObject(out, region)
-      }
-
-      val region2 = hadoopConf.readKryoFile(path) { in =>
-        kryo.readObject[Region](in, classOf[Region])
-      }
-
-      assert(region2.size.toInt == a.length)
-      val a2 = region2.loadBytes(0, region2.size.toInt)
-      assert(a2 sameElements a)
-
-      true
-    }
-  }
+  
+  // Tests for Region serialization have been removed since an off-heap Region
+  // contains absolute addresses and can't be serialized/deserialized without 
+  // knowing the RegionValue Type.
 }

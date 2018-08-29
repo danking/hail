@@ -1,327 +1,22 @@
 package is.hail.methods
 
-import java.io.{ObjectInputStream, ObjectOutputStream}
-
-import is.hail.HailContext
 import is.hail.annotations._
 import is.hail.expr._
 import is.hail.expr.types._
 import is.hail.stats._
 import is.hail.utils._
 import is.hail.variant._
-import org.apache.spark.SparkContext
+import org.apache.spark.sql.Row
 import org.apache.spark.util.StatCounter
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
+import scala.collection.JavaConverters._
+import scala.language.implicitConversions
 
 object Aggregators {
 
-  def buildRowAggregationsByKey(vsm: MatrixTable, nKeys: Int, keyMap: Array[Int], ec: EvalContext): (RegionValue) => Array[() => Unit] =
-    buildRowAggregationsByKey(vsm.sparkContext, vsm.matrixType, vsm.value.globals, vsm.value.colValues, nKeys, keyMap, ec)
-
-  def buildRowAggregationsByKey(sc: SparkContext,
-    typ: MatrixType,
-    globals: BroadcastValue,
-    colValues: IndexedSeq[Annotation],
-    nKeys: Int,
-    keyMap: Array[Int],
-    ec: EvalContext): (RegionValue) => Array[() => Unit] = {
-
-    val aggregations = ec.aggregations
-    if (aggregations.isEmpty)
-      return { rv => Array.fill[() => Unit](nKeys) { () => Unit } }
-
-    val localA = ec.a
-    val localNCols = colValues.length
-    val localAnnotationsBc = sc.broadcast(colValues)
-    val globalsBc = globals.broadcast
-
-    val fullRowType = typ.rvRowType
-    val localEntriesIndex = typ.entriesIdx
-
-    { (rv: RegionValue) =>
-      val fullRow = new UnsafeRow(fullRowType, rv)
-      val row = fullRow.deleteField(localEntriesIndex)
-
-      val aggs = MultiArray2.fill[Aggregator](nKeys, aggregations.size)(null)
-      var nk = 0
-      while (nk < nKeys) {
-        var nagg = 0
-        while (nagg < aggregations.size) {
-          aggs.update(nk, nagg, aggregations(nagg)._3.copy())
-          nagg += 1
-        }
-        nk += 1
-      }
-      localA(0) = globalsBc.value
-      localA(1) = row
-      val is = fullRow.getAs[IndexedSeq[Annotation]](localEntriesIndex)
-
-      var i = 0
-      while (i < localNCols) {
-        localA(2) = is(i)
-        if (keyMap(i) != -1) {
-          localA(3) = localAnnotationsBc.value(i)
-
-          var j = 0
-          while (j < aggs.n2) {
-            aggregations(j)._2(aggs(keyMap(i), j).seqOp)
-            j += 1
-          }
-        }
-        i += 1
-      }
-      Array.tabulate[() => Unit](nKeys) { k => { () => {
-        var j = 0
-        while (j < aggs.n2) {
-          aggregations(j)._1.v = aggs(k, j).result
-          j += 1
-        }
-      }}}
-    }
-  }
-
-  def buildRowAggregations(vsm: MatrixTable, ec: EvalContext): Option[(RegionValue) => Unit] =
-    buildRowAggregations(vsm.sparkContext, vsm.matrixType, vsm.value.globals, vsm.value.colValues, ec)
-
-  def buildRowAggregations(sc: SparkContext,
-    typ: MatrixType,
-    globals: BroadcastValue,
-    colValues: IndexedSeq[Annotation],
-    ec: EvalContext): Option[(RegionValue) => Unit] = {
-
-    val aggregations = ec.aggregations
-    if (aggregations.isEmpty)
-      return None
-
-    val localA = ec.a
-    val localNCols = colValues.length
-    val colValuesBc = sc.broadcast(colValues)
-    val fullRowType = typ.rvRowType
-    val localEntriesIndex = typ.entriesIdx
-    val globalsBc = globals.broadcast
-
-    Some({ (rv: RegionValue) =>
-
-      val fullRow = new UnsafeRow(fullRowType, rv)
-      val row = fullRow.deleteField(localEntriesIndex)
-
-      val aggs = aggregations.map { case (_, _, agg0) => agg0.copy() }
-
-      ec.set(0, globalsBc.value)
-      ec.set(1, row)
-
-      val is = fullRow.getAs[IndexedSeq[Annotation]](localEntriesIndex)
-      var i = 0
-
-      while (i < localNCols) {
-        ec.set(2, is(i))
-        ec.set(3, colValuesBc.value(i))
-
-        var j = 0
-        while (j < aggs.size) {
-          aggregations(j)._2(aggs(j).seqOp)
-          j += 1
-        }
-
-        i += 1
-      }
-
-      i = 0
-      while (i < aggs.size) {
-        aggregations(i)._1.v = aggs(i).result
-        i += 1
-      }
-    })
-  }
-
-  def buildColAggregations(hc: HailContext, value: MatrixValue, ec: EvalContext): Option[(Int) => Unit] = {
-
-    val aggregations = ec.aggregations
-
-    if (aggregations.isEmpty)
-      return None
-
-    val localA = ec.a
-    val localNCols = value.nCols
-    val globalsBc = value.globals.broadcast
-    val localColValuesBc = value.colValuesBc
-
-    val nAggregations = aggregations.length
-    val nCols = value.nCols
-    val depth = treeAggDepth(hc, value.nPartitions)
-
-    val baseArray = MultiArray2.fill[Aggregator](nCols, nAggregations)(null)
-    for (i <- 0 until nCols; j <- 0 until nAggregations) {
-      baseArray.update(i, j, aggregations(j)._3.copy())
-    }
-
-    val fullRowType = value.typ.rvRowType
-    val localEntriesIndex = value.typ.entriesIdx
-
-    val result = value.rvd.treeAggregate(baseArray)({ case (arr, rv) =>
-      val fullRow = new UnsafeRow(fullRowType, rv)
-      val row = fullRow.deleteField(localEntriesIndex)
-
-      localA(0) = globalsBc.value
-      localA(3) = row
-
-      val gs = fullRow.getAs[IndexedSeq[Annotation]](localEntriesIndex)
-
-      var i = 0
-      while (i < localNCols) {
-        localA(1) = localColValuesBc.value(i)
-        localA(2) = gs(i)
-
-        var j = 0
-        while (j < nAggregations) {
-          aggregations(j)._2(arr(i, j).seqOp)
-          j += 1
-        }
-        i += 1
-      }
-
-      // clean up
-      localA.indices.foreach { i =>
-        localA(i) = null
-      }
-
-      arr
-    }, { case (arr1, arr2) =>
-      for (i <- 0 until nCols; j <- 0 until nAggregations) {
-        val a1 = arr1(i, j)
-        a1.combOp(arr2(i, j).asInstanceOf[a1.type])
-      }
-      arr1
-    }, depth = depth)
-
-    Some((i: Int) => {
-      for (j <- 0 until nAggregations) {
-        aggregations(j)._1.v = result(i, j).result
-      }
-    })
-  }
-
-  def makeColFunctions(vsm: MatrixTable, aggExpr: String): ColFunctions = {
-    val ec = vsm.colEC
-
-    val (resultNames, resultTypes, aggF) = Parser.parseNamedExprs(aggExpr, ec)
-
-    val newType = TStruct(resultNames.zip(resultTypes): _*)
-
-    val localNCols = vsm.numCols
-    val localColValuesBc = vsm.colValuesBc
-
-    val aggregations = ec.aggregations
-    val nAggregations = aggregations.size
-
-    val globalsBc = vsm.globals.broadcast
-
-    val ma = MultiArray2.fill[Aggregator](localNCols, nAggregations)(null)
-    val zVal = { () =>
-      for (i <- 0 until localNCols; j <- 0 until nAggregations) {
-        ma.update(i, j, aggregations(j)._3.copy())
-      }
-      ma
-    }
-
-    val fullRowType = vsm.rvRowType
-    val localEntriesIndex = vsm.entriesIndex
-
-
-    val seqOp = (ma: MultiArray2[Aggregator], rv: RegionValue) => {
-      val fullRow = new UnsafeRow(fullRowType, rv)
-      val row = fullRow.deleteField(localEntriesIndex)
-
-      val is = fullRow.getAs[IndexedSeq[Annotation]](localEntriesIndex)
-
-      var i = 0
-      while (i < localNCols) {
-        ec.setAll(globalsBc.value,
-          localColValuesBc.value(i),
-          is(i),
-          row)
-
-        var j = 0
-        while (j < nAggregations) {
-          aggregations(j)._2(ma(i, j).seqOp)
-          j += 1
-        }
-        i += 1
-      }
-      ma
-    }
-
-    val resultOp = (ma: MultiArray2[Aggregator], rvb: RegionValueBuilder) => {
-      ec.set(0, globalsBc.value)
-      rvb.startArray(localNCols)
-
-      var i = 0
-      while (i < localNCols) {
-        ec.set(2, localColValuesBc.value(i))
-        var j = 0
-        while (j < nAggregations) {
-          aggregations(j)._1.v = ma(i, j).result
-          j += 1
-        }
-        rvb.startStruct()
-        val fields = aggF()
-        var k = 0
-        while (k < fields.size) {
-          rvb.addAnnotation(newType.types(k), fields(k))
-          k += 1
-        }
-        rvb.endStruct()
-        i += 1
-      }
-      rvb.endArray()
-    }
-
-    ColFunctions(zVal, seqOp, resultOp, newType)
-  }
-
-  case class ColFunctions(
-    zero: () => MultiArray2[Aggregator],
-    seqOp: (MultiArray2[Aggregator], RegionValue) => MultiArray2[Aggregator],
-    resultOp: (MultiArray2[Aggregator], RegionValueBuilder) => Unit,
-    resultType: TStruct)
-
-  def makeFunctions[T](ec: EvalContext, setEC: (EvalContext, T) => Unit): (Array[Aggregator],
-    (Array[Aggregator], T) => Array[Aggregator],
-    (Array[Aggregator], Array[Aggregator]) => Array[Aggregator],
-    (Array[Aggregator] => Unit)) = {
-
-    val aggregations = ec.aggregations
-
-    val zVal = aggregations.map { case (_, _, agg0) => agg0.copy() }.toArray
-
-    val seqOp = (array: Array[Aggregator], t: T) => {
-      setEC(ec, t)
-      var i = 0
-      while (i < array.length) {
-        aggregations(i)._2(array(i).seqOp)
-        i += 1
-      }
-      array
-    }
-
-    val combOp = (arr1: Array[Aggregator], arr2: Array[Aggregator]) => {
-      var i = 0
-      while (i < arr1.length) {
-        val a1 = arr1(i)
-        a1.combOp(arr2(i).asInstanceOf[a1.type])
-        i += 1
-      }
-      arr1
-    }
-
-    val resultOp = (aggs: Array[Aggregator]) =>
-      (aggs, aggregations).zipped.foreach { case (agg, (b, _, _)) => b.v = agg.result }
-
-    (zVal, seqOp, combOp, resultOp)
-  }
 }
 
 class CountAggregator() extends TypedAggregator[Long] {
@@ -509,7 +204,7 @@ class InfoScoreAggregator extends TypedAggregator[Annotation] {
 
   def seqOp(x: Any) {
     if (x != null)
-      _state.merge(x.asInstanceOf[IndexedSeq[Double]])
+      _state.merge(x.asInstanceOf[IndexedSeq[java.lang.Double]])
   }
 
   def combOp(agg2: this.type) {
@@ -677,7 +372,7 @@ class MinAggregator[T, BoxedT >: Null](implicit ev: NumericPair[T, BoxedT], ct: 
   def copy() = new MinAggregator[T, BoxedT]()
 }
 
-class CallStatsAggregator(allelesF: (Any) => Any)
+class CallStatsAggregator(nAllelesF: (Any) => Any)
   extends TypedAggregator[Annotation] {
 
   var first = true
@@ -693,9 +388,9 @@ class CallStatsAggregator(allelesF: (Any) => Any)
     if (first) {
       first = false
 
-      val alleles = allelesF(x)
-      if (alleles != null)
-        combiner = new CallStatsCombiner(alleles.asInstanceOf[IndexedSeq[String]])
+      val nAlleles = nAllelesF(x)
+      if (nAlleles != null)
+        combiner = new CallStatsCombiner(nAlleles.asInstanceOf[Int])
     }
 
     if (combiner != null && x != null)
@@ -705,18 +400,26 @@ class CallStatsAggregator(allelesF: (Any) => Any)
   def combOp(agg2: this.type) {
     if (agg2.combiner != null) {
       if (combiner == null)
-        combiner = new CallStatsCombiner(agg2.combiner.alleles)
+        combiner = new CallStatsCombiner(agg2.combiner.nAlleles)
       combiner.merge(agg2.combiner)
     }
   }
 
-  def copy() = new CallStatsAggregator(allelesF)
+  def copy() = new CallStatsAggregator(nAllelesF)
 }
 
 class InbreedingAggregator(getAF: (Call) => Any) extends TypedAggregator[Annotation] {
   var _state = new InbreedingCombiner()
 
   def result = _state.asAnnotation
+
+  def seqOp(x: Any, af: Any) = {
+    if (x != null) {
+      val gt = x.asInstanceOf[Call]
+      if (af != null)
+        _state.merge(gt, af.asInstanceOf[Double])
+    }
+  }
 
   def seqOp(x: Any) = {
     if (x != null) {
@@ -761,9 +464,6 @@ class TakeByAggregator[T](var t: Type, var f: (Any) => Any, var n: Int)(implicit
 
   var ord: Ordering[(Any, Any)] = makeOrd()
 
-  // PriorityQueue is not serializable
-  // https://issues.scala-lang.org/browse/SI-7568
-  // fixed in Scala 2.11.0-M7
   var _state = if (ord != null)
     new mutable.PriorityQueue[(Any, Any)]()(ord)
   else
@@ -776,7 +476,7 @@ class TakeByAggregator[T](var t: Type, var f: (Any) => Any, var n: Int)(implicit
     seqOp(cx, f(cx))
   }
 
-  private def seqOp(x: Any, sortKey: Any) = {
+  def seqOp(x: Any, sortKey: Any) = {
     val p = (x, sortKey)
     if (_state.length < n)
       _state += p
@@ -793,23 +493,109 @@ class TakeByAggregator[T](var t: Type, var f: (Any) => Any, var n: Int)(implicit
   }
 
   def copy() = new TakeByAggregator(t, f, n)
+}
 
-  private def writeObject(oos: ObjectOutputStream) {
-    oos.writeObject(t)
-    oos.writeObject(f)
-    oos.writeInt(n)
-    oos.writeObject(tord)
-    oos.writeObject(_state.toArray[(Any, Any)])
+class LinearRegressionAggregator(xF: (Any) => Any, k: Int, k0: Int) extends TypedAggregator[Any] {
+  var combiner = new LinearRegressionCombiner(k, k0)
+
+  def seqOp(a: Any) = {
+    if (a != null) {
+      val y = a.asInstanceOf[Double]
+      val x = xF(y)
+      if (x != null)
+        combiner.merge(y, x.asInstanceOf[Array[Double]])
+    }
   }
 
-  private def readObject(ois: ObjectInputStream) {
-    t = ois.readObject().asInstanceOf[Type]
-    f = ois.readObject().asInstanceOf[(Any) => Any]
-    n = ois.readInt()
-    tord = ois.readObject().asInstanceOf[Ordering[T]]
-    ord = makeOrd()
-
-    val elems = ois.readObject().asInstanceOf[Array[(Any, Any)]]
-    _state = mutable.PriorityQueue[(Any, Any)](elems: _*)(ord)
+  def seqOp(y: Any, x: Any) {
+    if (y != null && x != null) {
+      combiner.merge(y.asInstanceOf[Double], x.asInstanceOf[IndexedSeq[Double]])
+    }
   }
+
+  def combOp(agg2: this.type) {
+    combiner.merge(agg2.combiner)
+  }
+
+  def result: Annotation = combiner.result()
+
+  def copy() = {
+    val lra = new LinearRegressionAggregator(xF, k, k0)
+    lra.combiner = combiner.copy()
+    lra
+  }
+}
+
+class KeyedAggregator[T, K](aggregator: TypedAggregator[T]) extends TypedAggregator[Map[Any, T]] {
+  private val m = new java.util.HashMap[Any, TypedAggregator[T]]()
+
+  def result = m.asScala.map { case (k, v) => (k, v.result) }.toMap
+
+  def seqOp(x: Any) {
+    val cx = x.asInstanceOf[Row]
+    if (cx != null)
+      seqOp(cx.get(0), cx.get(1))
+    else
+      seqOp(null, null)
+  }
+
+  private def seqOp(key: Any, x: Any) {
+    var agg = m.get(key)
+    if (agg == null) {
+      agg = aggregator.copy()
+      m.put(key, agg)
+    }
+    val r = x.asInstanceOf[Row]
+    agg match {
+      case tagg: KeyedAggregator[_, _] => agg.seqOp(x)
+      case tagg: CountAggregator => agg.seqOp(0)
+      case tagg: InbreedingAggregator =>
+        agg.asInstanceOf[InbreedingAggregator].seqOp(r.get(0), r.get(1))
+      case tagg: TakeByAggregator[_] =>
+        agg.asInstanceOf[TakeByAggregator[_]].seqOp(r.get(0), r.get(1))
+      case _ => agg.seqOp(r.get(0))
+    }
+  }
+
+  def combOp(agg2: this.type) {
+    agg2.m.asScala.foreach { case (k, v2) =>
+      val agg = m.get(k)
+      if (agg == null)
+        m.put(k, v2)
+      else {
+        agg.combOp(v2.asInstanceOf[agg.type])
+      }
+    }
+  }
+
+  def copy() = new KeyedAggregator(aggregator.copy())
+}
+
+class DownsampleAggregator(nDivisions: Int, getYL: Any => (Any, Any)) extends TypedAggregator[IndexedSeq[Row]] {
+  require(nDivisions > 0)
+
+  var _state = new DownsampleCombiner(nDivisions)
+
+  def result: IndexedSeq[Row] = _state.toRes
+
+  def seqOp(x: Any, y: Any, l: Any) = {
+    if (x != null && y != null) {
+      val labelArgs = l.asInstanceOf[IndexedSeq[String]]
+      _state.merge(x.asInstanceOf[Double], y.asInstanceOf[Double], labelArgs)
+    }
+  }
+
+  def seqOp(x: Any) = {
+    if (x != null) {
+      val y = getYL(x)._1
+      val l = getYL(x)._2
+      val labelArgs = l.asInstanceOf[IndexedSeq[String]]
+      if (y != null)
+        _state.merge(x.asInstanceOf[Double], y.asInstanceOf[Double], labelArgs)
+    }
+  }
+
+  def combOp(agg2: this.type) = _state.merge(agg2._state)
+
+  def copy() = new DownsampleAggregator(nDivisions, getYL)
 }

@@ -31,6 +31,7 @@ These functions are exposed at the top level of the module, e.g. ``hl.case``.
     null
     is_missing
     is_defined
+    coalesce
     or_else
     or_missing
     range
@@ -68,6 +69,7 @@ These functions are exposed at the top level of the module, e.g. ``hl.case``.
     map
     flatmap
     zip
+    zip_with_index
     flatten
     any
     all
@@ -76,17 +78,18 @@ These functions are exposed at the top level of the module, e.g. ``hl.case``.
     find
     group_by
     len
-    index
 
 .. rubric:: Numeric functions
 
 .. autosummary::
 
     abs
+    approx_equal
     exp
     is_nan
     log
     log10
+    sign
     sqrt
     int
     int32
@@ -94,6 +97,9 @@ These functions are exposed at the top level of the module, e.g. ``hl.case``.
     float
     float32
     float64
+    floor
+    ceil
+    uniroot
 
 .. rubric:: Numeric collection functions
 
@@ -112,20 +118,22 @@ These functions are exposed at the top level of the module, e.g. ``hl.case``.
 
 .. autosummary::
 
+    format
     json
     hamming
     delimit
+    entropy
 
 .. rubric:: Statistical functions
 
 .. autosummary::
 
-    chisq
+    chi_squared_test
     fisher_exact_test
-    ctt
+    contingency_table_test
     dbeta
     dpois
-    hardy_weinberg_p
+    hardy_weinberg_test
     pchisqtail
     pnorm
     ppois
@@ -138,6 +146,10 @@ These functions are exposed at the top level of the module, e.g. ``hl.case``.
 .. autosummary::
 
     rand_bool
+    rand_beta
+    rand_cat
+    rand_dirichlet
+    rand_gamma
     rand_norm
     rand_pois
     rand_unif
@@ -147,6 +159,7 @@ These functions are exposed at the top level of the module, e.g. ``hl.case``.
 .. autosummary::
 
     locus
+    locus_from_global_position
     locus_interval
     parse_locus
     parse_variant
@@ -165,7 +178,12 @@ These functions are exposed at the top level of the module, e.g. ``hl.case``.
     is_indel
     is_star
     is_complex
+    is_valid_contig
+    is_valid_locus
     allele_type
     pl_dosage
     gp_dosage
     get_sequence
+    mendel_error_code
+    liftover
+    min_rep

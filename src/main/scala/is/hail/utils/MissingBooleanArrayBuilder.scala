@@ -2,12 +2,12 @@ package is.hail.utils
 
 import is.hail.expr.types._
 import is.hail.annotations._
-import scala.collection.mutable.BitSet
+import scala.collection.mutable
 
-class MissingBooleanArrayBuilder {
+class MissingBooleanArrayBuilder extends Serializable {
   private var len = 0
-  private val elements = new BitSet()
-  private val isMissing = new BitSet()
+  private var elements = new mutable.BitSet()
+  private var isMissing = new mutable.BitSet()
 
   def addMissing() {
     isMissing.add(len)
@@ -15,7 +15,8 @@ class MissingBooleanArrayBuilder {
   }
 
   def add(x: Boolean) {
-    elements.add(len)
+    if (x)
+      elements.add(len)
     len += 1
   }
 
@@ -23,14 +24,11 @@ class MissingBooleanArrayBuilder {
 
   def foreach(whenMissing: (Int) => Unit)(whenPresent: (Int, Boolean) => Unit) {
     var i = 0
-    var j = 0
     while (i < len) {
       if (isMissing(i))
         whenMissing(i)
-      else {
-        whenPresent(i, elements(j))
-        j += 1
-      }
+      else
+        whenPresent(i, elements(i))
       i += 1
     }
   }
@@ -48,5 +46,19 @@ class MissingBooleanArrayBuilder {
       i += 1
     }
     rvb.endArray()
+  }
+
+  def clear() {
+    len = 0
+    elements.clear()
+    isMissing.clear()
+  }
+
+  override def clone(): MissingBooleanArrayBuilder = {
+    val ab = new MissingBooleanArrayBuilder()
+    ab.len = len
+    ab.elements = elements.clone()
+    ab.isMissing = isMissing.clone()
+    ab
   }
 }

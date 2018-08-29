@@ -10,11 +10,10 @@ object SparkSuite {
   lazy val hc = HailContext(master = Option(System.getProperty("hail.master")),
     appName = "Hail.TestNG",
     local = "local[2]",
-    minBlockSize = 0)
+    minBlockSize = 0, logFile = "/tmp/hail.log")
 }
 
 class SparkSuite extends TestNGSuite {
-
   lazy val hc: HailContext = SparkSuite.hc
 
   lazy val sc: SparkContext = hc.sc

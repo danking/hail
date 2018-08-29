@@ -12,7 +12,7 @@ import org.apache.hadoop.fs.PathIOException
 import org.apache.hadoop.mapred.FileSplit
 import org.apache.hadoop.mapreduce.lib.input.{FileSplit => NewFileSplit}
 import org.apache.log4j.Level
-import org.apache.spark.Partition
+import org.apache.spark.{Partition, TaskContext}
 import org.json4s.JsonAST.JArray
 import org.json4s.jackson.Serialization
 import org.json4s.reflect.TypeInfo
@@ -185,6 +185,16 @@ package object utils extends Logging
   def D_>=(a: Double, b: Double, tolerance: Double = defaultTolerance): Boolean =
     (a == b) || a - b >= -D_epsilon(a, b, tolerance)
 
+  def D0_==(x: Double, y: Double, tolerance: Double = defaultTolerance): Boolean =
+    if (x.isNaN)
+      y.isNaN
+    else if (x.isPosInfinity)
+      y.isPosInfinity
+    else if (x.isNegInfinity)
+      y.isNegInfinity
+    else
+      D_==(x, y, tolerance)
+
   def flushDouble(a: Double): Double =
     if (math.abs(a) < java.lang.Double.MIN_NORMAL) 0.0 else a
 
@@ -205,7 +215,7 @@ package object utils extends Logging
     .filter(s => !s.isEmpty)
 
   def prettyIdentifier(str: String): String = {
-    if (str.matches( """\p{javaJavaIdentifierStart}\p{javaJavaIdentifierPart}*"""))
+    if (str.matches("""\p{javaJavaIdentifierStart}\p{javaJavaIdentifierPart}*"""))
       str
     else
       s"`${ StringEscapeUtils.escapeString(str, backticked = true) }`"
@@ -537,6 +547,12 @@ package object utils extends Logging
     "part-" + StringUtils.leftPad(is, d, "0")
   }
 
+  def partFile(d: Int, i: Int, ctx: TaskContext): String = {
+    val rng = new java.security.SecureRandom()
+    val fileUUID = new java.util.UUID(rng.nextLong(), rng.nextLong())
+    s"${ partFile(d, i) }-${ ctx.stageId() }-${ ctx.partitionId() }-${ ctx.attemptNumber() }-$fileUUID"
+  }
+
   def mangle(strs: Array[String], formatter: Int => String = "_%d".format(_)): (Array[String], Array[(String, String)]) = {
     val b = new ArrayBuilder[String]
 
@@ -561,15 +577,87 @@ package object utils extends Logging
   }
 
   def lift[T, S](pf: PartialFunction[T, S]): (T) => Option[S] = pf.lift
+
   def flatLift[T, S](pf: PartialFunction[T, Option[S]]): (T) => Option[S] = pf.flatLift
-  def optMatch[T, S](a: T)(pf : PartialFunction[T, S]): Option[S] = lift(pf)(a)
 
+  def optMatch[T, S](a: T)(pf: PartialFunction[T, S]): Option[S] = lift(pf)(a)
 
-  def using[R <: Closeable, T](r: R)(consume: (R) => T): T = {
+  def using[R <: AutoCloseable, T](r: R)(consume: (R) => T): T = {
     try {
       consume(r)
     } finally {
       r.close()
+    }
+  }
+
+  def point[T]()(implicit t: Pointed[T]): T = t.point
+
+  def partition(n: Int, k: Int): Array[Int] = {
+    if (k == 0) {
+      assert(n == 0)
+      return Array.empty[Int]
+    }
+
+    assert(n >= 0)
+    assert(k > 0)
+    val parts = Array.tabulate(k)(i => (n - i + k - 1) / k)
+    assert(parts.sum == n)
+    assert(parts.max - parts.min <= 1)
+    parts
+  }
+
+  def matchErrorToNone[T, U](f: (T) => U): (T) => Option[U] = (x: T) => {
+    try {
+      Some(f(x))
+    } catch {
+      case _: MatchError => None
+    }
+  }
+
+  def charRegex(c: Char): String = {
+    // See: https://docs.oracle.com/javase/tutorial/essential/regex/literals.html
+    val metacharacters = "<([{\\^-=$!|]})?*+.>"
+    val s = c.toString
+    if (metacharacters.contains(c))
+      "\\" + s
+    else
+      s
+  }
+
+  def toMapIfUnique[K, K2, V](
+    kvs: Traversable[(K, V)]
+  )(keyBy: K => K2
+  ): Either[Map[K2, Traversable[K]], Map[K2, V]] = {
+    val grouped = kvs.groupBy(x => keyBy(x._1))
+
+    val dupes = grouped.filter { case (k, m) => m.size != 1 }
+
+    if (dupes.nonEmpty) {
+      Left(dupes.map { case (k, m) => k -> m.map(_._1) })
+    } else {
+      Right(grouped
+        .map { case (k, m) => k -> m.map(_._2).head }
+        .toMap)
+    }
+  }
+
+  def getHeadPartitionCounts(original: IndexedSeq[Long], n: Long): IndexedSeq[Long] = {
+    val scan = original.scanLeft(0L)(_ + _).tail
+    if (scan(scan.length - 1) < n)
+      original
+    else {
+      val (lastSum, lastIdx) = scan.iterator.zipWithIndex.filter { case (sum, _) => sum >= n }.next()
+      val ab = new ArrayBuilder[Long](0)
+      var i = 0
+      while (i < lastIdx) {
+        ab += original(i)
+        i += 1
+      }
+      if (lastIdx == 0)
+        ab += n
+      else
+        ab += n - scan(lastIdx - 1)
+      ab.result()
     }
   }
 }

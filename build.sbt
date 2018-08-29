@@ -27,7 +27,7 @@ lazy val root = (project in file(".")).
         , hadoopClient
         , "net.jpountz.lz4" % "lz4" % "1.3.0"
         , "org.scalanlp" %% "breeze-natives" % si.breezeVersion
-        , "com.github.samtools" % "htsjdk" % "2.5.0"
+        , "com.github.samtools" % "htsjdk" % "2.14.2"
         , "org.slf4j" % "slf4j-api" % "1.7.25"
         , "org.http4s" %% "http4s-core" % "0.12.3"
         , "org.http4s" %% "http4s-server" % "0.12.3"
@@ -42,6 +42,7 @@ lazy val root = (project in file(".")).
         , "org.json4s" %% "json4s-core" % "3.2.10"
         , "org.json4s" %% "json4s-jackson" % "3.2.10"
         , "org.json4s" %% "json4s-ast" % "3.2.10"
+        , "org.elasticsearch" % "elasticsearch-spark-20_2.11" % "6.2.4"
         , "org.apache.solr" % "solr-solrj" % "6.2.0"
         , "com.datastax.cassandra" % "cassandra-driver-core" % "3.0.0"
         , "com.jayway.restassured" % "rest-assured" % "2.8.0"

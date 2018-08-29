@@ -20,6 +20,7 @@ class IntervalSuite extends TestNGSuite {
       e <- points
       is <- Array(true, false)
       ie <- Array(true, false)
+      if pord.lt(s, e) || (pord.equiv(s, e) && is && ie)
     } yield SetInterval(s, e, is, ie)
 
   val test_itrees: IndexedSeq[SetIntervalTree] =
@@ -31,13 +32,6 @@ class IntervalSuite extends TestNGSuite {
           }
       } :+ SetIntervalTree(test_intervals.toArray.zipWithIndex)
 
-
-  @Test def interval_agrees_with_set_interval_definitely_empty() {
-    for (set_interval <- test_intervals) {
-      val interval = set_interval.interval
-      assertEquals(interval.definitelyEmpty(pord), set_interval.definitelyEmpty())
-    }
-  }
 
   @Test def interval_agrees_with_set_interval_greater_than_point() {
     for (set_interval <- test_intervals; p <- points) {
@@ -72,7 +66,7 @@ class IntervalSuite extends TestNGSuite {
     for (set_interval1 <- test_intervals; set_interval2 <- test_intervals) {
       val interval1 = set_interval1.interval
       val interval2 = set_interval2.interval
-      assertEquals(interval1.mayOverlap(pord, interval2), set_interval1.probablyOverlaps(set_interval2))
+      assertEquals(interval1.overlaps(pord, interval2), set_interval1.probablyOverlaps(set_interval2))
     }
   }
 
@@ -80,7 +74,7 @@ class IntervalSuite extends TestNGSuite {
     for (set_interval1 <- test_intervals; set_interval2 <- test_intervals) {
       val interval1 = set_interval1.interval
       val interval2 = set_interval2.interval
-      assertEquals(interval1.definitelyDisjoint(pord, interval2), set_interval1.definitelyDisjoint(set_interval2))
+      assertEquals(interval1.isDisjointFrom(pord, interval2), set_interval1.definitelyDisjoint(set_interval2))
     }
   }
 
@@ -124,7 +118,7 @@ class IntervalSuite extends TestNGSuite {
     for (set_interval1 <- test_intervals; set_interval2 <- test_intervals) {
       val interval1 = set_interval1.interval
       val interval2 = set_interval2.interval
-      assertEquals(interval1.intersect(pord, interval2), set_interval1.intersect(set_interval2).interval)
+      assertEquals(interval1.intersect(pord, interval2), set_interval1.intersect(set_interval2).map(_.interval))
     }
   }
 
@@ -148,8 +142,8 @@ class IntervalSuite extends TestNGSuite {
       val atree = set_itree.annotationTree
       val itree = set_itree.intervalTree
       val interval = set_interval.interval
-      assertEquals(itree.probablyOverlaps(pord, interval), set_itree.probablyOverlaps(set_interval))
-      assertEquals(atree.probablyOverlaps(pord, interval), set_itree.probablyOverlaps(set_interval))
+      assertEquals(itree.overlaps(pord, interval), set_itree.probablyOverlaps(set_interval))
+      assertEquals(atree.overlaps(pord, interval), set_itree.probablyOverlaps(set_interval))
     }
   }
 
@@ -157,8 +151,8 @@ class IntervalSuite extends TestNGSuite {
     for (set_itree <- test_itrees) {
       val atree = set_itree.annotationTree
       val itree = set_itree.intervalTree
-      assertEquals(itree.definitelyEmpty(pord), set_itree.definitelyEmpty())
-      assertEquals(atree.definitelyEmpty(pord), set_itree.definitelyEmpty())
+      assertEquals(itree.isEmpty(pord), set_itree.definitelyEmpty())
+      assertEquals(atree.isEmpty(pord), set_itree.definitelyEmpty())
     }
   }
 
@@ -170,8 +164,8 @@ class IntervalSuite extends TestNGSuite {
       val atree = set_itree.annotationTree
       val itree = set_itree.intervalTree
       val interval = set_interval.interval
-      assertEquals(itree.definitelyDisjoint(pord, interval), set_itree.definitelyDisjoint(set_interval))
-      assertEquals(atree.definitelyDisjoint(pord, interval), set_itree.definitelyDisjoint(set_interval))
+      assertEquals(itree.isDisjointFrom(pord, interval), set_itree.definitelyDisjoint(set_interval))
+      assertEquals(atree.isDisjointFrom(pord, interval), set_itree.definitelyDisjoint(set_interval))
     }
   }
 
@@ -275,14 +269,15 @@ case class SetInterval(start: Int, end: Int, includesStart: Boolean, includesEnd
     else None
   }
 
-  def intersect(other: SetInterval): SetInterval = {
+  def intersect(other: SetInterval): Option[SetInterval] = {
     val intersection = doubledPointSet.intersect(other.doubledPointSet)
-    if (intersection.isEmpty)
-      SetInterval(start, start, false, false)
+    if (this.definitelyDisjoint(other))
+      None
     else {
+      assert(intersection.nonEmpty)
       val start = intersection.min(pord.toOrdering)
       val end = intersection.max(pord.toOrdering)
-      SetInterval(start / 2, (end + 1) / 2, start % 2 == 0, end % 2 == 0)
+      Some(SetInterval(start / 2, (end + 1) / 2, start % 2 == 0, end % 2 == 0))
     }
   }
 }

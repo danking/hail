@@ -1,6 +1,5 @@
 from hail.typecheck import *
 from hail.utils.java import *
-from hail.genetics.reference_genome import reference_genome_type
 import hail as hl
 
 interval_type = lazy()
@@ -10,7 +9,7 @@ class Interval(object):
     """
     An object representing a range of values between `start` and `end`.
 
-    >>> interval = hl.Interval(3, 6)
+    >>> interval2 = hl.Interval(3, 6)
 
     Parameters
     ----------
@@ -81,10 +80,8 @@ class Interval(object):
         Examples
         --------
 
-        .. doctest::
-
-            >>> interval.start
-            3
+        >>> interval2.start
+        3
 
         Returns
         -------
@@ -102,10 +99,8 @@ class Interval(object):
         Examples
         --------
 
-        .. doctest::
-
-            >>> interval.end
-            6
+        >>> interval2.end
+        6
 
         Returns
         -------
@@ -123,10 +118,8 @@ class Interval(object):
         Examples
         --------
 
-        .. doctest::
-
-            >>> interval.includes_start
-            True
+        >>> interval2.includes_start
+        True
 
         Returns
         -------
@@ -144,10 +137,8 @@ class Interval(object):
         Examples
         --------
 
-        .. doctest::
-
-            >>> interval.includes_end
-            False
+        >>> interval2.includes_end
+        False
 
         Returns
         -------
@@ -165,10 +156,8 @@ class Interval(object):
         Examples
         --------
 
-        .. doctest::
-
-            >>> interval.point_type
-            tint32
+        >>> interval2.point_type
+        tint32
 
         Returns
         -------
@@ -183,13 +172,11 @@ class Interval(object):
         Examples
         --------
 
-        .. doctest::
+        >>> interval2.contains(5)
+        True
 
-            >>> interval.contains(5)
-            True
-
-            >>> interval.contains(6)
-            False
+        >>> interval2.contains(6)
+        False
 
         Parameters
         ----------
@@ -223,6 +210,6 @@ class Interval(object):
 
         if self.point_type != interval.point_type:
             raise TypeError("'interval' must have the point type '{}', but found '{}'".format(self.point_type, interval.point_type))
-        return self._jrep.mayOverlap(self.point_type._jtype.ordering(), interval._jrep)
+        return self._jrep.overlaps(self.point_type._jtype.ordering(), interval._jrep)
 
 interval_type.set(Interval)

@@ -1,18 +1,22 @@
 package is.hail.rvd
 
-import is.hail.annotations.{RegionValue, WritableRegionValue}
+import is.hail.utils._
+import is.hail.annotations.{RegionValue, SafeRow, WritableRegionValue}
 import is.hail.expr.types.Type
 
 case class OrderedRVPartitionInfo(
   partitionIndex: Int,
   size: Int,
-  min: RegionValue,
-  max: RegionValue,
-  // min, max: RegionValue[pkType]
-  samples: Array[RegionValue],
-  sortedness: Int) {
+  min: Any,
+  max: Any,
+  // min, max: RegionValue[kType]
+  samples: Array[Any],
+  sortedness: Int
+) {
+  val interval = Interval(min, max, true, true)
+
   def pretty(t: Type): String = {
-    s"partitionIndex=$partitionIndex,size=$size,min=${min.pretty(t)},max=${max.pretty(t)},samples=${samples.map(_.pretty(t)).mkString(",")},sortedness=$sortedness"
+    s"partitionIndex=$partitionIndex,size=$size,min=$min,max=$max,samples=${samples.mkString(",")},sortedness=$sortedness"
   }
 }
 
@@ -21,61 +25,80 @@ object OrderedRVPartitionInfo {
   final val TSORTED = 1
   final val KSORTED = 2
 
-  def apply(typ: OrderedRVDType, sampleSize: Int, partitionIndex: Int, it: Iterator[RegionValue], seed: Int): OrderedRVPartitionInfo = {
-    val minF = WritableRegionValue(typ.pkType)
-    val maxF = WritableRegionValue(typ.pkType)
-    val prevF = WritableRegionValue(typ.kType)
+  def apply(
+    typ: OrderedRVDType,
+    partitionKey: Int,
+    sampleSize: Int,
+    partitionIndex: Int,
+    it: Iterator[RegionValue],
+    seed: Int,
+    producerContext: RVDContext
+  ): OrderedRVPartitionInfo = {
+    using(RVDContext.default) { localctx =>
+      val pkOrd = typ.copy(key = typ.key.take(partitionKey)).kOrd
+      val minF = WritableRegionValue(typ.kType, localctx.freshRegion)
+      val maxF = WritableRegionValue(typ.kType, localctx.freshRegion)
+      val prevF = WritableRegionValue(typ.kType, localctx.freshRegion)
 
-    assert(it.hasNext)
-    val f0 = it.next()
+      assert(it.hasNext)
+      val f0 = it.next()
 
-    minF.setSelect(typ.kType, typ.pkKFieldIdx, f0)
-    maxF.setSelect(typ.kType, typ.pkKFieldIdx, f0)
-    prevF.set(f0)
+      minF.set(f0)
+      maxF.set(f0)
+      prevF.set(f0)
 
-    var sortedness = KSORTED
+      var sortedness = KSORTED
 
-    val rng = new java.util.Random(seed)
-    val samples = new Array[WritableRegionValue](sampleSize)
+      val rng = new java.util.Random(seed)
+      val samples = new Array[WritableRegionValue](sampleSize)
 
-    var i = 0
+      var i = 0
 
-    if (sampleSize > 0) {
-      samples(0) = WritableRegionValue(typ.pkType, f0)
-      i += 1
-    }
-
-    while (it.hasNext) {
-      val f = it.next()
-
-      if (typ.kOrd.compare(f, prevF.value) < 0) {
-        if (typ.pkInKOrd.compare(f, prevF.value) < 0)
-          sortedness = UNSORTED
-        else
-          sortedness = sortedness.min(TSORTED)
+      if (sampleSize > 0) {
+        samples(0) = WritableRegionValue(typ.kType, f0, localctx.freshRegion)
+        i += 1
       }
 
-      if (typ.pkKOrd.compare(minF.value, f) > 0)
-        minF.setSelect(typ.kType, typ.pkKFieldIdx, f)
-      if (typ.pkKOrd.compare(maxF.value, f) < 0)
-        maxF.setSelect(typ.kType, typ.pkKFieldIdx, f)
+      producerContext.region.clear()
+      while (it.hasNext) {
+        val f = it.next()
 
-      prevF.set(f)
+        if (typ.kOrd.lt(f, prevF.value)) {
+          if (pkOrd.lt(f, prevF.value)) {
+            if (sortedness > UNSORTED)
+              log.info(s"unsorted: ${ f.pretty(typ.kType) }, ${ prevF.pretty }")
+            sortedness = UNSORTED
+          } else
+            if (sortedness > TSORTED)
+              log.info(s"tsorted: ${ f.pretty(typ.kType) }, ${ prevF.pretty }")
+            sortedness = sortedness.min(TSORTED)
+        }
 
-      if (i < sampleSize)
-        samples(i) = WritableRegionValue(typ.pkType, f)
-      else {
-        val j = rng.nextInt(i)
-        if (j < sampleSize)
-          samples(j).set(f)
+        if (typ.kOrd.lt(f, minF.value))
+          minF.set(f)
+        if (typ.kOrd.gt(f, maxF.value))
+          maxF.set(f)
+
+        prevF.set(f)
+
+        if (i < sampleSize)
+          samples(i) = WritableRegionValue(typ.kType, f, localctx.freshRegion)
+        else {
+          val j = if (i > 0) rng.nextInt(i) else 0
+          if (j < sampleSize)
+            samples(j).set(f)
+        }
+
+        producerContext.region.clear()
+        i += 1
       }
 
-      i += 1
-    }
+      val safe: RegionValue => Any = SafeRow(typ.kType, _)
 
-    OrderedRVPartitionInfo(partitionIndex, i,
-      minF.value, maxF.value,
-      Array.tabulate[RegionValue](math.min(i, sampleSize))(i => samples(i).value),
-      sortedness)
+      OrderedRVPartitionInfo(partitionIndex, i,
+        safe(minF.value), safe(maxF.value),
+        Array.tabulate[Any](math.min(i, sampleSize))(i => safe(samples(i).value)),
+        sortedness)
+    }
   }
 }

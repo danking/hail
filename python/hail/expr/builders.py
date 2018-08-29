@@ -1,5 +1,7 @@
 from hail.typecheck import typecheck_method
-from hail.expr.expressions import unify_types, unify_types_limited, expr_any, expr_bool, ExpressionException
+from hail.expr.expressions import unify_types, unify_types_limited, expr_any, \
+    expr_bool, ExpressionException, construct_expr
+from hail import ir
 
 
 class ConditionalBuilder(object):
@@ -23,19 +25,18 @@ class SwitchBuilder(ConditionalBuilder):
 
     Examples
     --------
-    .. doctest::
 
-        >>> csq = hl.literal('loss of function')
-        >>> expr = (hl.switch(csq)
-        ...           .when('synonymous', 1)
-        ...           .when('SYN', 1)
-        ...           .when('missense', 2)
-        ...           .when('MIS', 2)
-        ...           .when('loss of function', 3)
-        ...           .when('LOF', 3)
-        ...           .or_missing())
-        >>> hl.eval_expr(expr)
-        3
+    >>> csq = hl.literal('loss of function')
+    >>> expr = (hl.switch(csq)
+    ...           .when('synonymous', 1)
+    ...           .when('SYN', 1)
+    ...           .when('missense', 2)
+    ...           .when('MIS', 2)
+    ...           .when('loss of function', 3)
+    ...           .when('LOF', 3)
+    ...           .or_missing())
+    >>> expr.value
+    3
 
     Notes
     -----
@@ -71,10 +72,10 @@ class SwitchBuilder(ConditionalBuilder):
                 expr = cond(condition, then, expr)
             return expr
 
-        return bind(self._base, f)
+        return bind(f, self._base)
 
     @typecheck_method(value=expr_any, then=expr_any)
-    def when(self, value, then):
+    def when(self, value, then) -> 'SwitchBuilder':
         """Add a value test. If the `base` expression is equal to `value`, then
          returns `then`.
 
@@ -104,7 +105,7 @@ class SwitchBuilder(ConditionalBuilder):
         return self
 
     @typecheck_method(then=expr_any)
-    def when_missing(self, then):
+    def when_missing(self, then) -> 'SwitchBuilder':
         """Add a test for missingness. If the `base` expression is missing,
         returns `then`.
 
@@ -176,16 +177,15 @@ class CaseBuilder(ConditionalBuilder):
 
     Examples
     --------
-    .. doctest::
 
-        >>> x = hl.literal('foo bar baz')
-        >>> expr = (hl.case()
-        ...           .when(x[:3] == 'FOO', 1)
-        ...           .when(x.length() == 11, 2)
-        ...           .when(x == 'secret phrase', 3)
-        ...           .default(0))
-        >>> hl.eval_expr(expr)
-        2
+    >>> x = hl.literal('foo bar baz')
+    >>> expr = (hl.case()
+    ...           .when(x[:3] == 'FOO', 1)
+    ...           .when(x.length() == 11, 2)
+    ...           .when(x == 'secret phrase', 3)
+    ...           .default(0))
+    >>> expr.value
+    2
 
     Notes
     -----
@@ -218,15 +218,14 @@ class CaseBuilder(ConditionalBuilder):
         return expr
 
     @typecheck_method(condition=expr_bool, then=expr_any)
-    def when(self, condition, then):
+    def when(self, condition, then) -> 'CaseBuilder':
         """Add a branch. If `condition` is ``True``, then returns `then`.
 
         Warning
         -------
         Missingness is treated similarly to :func:`.cond`. Missingness is
         **not** treated as ``False``. A `condition` that evaluates to missing
-        will return a missing result, not proceed to the next
-        :meth:`~.CaseBuilder.when` or :meth:`~.CaseBuilder.default`. Always
+        will return a missing result, not proceed to the next case. Always
         test missingness first in a :class:`.CaseBuilder`.
 
         Parameters
@@ -285,3 +284,25 @@ class CaseBuilder(ConditionalBuilder):
             raise ExpressionException("'or_missing' cannot be called without at least one 'when' call")
         from hail.expr.functions import null
         return self._finish(null(self._ret_type))
+
+    @typecheck_method(message=str)
+    def or_error(self, message):
+        """Finish the case statement by throwing an error with the given message.
+
+        Notes
+        -----
+        If no condition from a :meth:`.CaseBuilder.when` call is ``True``, then
+        an error is thrown.
+
+        Parameters
+        ----------
+        message : :obj:`str`
+
+        Returns
+        -------
+        :class:`.Expression`
+        """
+        if len(self._cases) == 0:
+            raise ExpressionException("'or_error' cannot be called without at least one 'when' call")
+        error_expr = construct_expr(ir.Die(message, self._ret_type), self._ret_type)
+        return self._finish(error_expr)

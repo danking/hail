@@ -4,7 +4,8 @@ import is.hail.HailContext
 import is.hail.annotations._
 import is.hail.expr.types._
 import is.hail.io.vcf.LoadVCF
-import is.hail.rvd.OrderedRVD
+import is.hail.rvd.{OrderedRVD, RVDContext}
+import is.hail.sparkextras.ContextRDD
 import is.hail.utils.StringEscapeUtils._
 import is.hail.utils._
 import is.hail.variant.{Locus, _}
@@ -23,15 +24,15 @@ object LoadPlink {
   def expectedBedSize(nSamples: Int, nVariants: Long): Long = 3 + nVariants * ((nSamples + 3) / 4)
 
   private def parseBim(bimPath: String, hConf: Configuration, a2Reference: Boolean = true,
-    contigRecoding: Map[String, String] = Map.empty[String, String]): Array[(String, Int, String, String, String)] = {
+    contigRecoding: Map[String, String] = Map.empty[String, String]): Array[(String, Int, Double, String, String, String)] = {
     hConf.readLines(bimPath)(_.map(_.map { line =>
       line.split("\\s+") match {
-        case Array(contig, rsId, morganPos, bpPos, allele1, allele2) =>
+        case Array(contig, rsId, cmPos, bpPos, allele1, allele2) =>
           val recodedContig = contigRecoding.getOrElse(contig, contig)
           if (a2Reference)
-            (recodedContig, bpPos.toInt, allele2, allele1, rsId)
+            (recodedContig, bpPos.toInt, cmPos.toDouble, allele2, allele1, rsId)
           else
-            (recodedContig, bpPos.toInt, allele1, allele2, rsId)
+            (recodedContig, bpPos.toInt, cmPos.toDouble, allele1, allele2, rsId)
 
         case other => fatal(s"Invalid .bim line.  Expected 6 fields, found ${ other.length } ${ plural(other.length, "field") }")
       }
@@ -76,10 +77,19 @@ object LoadPlink {
           case _ => fatal(s"Invalid sex: `$isFemale'. Male is `1', female is `2', unknown is `0'")
         }
 
+        var warnedAbout9 = false
         val pheno1 =
           if (ffConfig.isQuantPheno)
             pheno match {
               case ffConfig.missingValue => null
+              case "-9" =>
+                if (!warnedAbout9) {
+                  warn(
+                    s"""Interpreting value '-9' as a valid quantitative phenotype, which differs from default PLINK behavior.
+                       |  Use missing='-9' to interpret '-9' as a missing value.""".stripMargin)
+                  warnedAbout9 = true
+                }
+                -9d
               case numericRegex() => pheno.toDouble
               case _ => fatal(s"Invalid quantitative phenotype: `$pheno'. Value must be numeric or `${ ffConfig.missingValue }'")
             }
@@ -112,10 +122,11 @@ object LoadPlink {
     bedPath: String,
     sampleAnnotations: IndexedSeq[Annotation],
     sampleAnnotationSignature: TStruct,
-    variants: Array[(String, Int, String, String, String)],
+    variants: Array[(String, Int, Double, String, String, String)],
     nPartitions: Option[Int] = None,
     a2Reference: Boolean = true,
-    rg: Option[ReferenceGenome] = Some(ReferenceGenome.defaultReference)): MatrixTable = {
+    rg: Option[ReferenceGenome] = Some(ReferenceGenome.defaultReference),
+    skipInvalidLoci: Boolean = false): MatrixTable = {
 
     val sc = hc.sc
     val nSamples = sampleAnnotations.length
@@ -123,78 +134,94 @@ object LoadPlink {
     sc.hadoopConfiguration.setInt("nSamples", nSamples)
     sc.hadoopConfiguration.setBoolean("a2Reference", a2Reference)
 
-    val rdd = sc.hadoopFile(bedPath, classOf[PlinkInputFormat], classOf[LongWritable], classOf[PlinkRecord],
-      nPartitions.getOrElse(sc.defaultMinPartitions))
+    val crdd = ContextRDD.weaken[RVDContext](
+      sc.hadoopFile(
+        bedPath,
+        classOf[PlinkInputFormat],
+        classOf[LongWritable],
+        classOf[PlinkRecord],
+        nPartitions.getOrElse(sc.defaultMinPartitions)))
 
     val matrixType = MatrixType.fromParts(
       globalType = TStruct.empty(),
       colKey = Array("s"),
       colType = sampleAnnotationSignature,
-      rowType = TStruct("locus" -> TLocus.schemaFromRG(rg), "alleles" -> TArray(TString()), "rsid" -> TString()),
+      rowType = TStruct(
+        "locus" -> TLocus.schemaFromRG(rg),
+        "alleles" -> TArray(TString()),
+        "rsid" -> TString(),
+        "cm_position" -> TFloat64()),
       rowKey = Array("locus", "alleles"),
       rowPartitionKey = Array("locus"),
-      entryType = TStruct(required = true, "GT" -> TCall()))
+      entryType = TStruct("GT" -> TCall()))
 
     val kType = matrixType.orvdType.kType
     val rvRowType = matrixType.rvRowType
 
-    val fastKeys = rdd.mapPartitions { it =>
-      val region = Region()
+    val fastKeys = crdd.cmapPartitions { (ctx, it) =>
+      val region = ctx.region
       val rvb = new RegionValueBuilder(region)
       val rv = RegionValue(region)
 
-      it.map { case (_, record) =>
-        val (contig, pos, ref, alt, rsid) = variantsBc.value(record.getKey)
+      it.flatMap { case (_, record) =>
+        val (contig, pos, _, ref, alt, _) = variantsBc.value(record.getKey)
 
-        region.clear()
-        rvb.start(kType)
-        rvb.startStruct()
-        rvb.addAnnotation(kType.types(0), Locus.annotation(contig, pos, rg))
-        rvb.startArray(2)
-        rvb.addString(ref)
-        rvb.addString(alt)
-        rvb.endArray()
-        rvb.endStruct()
+        if (skipInvalidLoci && !rg.forall(_.isValidLocus(contig, pos)))
+          None
+        else {
+          rvb.start(kType)
+          rvb.startStruct()
+          rvb.addAnnotation(kType.types(0), Locus.annotation(contig, pos, rg))
+          rvb.startArray(2)
+          rvb.addString(ref)
+          rvb.addString(alt)
+          rvb.endArray()
+          rvb.endStruct()
 
-        rv.setOffset(rvb.end())
-        rv
+          rv.setOffset(rvb.end())
+          Some(rv)
+        }
       }
     }
 
-    val rdd2 = rdd.mapPartitions { it =>
-      val region = Region()
+    val rdd2 = crdd.cmapPartitions { (ctx, it) =>
+      val region = ctx.region
       val rvb = new RegionValueBuilder(region)
       val rv = RegionValue(region)
 
-      it.map { case (_, record) =>
-        val (contig, pos, ref, alt, rsid) = variantsBc.value(record.getKey)
+      it.flatMap { case (_, record) =>
+        val (contig, pos, cmPos, ref, alt, rsid) = variantsBc.value(record.getKey)
 
-        region.clear()
-        rvb.start(rvRowType)
-        rvb.startStruct()
-        rvb.addAnnotation(kType.types(0), Locus.annotation(contig, pos, rg))
-        rvb.startArray(2)
-        rvb.addString(ref)
-        rvb.addString(alt)
-        rvb.endArray()
-        rvb.addAnnotation(rvRowType.types(2), rsid)
-        record.getValue(rvb)
-        rvb.endStruct()
+        if (skipInvalidLoci && !rg.forall(_.isValidLocus(contig, pos)))
+          None
+        else {
+          rvb.start(rvRowType)
+          rvb.startStruct()
+          rvb.addAnnotation(kType.types(0), Locus.annotation(contig, pos, rg))
+          rvb.startArray(2)
+          rvb.addString(ref)
+          rvb.addString(alt)
+          rvb.endArray()
+          rvb.addAnnotation(rvRowType.types(2), rsid)
+          rvb.addDouble(cmPos)
+          record.getValue(rvb)
+          rvb.endStruct()
 
-        rv.setOffset(rvb.end())
-        rv
+          rv.setOffset(rvb.end())
+          Some(rv)
+        }
       }
     }
 
     new MatrixTable(hc, matrixType,
-      BroadcastValue(Annotation.empty, matrixType.globalType, sc),
-      sampleAnnotations,
-      OrderedRVD(matrixType.orvdType, rdd2, Some(fastKeys), None))
+      BroadcastRow(Row.empty, matrixType.globalType, sc),
+      BroadcastIndexedSeq(sampleAnnotations, TArray(matrixType.colType), sc),
+      OrderedRVD.coerce(matrixType.orvdType, rdd2, fastKeys))
   }
 
   def apply(hc: HailContext, bedPath: String, bimPath: String, famPath: String, ffConfig: FamFileConfig,
     nPartitions: Option[Int] = None, a2Reference: Boolean = true, rg: Option[ReferenceGenome] = Some(ReferenceGenome.defaultReference),
-    contigRecoding: Map[String, String] = Map.empty[String, String]): MatrixTable = {
+    contigRecoding: Map[String, String] = Map.empty[String, String], skipInvalidLoci: Boolean = false): MatrixTable = {
     val (sampleInfo, signature) = parseFam(famPath, ffConfig, hc.hadoopConf)
 
     val nameMap = Map("id" -> "s")
@@ -231,8 +258,11 @@ object LoadPlink {
     if (bedSize < nPartitions.getOrElse(hc.sc.defaultMinPartitions))
       fatal(s"The number of partitions requested (${ nPartitions.getOrElse(hc.sc.defaultMinPartitions) }) is greater than the file size ($bedSize)")
 
-    val vds = parseBed(hc, bedPath, sampleInfo, saSignature, variants, nPartitions, a2Reference, rg)
+    val vds = parseBed(hc, bedPath, sampleInfo, saSignature, variants, nPartitions, a2Reference, rg, skipInvalidLoci)
+    if (skipInvalidLoci && rg.isDefined && vds.countRows() != nVariants) {
+      val nFiltered = nVariants - vds.countRows()
+      info(s"Filtered out $nFiltered ${ plural(nFiltered, "variant") } that are inconsistent with reference genome '${ rg.get.name }'.")
+    }
     vds
   }
-
 }

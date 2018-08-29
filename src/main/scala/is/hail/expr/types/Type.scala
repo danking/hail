@@ -2,6 +2,7 @@ package is.hail.expr.types
 
 import is.hail.annotations._
 import is.hail.check.{Arbitrary, Gen}
+import is.hail.expr.ir.EmitMethodBuilder
 import is.hail.expr.{JSONAnnotationImpex, Parser, SparkAnnotationImpex}
 import is.hail.utils
 import is.hail.utils._
@@ -128,11 +129,9 @@ object Type {
 abstract class Type extends BaseType with Serializable {
   self =>
 
-  def children: Seq[Type] = Seq()
+  def children: Seq[Type] = FastSeq()
 
   def clear(): Unit = children.foreach(_.clear())
-
-  def desc: String = ""
 
   def unify(concrete: Type): Boolean = {
     this.isOfType(concrete)
@@ -142,35 +141,16 @@ abstract class Type extends BaseType with Serializable {
 
   def subst(): Type = this.setRequired(false)
 
-  def getAsOption[T](fields: String*)(implicit ct: ClassTag[T]): Option[T] = {
-    getOption(fields: _*)
-      .flatMap { t =>
-        if (ct.runtimeClass.isInstance(t))
-          Some(t.asInstanceOf[T])
-        else
-          None
-      }
+  def unsafeOrdering(missingGreatest: Boolean): UnsafeOrdering = ???
+
+  def unsafeOrdering(): UnsafeOrdering = unsafeOrdering(false)
+
+  def unsafeOrdering(rightType: Type, missingGreatest: Boolean): UnsafeOrdering = {
+    require(this.isOfType(rightType))
+    unsafeOrdering(missingGreatest)
   }
 
-  def unsafeOrdering(missingGreatest: Boolean = false): UnsafeOrdering = ???
-
-  def getOption(fields: String*): Option[Type] = getOption(fields.toList)
-
-  def getOption(path: List[String]): Option[Type] = {
-    if (path.isEmpty)
-      Some(this)
-    else
-      None
-  }
-
-  def delete(fields: String*): (Type, Deleter) = delete(fields.toList)
-
-  def delete(path: List[String]): (Type, Deleter) = {
-    if (path.nonEmpty)
-      throw new AnnotationPathException(s"invalid path ${ path.mkString(".") } from type ${ this }")
-    else
-      (TStruct.empty(), a => null)
-  }
+  def unsafeOrdering(rightType: Type): UnsafeOrdering = unsafeOrdering(rightType, false)
 
   def unsafeInsert(typeToInsert: Type, path: List[String]): (Type, UnsafeInserter) =
     TStruct.empty().unsafeInsert(typeToInsert, path)
@@ -234,13 +214,17 @@ abstract class Type extends BaseType with Serializable {
   def isRealizable: Boolean = children.forall(_.isRealizable)
 
   /* compare values for equality, but compare Float and Double values by the absolute value of their difference is within tolerance or with D_== */
-  def valuesSimilar(a1: Annotation, a2: Annotation, tolerance: Double = utils.defaultTolerance): Boolean = a1 == a2
+  def valuesSimilar(a1: Annotation, a2: Annotation, tolerance: Double = utils.defaultTolerance, absolute: Boolean = false): Boolean = a1 == a2
 
   def scalaClassTag: ClassTag[_ <: AnyRef]
 
   def canCompare(other: Type): Boolean = this == other
 
   val ordering: ExtendedOrdering
+
+  def codeOrdering(mb: EmitMethodBuilder): CodeOrdering = codeOrdering(mb, this)
+
+  def codeOrdering(mb: EmitMethodBuilder, other: Type): CodeOrdering
 
   def jsonReader: JSONReader[Annotation] = new JSONReader[Annotation] {
     def fromJSON(a: JValue): Annotation = JSONAnnotationImpex.importAnnotation(a, self)
@@ -281,7 +265,6 @@ abstract class Type extends BaseType with Serializable {
       case t: TArray => t.copy(required = required)
       case t: TSet => t.copy(required = required)
       case t: TDict => t.copy(required = required)
-      case t: TVariant => t.copy(required = required)
       case t: TLocus => t.copy(required = required)
       case t: TInterval => t.copy(required = required)
       case t: TStruct => t.copy(required = required)
@@ -302,9 +285,8 @@ abstract class Type extends BaseType with Serializable {
       case TFloat64(_) => t == TFloat64Optional || t == TFloat64Required
       case TString(_) => t == TStringOptional || t == TStringRequired
       case TCall(_) => t == TCallOptional || t == TCallRequired
-      case t2: TLocus => t == t2 || t == +t2
-      case t2: TVariant => t == t2 || t == +t2
-      case t2: TInterval => t == t2 || t == +t2
+      case t2: TLocus => t.isInstanceOf[TLocus] && t.asInstanceOf[TLocus].rg == t2.rg
+      case t2: TInterval => t.isInstanceOf[TInterval] && t.asInstanceOf[TInterval].pointType.isOfType(t2.pointType)
       case t2: TStruct =>
         t.isInstanceOf[TStruct] &&
           t.asInstanceOf[TStruct].size == t2.size &&

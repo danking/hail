@@ -10,6 +10,8 @@ import scala.io.Source
 import is.hail.utils.{FlipbookIterator, StagingIterator, StateMachine}
 import org.apache.spark.sql.Row
 
+import scala.reflect.ClassTag
+
 class RichIterator[T](val it: Iterator[T]) extends AnyVal {
   def toStagingIterator: StagingIterator[T] = {
     val bit = it.buffered
@@ -96,15 +98,17 @@ class RichIterator[T](val it: Iterator[T]) extends AnyVal {
         prev
       }
     }
+
+  def toFastSeq(implicit tct: ClassTag[T]): Seq[T] = toFastIndexedSeq
+
+  def toFastIndexedSeq(implicit tct: ClassTag[T]): IndexedSeq[T] = it.toArray[T]
 }
 
 class RichRowIterator(val it: Iterator[Row]) extends AnyVal {
-  def toRegionValueIterator(rowTyp: TStruct): Iterator[RegionValue] = {
-    val region = Region()
+  def toRegionValueIterator(region: Region, rowTyp: TStruct): Iterator[RegionValue] = {
     val rvb = new RegionValueBuilder(region)
     val rv = RegionValue(region)
     it.map { row =>
-      region.clear()
       rvb.start(rowTyp)
       rvb.addAnnotation(rowTyp, row)
       rv.setOffset(rvb.end())

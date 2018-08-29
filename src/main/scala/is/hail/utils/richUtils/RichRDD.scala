@@ -2,12 +2,12 @@ package is.hail.utils.richUtils
 
 import java.io.OutputStream
 
-import is.hail.sparkextras.ReorderedPartitionsRDD
+import is.hail.rvd.RVDContext
+import is.hail.sparkextras._
 import is.hail.utils._
-import org.apache.commons.lang3.StringUtils
 import org.apache.hadoop
 import org.apache.hadoop.io.compress.CompressionCodecFactory
-import org.apache.spark.{NarrowDependency, Partition, TaskContext}
+import org.apache.spark.{NarrowDependency, Partition, Partitioner, TaskContext}
 import org.apache.spark.rdd.RDD
 
 import scala.reflect.ClassTag
@@ -15,9 +15,9 @@ import scala.collection.mutable
 
 case class SubsetRDDPartition(index: Int, parentPartition: Partition) extends Partition
 
-class RichRDD[T](val r: RDD[T]) extends AnyVal {
-  def countByValueRDD()(implicit tct: ClassTag[T]): RDD[(T, Int)] = r.map((_, 1)).reduceByKey(_ + _)
+case class SupersetRDDPartition(index: Int, maybeParentPartition: Option[Partition]) extends Partition
 
+class RichRDD[T](val r: RDD[T]) extends AnyVal {
   def reorderPartitions(oldIndices: Array[Int])(implicit tct: ClassTag[T]): RDD[T] =
     new ReorderedPartitionsRDD[T](r, oldIndices)
 
@@ -81,7 +81,7 @@ class RichRDD[T](val r: RDD[T]) extends AnyVal {
       fatal("write failed: no success indicator found")
 
     if (exportType == ExportType.CONCATENATED) {
-      hConf.copyMerge(parallelOutputPath, filename, rWithHeader.getNumPartitions, hasHeader = false)
+      hConf.copyMerge(parallelOutputPath, filename, rWithHeader.getNumPartitions, header = false)
     }
   }
 
@@ -100,14 +100,15 @@ class RichRDD[T](val r: RDD[T]) extends AnyVal {
     )
   }
 
-  def subsetPartitions(keep: Array[Int])(implicit ct: ClassTag[T]): RDD[T] = {
-    require(keep.length <= r.partitions.length, "tried to subset to more partitions than exist")
+  def subsetPartitions(keep: Array[Int], newPartitioner: Option[Partitioner] = None)(implicit ct: ClassTag[T]): RDD[T] = {
+    require(keep.length <= r.partitions.length,
+      s"tried to subset to more partitions than exist ${keep.toSeq} ${r.partitions.toSeq}")
     require(keep.isIncreasing && (keep.isEmpty || (keep.head >= 0 && keep.last < r.partitions.length)),
       "values not sorted or not in range [0, number of partitions)")
     val parentPartitions = r.partitions
 
-    new RDD[T](r.sparkContext, Seq(new NarrowDependency[T](r) {
-      def getParents(partitionId: Int): Seq[Int] = Seq(keep(partitionId))
+    new RDD[T](r.sparkContext, FastSeq(new NarrowDependency[T](r) {
+      def getParents(partitionId: Int): Seq[Int] = FastSeq(keep(partitionId))
     })) {
       def getPartitions: Array[Partition] = keep.indices.map { i =>
         SubsetRDDPartition(i, parentPartitions(keep(i)))
@@ -115,6 +116,42 @@ class RichRDD[T](val r: RDD[T]) extends AnyVal {
 
       def compute(split: Partition, context: TaskContext): Iterator[T] =
         r.compute(split.asInstanceOf[SubsetRDDPartition].parentPartition, context)
+      
+      @transient override val partitioner: Option[Partitioner] = newPartitioner
+    }
+  }
+
+  def supersetPartitions(
+    oldToNewPI: Array[Int],
+    newNPartitions: Int,
+    newPIPartition: Int => Iterator[T],
+    newPartitioner: Option[Partitioner] = None)(implicit ct: ClassTag[T]): RDD[T] = {
+    
+    require(oldToNewPI.length == r.partitions.length)
+    require(oldToNewPI.forall(pi => pi >= 0 && pi < newNPartitions))
+    require(oldToNewPI.areDistinct())
+    
+    val parentPartitions = r.partitions
+    val newToOldPI = oldToNewPI.zipWithIndex.toMap
+
+    new RDD[T](r.sparkContext, FastSeq(new NarrowDependency[T](r) {
+      def getParents(partitionId: Int): Seq[Int] = newToOldPI.get(partitionId) match {
+        case Some(oldPI) => Array(oldPI)
+        case None => Array.empty[Int]
+      }
+    })) {
+      def getPartitions: Array[Partition] = Array.tabulate(newNPartitions) { i =>
+        SupersetRDDPartition(i, newToOldPI.get(i).map(parentPartitions))
+      }
+
+      def compute(split: Partition, context: TaskContext): Iterator[T] = {
+        split.asInstanceOf[SupersetRDDPartition].maybeParentPartition match {
+          case Some(part) => r.compute(part, context)
+          case None => newPIPartition(split.index)
+        }
+      }
+
+      @transient override val partitioner: Option[Partitioner] = newPartitioner
     }
   }
 
@@ -141,7 +178,7 @@ class RichRDD[T](val r: RDD[T]) extends AnyVal {
 
     var partScanned = 0
     var nLeft = n
-    var idxLast = 0
+    var idxLast = -1
     var nLast = 0L
     var numPartsToTry = 1L
 
@@ -183,48 +220,15 @@ class RichRDD[T](val r: RDD[T]) extends AnyVal {
     }, preservesPartitioning = true)
       .subsetPartitions((0 to idxLast).toArray)
   }
-  
-  def writePartitions(path: String,
-    write: (Int, Iterator[T], OutputStream) => Long,
-    remapPartitions: Option[(Array[Int], Int)] = None): (Array[String], Array[Long]) = {
-    val sc = r.sparkContext
-    val hadoopConf = sc.hadoopConfiguration
-    
-    hadoopConf.mkDir(path + "/parts")
-    
-    val sHadoopConfBc = sc.broadcast(new SerializableHadoopConfiguration(hadoopConf))
 
-    val nPartitionsToWrite = r.getNumPartitions
-    
-    val (remap, nPartitions) = remapPartitions match {
-      case Some((map, n)) => (map.apply _, n)
-      case None => (identity[Int] _, nPartitionsToWrite)
-    }
-    
-    val d = digitsNeeded(nPartitions)
-    
-    val remapBc = sc.broadcast(remap)
-
-    val partFiles = Array.tabulate[String](nPartitions) { i =>
-      val is = i.toString
-      assert(is.length <= d)
-      "part-" + StringUtils.leftPad(is, d, "0")
-    }
-
-    val partitionCounts = r.mapPartitionsWithIndex { case (index, it) =>
-      val i = remapBc.value(index)
-      val filename = path + "/parts/" + partFile(d, i)
-      val os = sHadoopConfBc.value.value.unsafeWriter(filename)
-      Iterator.single(write(i, it, os))
-    }
-      .collect()
-        
-    val itemCount = partitionCounts.sum
-    assert(nPartitionsToWrite == partitionCounts.length)
-
-    info(s"wrote $itemCount ${ plural(itemCount, "item") } " +
-      s"in ${ nPartitionsToWrite } ${ plural(nPartitionsToWrite, "partition") }")
-    
-    (partFiles, partitionCounts)
-  }
+  def writePartitions(
+    path: String,
+    stageLocally: Boolean,
+    write: (Iterator[T], OutputStream) => Long
+  )(implicit tct: ClassTag[T]
+  ): (Array[String], Array[Long]) =
+    ContextRDD.weaken[RVDContext](r).writePartitions(
+      path,
+      stageLocally,
+      (_, it, os) => write(it, os))
 }

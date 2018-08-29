@@ -52,7 +52,8 @@ class ExprCoercer(TypeChecker):
     def can_coerce(self, t: HailType) -> bool:
         ...
 
-    def coerce(self, x: Expression) -> Expression:
+    def coerce(self, x) -> Expression:
+        x = to_expr(x)
         if not self.can_coerce(x.dtype):
             raise ExpressionException(f"cannot coerce type '{x.dtype}' to type '{self.str_t}'")
         if self._requires_conversion(x.dtype):
@@ -131,7 +132,7 @@ class Int64Coercer(ExprCoercer):
         return t in (tbool, tint32, tint64)
 
     def _coerce(self, x):
-        return x._method("toInt64", tint32)
+        return x._method("toInt64", tint64)
 
 
 class Float32Coercer(ExprCoercer):
@@ -146,7 +147,7 @@ class Float32Coercer(ExprCoercer):
         return t in (tbool, tint32, tint64, tfloat32)
 
     def _coerce(self, x):
-        return x._method("toFloat32", tint32)
+        return x._method("toFloat32", tfloat32)
 
 
 class Float64Coercer(ExprCoercer):
@@ -161,7 +162,7 @@ class Float64Coercer(ExprCoercer):
         return t in (tbool, tint32, tint64, tfloat32, tfloat64)
 
     def _coerce(self, x):
-        return x._method("toFloat64", tint32)
+        return x._method("toFloat64", tfloat64)
 
 
 class StringCoercer(ExprCoercer):
@@ -306,6 +307,7 @@ class TupleCoercer(ExprCoercer):
         super(TupleCoercer, self).__init__()
         self.elements = elements
 
+    @property
     def str_t(self):
         if self.elements is None:
             return 'tuple'
@@ -338,6 +340,7 @@ class StructCoercer(ExprCoercer):
         super(StructCoercer, self).__init__()
         self.fields = fields
 
+    @property
     def str_t(self) -> str:
         if self.fields is None:
             return 'struct'

@@ -58,13 +58,13 @@ class RichHadoopConfiguration(val hConf: hadoop.conf.Configuration) extends AnyV
   def isDir(filename: String): Boolean = {
     val fs = fileSystem(filename)
     val hPath = new hadoop.fs.Path(filename)
-    fs.getFileStatus(hPath).isDirectory
+    fs.isDirectory(hPath)
   }
 
   def isFile(filename: String): Boolean = {
     val fs = fileSystem(filename)
     val hPath = new hadoop.fs.Path(filename)
-    fs.getFileStatus(hPath).isFile
+    fs.isFile(hPath)
   }
 
   def exists(files: String*): Boolean = {
@@ -113,6 +113,15 @@ class RichHadoopConfiguration(val hConf: hadoop.conf.Configuration) extends AnyV
       }.toArray
   }
 
+  def globAllStatuses(filenames: Iterable[String]): Array[FileStatus] = {
+    filenames.flatMap { filename =>
+      val statuses = glob(filename)
+      if (statuses.isEmpty)
+        warn(s"`$filename' refers to no files")
+      statuses
+    }.toArray
+  }
+
   def glob(filename: String): Array[FileStatus] = {
     val fs = fileSystem(filename)
     val path = new hadoop.fs.Path(filename)
@@ -131,7 +140,7 @@ class RichHadoopConfiguration(val hConf: hadoop.conf.Configuration) extends AnyV
       false, hConf)
   }
 
-  def copyMerge(sourceFolder: String, destinationFile: String, numPartFilesExpected: Int, deleteSource: Boolean = true, hasHeader: Boolean = true) {
+  def copyMerge(sourceFolder: String, destinationFile: String, numPartFilesExpected: Int, deleteSource: Boolean = true, header: Boolean = true) {
     if (!exists(sourceFolder + "/_SUCCESS"))
       fatal("write failed: no success indicator found")
 
@@ -139,9 +148,9 @@ class RichHadoopConfiguration(val hConf: hadoop.conf.Configuration) extends AnyV
 
     val headerFileStatus = glob(sourceFolder + "/header")
 
-    if (hasHeader && headerFileStatus.isEmpty)
+    if (header && headerFileStatus.isEmpty)
       fatal(s"Missing header file")
-    else if (!hasHeader && headerFileStatus.nonEmpty)
+    else if (!header && headerFileStatus.nonEmpty)
       fatal(s"Found unexpected header file")
 
     val partFileStatuses = glob(sourceFolder + "/part-*").sortBy(fs => getPartNumber(fs.getPath.getName))
@@ -159,7 +168,7 @@ class RichHadoopConfiguration(val hConf: hadoop.conf.Configuration) extends AnyV
 
     if (deleteSource) {
       hConf.delete(sourceFolder, recursive = true)
-      if (hasHeader)
+      if (header)
         hConf.delete(sourceFolder + ".header", recursive = false)
     }
   }

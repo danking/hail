@@ -160,15 +160,28 @@ abstract class FlipbookIterator[A] extends BufferedIterator[A] { self =>
       }
     )
 
+  private[this] trait ValidityCachingStateMachine extends StateMachine[A] {
+    private[this] var _isValid: Boolean = _
+    final def isValid = _isValid
+    final def refreshValidity: Unit =
+      _isValid = calculateValidity
+    def calculateValidity: Boolean
+    def value: A
+    def advance(): Unit
+    refreshValidity
+  }
+
   def staircased(ord: OrderingView[A]): StagingIterator[FlipbookIterator[A]] = {
     ord.setBottom()
-    val stepIterator: FlipbookIterator[A] = FlipbookIterator(
-      new StateMachine[A] {
-        def value: A = self.value
-        def isValid: Boolean = self.isValid && ord.isEquivalent(value)
-        def advance() = { self.advance() }
+    val stepSM = new ValidityCachingStateMachine {
+      def value: A = self.value
+      def calculateValidity: Boolean = self.isValid && ord.isEquivalent(self.value)
+      def advance() = {
+        self.advance()
+        refreshValidity
       }
-    )
+    }
+    val stepIterator: FlipbookIterator[A] = FlipbookIterator(stepSM)
     val sm = new StateMachine[FlipbookIterator[A]] {
       var isValid: Boolean = true
       val value: FlipbookIterator[A] = stepIterator
@@ -176,8 +189,10 @@ abstract class FlipbookIterator[A] extends BufferedIterator[A] { self =>
         stepIterator.exhaust()
         if (self.isValid) {
           ord.setValue(self.value)
+          stepSM.refreshValidity
         } else {
           ord.setBottom()
+          stepSM.refreshValidity
           isValid = false
         }
       }
@@ -343,6 +358,42 @@ abstract class FlipbookIterator[A] extends BufferedIterator[A] { self =>
       buffer.iterator.toFlipbookIterator.map(rElem =>
         result.set(lElem, rElem)))
   }
+
+  def merge(
+    that: FlipbookIterator[A],
+    ord: (A, A) => Int): FlipbookIterator[A] = {
+    val left = self.toStagingIterator
+    val right = that.toStagingIterator
+    class MergeStateMachine extends StateMachine[A] {
+      var value: A = _
+      var isValid = true
+      def advance() {
+        left.stage()
+        right.stage()
+        val c = {
+          if (left.isValid) {
+            if (right.isValid)
+              ord(left.value, right.value)
+            else
+              -1
+          } else if (right.isValid)
+            1
+          else {
+            isValid = false
+            return
+          }
+        }
+        if (c <= 0)
+          value = left.consume()
+        else
+          value = right.consume()
+      }
+    }
+    val sm = new MergeStateMachine
+    sm.advance()
+    FlipbookIterator(sm)
+  }
+
 
   def sameElementsUsing[B](that: Iterator[B], eq: (A, B) => Boolean): Boolean = {
     while (this.hasNext && that.hasNext)

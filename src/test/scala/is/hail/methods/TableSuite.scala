@@ -5,6 +5,7 @@ import is.hail.annotations._
 import is.hail.check.Prop.forAll
 import is.hail.expr._
 import is.hail.expr.types._
+import is.hail.rvd.{OrderedRVD, UnpartitionedRVD}
 import is.hail.table.Table
 import is.hail.utils._
 import is.hail.testUtils._
@@ -21,9 +22,9 @@ class TableSuite extends SparkSuite {
     val data = Array(Array("Sample1", 9, 5), Array("Sample2", 3, 5), Array("Sample3", 2, 5), Array("Sample4", 1, 5))
     val rdd = sc.parallelize(data.map(Row.fromSeq(_)))
     val signature = TStruct(("Sample", TString()), ("field1", TInt32()), ("field2", TInt32()))
-    val keyNames = Array("Sample")
+    val keyNames = IndexedSeq("Sample")
 
-    val kt = Table(hc, rdd, signature, keyNames)
+    val kt = Table(hc, rdd, signature, Some(keyNames))
     kt.typeCheck()
     kt
   }
@@ -33,8 +34,8 @@ class TableSuite extends SparkSuite {
       Array("Sample3", IndexedSeq(2, 3, 4), 5), Array("Sample4", IndexedSeq.empty[Int], 5))
     val rdd = sc.parallelize(data.map(Row.fromSeq(_)))
     val signature = TStruct(("Sample", TString()), ("field1", TArray(TInt32())), ("field2", TInt32()))
-    val keyNames = Array("Sample")
-    val kt = Table(hc, rdd, signature, keyNames)
+    val keyNames = IndexedSeq("Sample")
+    val kt = Table(hc, rdd, signature, Some(keyNames))
     kt.typeCheck()
     kt
   }
@@ -44,8 +45,8 @@ class TableSuite extends SparkSuite {
       Array("Sample3", IndexedSeq(IndexedSeq(2, 3, 4), IndexedSeq(3), IndexedSeq(4, 10)), IndexedSeq.empty[Int]), Array("Sample4", IndexedSeq.empty[Int], IndexedSeq(5)))
     val rdd = sc.parallelize(data.map(Row.fromSeq(_)))
     val signature = TStruct(("Sample", TString()), ("field1", TArray(TArray(TInt32()))), ("field2", TArray(TInt32())))
-    val keyNames = Array("Sample")
-    val kt = Table(hc, rdd, signature, keyNames)
+    val keyNames = IndexedSeq("Sample")
+    val kt = Table(hc, rdd, signature, Some(keyNames))
     kt.typeCheck()
     kt
   }
@@ -56,14 +57,57 @@ class TableSuite extends SparkSuite {
     val kt = hc.importTable(inputFile).keyBy("Sample", "Status")
     kt.export(outputFile)
 
-    val importedData = sc.hadoopConfiguration.readLines(inputFile)(_.map(_.value).toIndexedSeq)
-    val exportedData = sc.hadoopConfiguration.readLines(outputFile)(_.map(_.value).toIndexedSeq)
+    val importedData = sc.hadoopConfiguration.readLines(inputFile)(_.map(_.value).toFastIndexedSeq)
+    val exportedData = sc.hadoopConfiguration.readLines(outputFile)(_.map(_.value).toFastIndexedSeq)
 
-    intercept[HailException] {
-      hc.importTable(inputFile).keyBy(List("Sample", "Status", "BadKeyName"))
+    intercept[AssertionError] {
+      hc.importTable(inputFile).keyBy("Sample", "Status", "BadKeyName")
     }
 
     assert(importedData == exportedData)
+  }
+
+  @Test def testWriteReadOrdered() {
+    val outputFile = tmpDir.createTempFile("ktRdWrtOrd")
+    sampleKT1.write(outputFile)
+    val read = Table.read(hc, outputFile)
+
+    assert(read.rvd.isInstanceOf[OrderedRVD])
+    assert(read.same(sampleKT1))
+  }
+
+  @Test def testWriteReadUnordered() {
+    val outputFile = tmpDir.createTempFile("ktRdWrtUnord")
+    sampleKT1.unkey().write(outputFile)
+    val read = Table.read(hc, outputFile)
+
+    assert(read.rvd.isInstanceOf[UnpartitionedRVD])
+    assert(read.same(sampleKT1.unkey()))
+  }
+
+  @Test def testKeyBy() {
+    val kt = sampleKT1
+    val count = kt.count()
+    val kt2 = kt.keyBy(Array("Sample", "field1"), Array("Sample"))
+    assert(kt2.count() == count)
+    assert(kt2.keyBy(Array("Sample"), Array("Sample")).count() == count)
+    assert(kt.keyBy("field1").count() == count)
+    assert(kt.unkey().keyBy(Array("Sample")).count() == count)
+  }
+
+  @Test def testTableToMatrixTableWithDuplicateKeys(): Unit = {
+    val table = Table.parallelize(
+      hc,
+      FastIndexedSeq(
+        Row("1:100", 0.5.toFloat, "trait1"),
+        Row("1:100", 0.6.toFloat, "trait1")),
+      TStruct("locus" -> TString(), "pval" -> TFloat32Required,
+        "phenotype" -> TString()),
+      None, None)
+
+    TestUtils.interceptSpark("duplicate \\(row key, col key\\) pairs are not supported")(
+      table.toMatrixTable(Array("locus"), Array("phenotype"), Array(),
+        Array(), Array("locus")).count())
   }
 
   @Test def testToMatrixTable() {
@@ -83,238 +127,6 @@ class TableSuite extends SparkSuite {
     assert(reVDS.reorderCols(sampleOrder).same(vds))
   }
 
-  @Test def testAnnotate() {
-    val inputFile = "src/test/resources/sampleAnnotations.tsv"
-    val kt1 = hc.importTable(inputFile, impute = true).keyBy("Sample")
-    val kt2 = kt1.annotate("""qPhen2 = pow(row.qPhen.toFloat64, 2d), NotStatus = row.Status == "CASE", X = row.qPhen == 5""")
-    val kt3 = kt2.annotate("")
-    val kt4 = kt3.select(kt3.fieldNames.map(n => s"row.$n")).keyBy("qPhen", "NotStatus")
-
-    val kt1columns = kt1.fieldNames.toSet
-    val kt2columns = kt2.fieldNames.toSet
-
-    assert(kt1.nKeys == 1)
-    assert(kt2.nKeys == 1)
-    assert(kt1.nColumns == 3 && kt2.nColumns == 6)
-    assert(kt1.keyFields.zip(kt2.keyFields).forall { case (fd1, fd2) => fd1.name == fd2.name && fd1.typ == fd2.typ })
-    assert(kt1columns ++ Set("qPhen2", "NotStatus", "X") == kt2columns)
-    assert(kt2 same kt3)
-
-    def getDataAsMap(kt: Table) = {
-      val columns = kt.fieldNames
-      kt.rdd.map { a => columns.zip(a.toSeq).toMap }.collect().toSet
-    }
-
-    val kt3data = getDataAsMap(kt3)
-    val kt4data = getDataAsMap(kt4)
-
-    assert(kt4.key.toSet == Set("qPhen", "NotStatus") &&
-      kt4.fieldNames.toSet -- kt4.key == Set("qPhen2", "X", "Sample", "Status") &&
-      kt3data == kt4data
-    )
-
-    val outputFile = tmpDir.createTempFile("annotate", "tsv")
-    kt2.export(outputFile)
-  }
-
-  @Test def testFilter() = {
-    val data = Array(Array(5, 9, 0), Array(2, 3, 4), Array(1, 2, 3))
-    val rdd = sc.parallelize(data.map(Row.fromSeq(_)))
-    val signature = TStruct(("field1", TInt32()), ("field2", TInt32()), ("field3", TInt32()))
-    val keyNames = Array("field1")
-
-    val kt1 = Table(hc, rdd, signature, keyNames)
-    kt1.typeCheck()
-    val kt2 = kt1.filter("row.field1 < 3", keep = true)
-    val kt3 = kt1.filter("row.field1 < 3 && row.field3 == 4", keep = true)
-    val kt4 = kt1.filter("row.field1 == 5 && row.field2 == 9 && row.field3 == 0", keep = false)
-    val kt5 = kt1.filter("row.field1 < -5 && row.field3 == 100", keep = true)
-
-    assert(kt1.count == 3 && kt2.count == 2 && kt3.count == 1 && kt4.count == 2 && kt5.count == 0)
-
-    val outputFile = tmpDir.createTempFile("filter", "tsv")
-    kt5.export(outputFile)
-  }
-
-  @Test def testJoin() = {
-    val inputFile1 = "src/test/resources/sampleAnnotations.tsv"
-    val inputFile2 = "src/test/resources/sampleAnnotations2.tsv"
-
-    val ktLeft = hc.importTable(inputFile1, impute = true).keyBy("Sample")
-    val ktRight = hc.importTable(inputFile2, impute = true).keyBy("Sample")
-
-    val ktLeftJoin = ktLeft.join(ktRight, "left")
-    val ktRightJoin = ktLeft.join(ktRight, "right")
-    val ktInnerJoin = ktLeft.join(ktRight, "inner")
-    val ktOuterJoin = ktLeft.join(ktRight, "outer")
-
-    val nExpectedColumns = ktLeft.nColumns + ktRight.nColumns - ktRight.nKeys
-
-    val i: IndexedSeq[Int] = Array(1, 2, 3)
-
-    val leftKeyQuerier = ktLeft.signature.query("Sample")
-    val rightKeyQuerier = ktRight.signature.query("Sample")
-    val leftJoinKeyQuerier = ktLeftJoin.signature.query("Sample")
-    val rightJoinKeyQuerier = ktRightJoin.signature.query("Sample")
-
-    val leftKeys = ktLeft.rdd.map { a => Option(leftKeyQuerier(a)).map(_.asInstanceOf[String]) }.collect().toSet
-    val rightKeys = ktRight.rdd.map { a => Option(rightKeyQuerier(a)).map(_.asInstanceOf[String]) }.collect().toSet
-
-    val nIntersectRows = leftKeys.intersect(rightKeys).size
-    val nUnionRows = rightKeys.union(leftKeys).size
-    val nExpectedKeys = ktLeft.nKeys
-
-    assert(ktLeftJoin.count == ktLeft.count &&
-      ktLeftJoin.nKeys == nExpectedKeys &&
-      ktLeftJoin.nColumns == nExpectedColumns &&
-      ktLeftJoin.copy(rdd = ktLeftJoin.rdd.filter { a =>
-        !rightKeys.contains(Option(leftJoinKeyQuerier(a)).map(_.asInstanceOf[String]))
-      }).forall("isMissing(row.qPhen2) && isMissing(row.qPhen3)")
-    )
-
-    assert(ktRightJoin.count == ktRight.count &&
-      ktRightJoin.nKeys == nExpectedKeys &&
-      ktRightJoin.nColumns == nExpectedColumns &&
-      ktRightJoin.copy(rdd = ktRightJoin.rdd.filter { a =>
-        !leftKeys.contains(Option(rightJoinKeyQuerier(a)).map(_.asInstanceOf[String]))
-      }).forall("isMissing(row.Status) && isMissing(row.qPhen)"))
-
-    assert(ktOuterJoin.count == nUnionRows &&
-      ktOuterJoin.nKeys == ktLeft.nKeys &&
-      ktOuterJoin.nColumns == nExpectedColumns)
-
-    assert(ktInnerJoin.count == nIntersectRows &&
-      ktInnerJoin.nKeys == nExpectedKeys &&
-      ktInnerJoin.nColumns == nExpectedColumns)
-
-    val outputFile = tmpDir.createTempFile("join", "tsv")
-    ktLeftJoin.export(outputFile)
-
-    val noNull = ktLeft.filter("isDefined(row.qPhen) && isDefined(row.Status)", keep = true).keyBy(List("Sample", "Status"))
-    assert(noNull.join(
-      noNull.rename(Map("qPhen" -> "qPhen_"), Map.empty[String, String]), "outer"
-    ).rdd.forall { r => !r.toSeq.exists(_ == null) })
-  }
-
-  @Test def testJoinDiffKeyNames() = {
-    val inputFile1 = "src/test/resources/sampleAnnotations.tsv"
-    val inputFile2 = "src/test/resources/sampleAnnotations2.tsv"
-
-    val ktLeft = hc.importTable(inputFile1, impute = true).keyBy("Sample")
-    val ktRight = hc.importTable(inputFile2, impute = true)
-      .keyBy("Sample")
-      .rename(Map("Sample" -> "sample"), Map.empty[String, String])
-    val ktBad = ktRight.keyBy("qPhen2")
-
-    intercept[HailException] {
-      val ktJoinBad = ktLeft.join(ktBad, "left")
-      assert(ktJoinBad.key sameElements Array("Sample"))
-    }
-
-    val ktJoin = ktLeft.join(ktRight, "left")
-    assert(ktJoin.key sameElements Array("Sample"))
-  }
-
-  @Test def testAggregate() {
-    val data = Array(Array("Case", 9, 0), Array("Case", 3, 4), Array("Control", 2, 3), Array("Control", 1, 5))
-    val rdd = sc.parallelize(data.map(Row.fromSeq(_)))
-    val signature = TStruct(("field1", TString()), ("field2", TInt32()), ("field3", TInt32()))
-    val keyNames = Array("field1")
-
-    val kt1 = Table(hc, rdd, signature, keyNames)
-    kt1.typeCheck()
-    val kt2 = kt1.aggregate("Status = row.field1",
-      "A = AGG.map(r => r.field2).sum(), " +
-        "B = AGG.map(r => r.field2).sum(), " +
-        "C = AGG.map(r => r.field2 + r.field3).sum(), " +
-        "D = AGG.count(), " +
-        "E = AGG.filter(r => r.field2 == 3).count()"
-    )
-
-    kt2.export("test.tsv")
-    val result = Array(Array("Case", 12, 12, 16, 2L, 1L), Array("Control", 3, 3, 11, 2L, 0L))
-    val resRDD = sc.parallelize(result.map(Row.fromSeq(_)))
-    val resSignature = TStruct(("Status", TString()), ("A", TInt32()), ("B", TInt32()), ("C", TInt32()), ("D", TInt64()), ("E", TInt64()))
-    val ktResult = Table(hc, resRDD, resSignature, key = Array("Status"))
-    ktResult.typeCheck()
-
-    assert(kt2 same ktResult)
-
-    val outputFile = tmpDir.createTempFile("aggregate", "tsv")
-    kt2.export(outputFile)
-  }
-
-  @Test def testForallExists() {
-    val data = Array(Array("Sample1", 9, 5), Array("Sample2", 3, 5), Array("Sample3", 2, 5), Array("Sample4", 1, 5))
-    val rdd = sc.parallelize(data.map(Row.fromSeq(_)))
-    val signature = TStruct(("Sample", TString()), ("field1", TInt32()), ("field2", TInt32()))
-    val keyNames = Array("Sample")
-
-    val kt = Table(hc, rdd, signature, keyNames)
-    kt.typeCheck()
-    assert(kt.forall("row.field2 == 5 && row.field1 != 0"))
-    assert(!kt.forall("row.field2 == 0 && row.field1 == 5"))
-    assert(kt.exists("""row.Sample == "Sample1" && row.field1 == 9 && row.field2 == 5"""))
-    assert(!kt.exists("""row.Sample == "Sample1" && row.field1 == 13 && row.field2 == 2"""))
-  }
-
-  @Test def testSelect() {
-    val data = Array(Array("Sample1", 9, 5, Row(5, "bunny")), Array("Sample2", 3, 5, Row(6, "hello")), Array("Sample3", 2, 5, null), Array("Sample4", 1, 5, null))
-    val rdd = sc.parallelize(data.map(Row.fromSeq(_)))
-    val signature = TStruct(("Sample", TString()), ("field1", TInt32()), ("field2", TInt32()), ("field3", TStruct(("A", TInt32()), ("B", TString()))))
-    val keyNames = Array("Sample")
-
-    val kt = Table(hc, rdd, signature, keyNames)
-    kt.typeCheck()
-
-    val select1 = kt.select("row.field1").keyBy("field1")
-    assert((select1.key sameElements Array("field1")) && (select1.fieldNames sameElements Array("field1")))
-
-    val select2 = kt.select("row.Sample", "row.field2", "row.field1").keyBy("Sample")
-    assert((select2.key sameElements Array("Sample")) && (select2.fieldNames sameElements Array("Sample", "field2", "field1")))
-
-    val select3 = kt.select("row.field2", "row.field1", "row.Sample").keyBy()
-    assert((select3.key sameElements Array.empty[String]) && (select3.fieldNames sameElements Array("field2", "field1", "Sample")))
-
-    val select4 = kt.select()
-    assert((select4.key sameElements Array.empty[String]) && (select4.fieldNames sameElements Array.empty[String]))
-
-    for (select <- Array(select1, select2, select3, select4)) {
-      select.export(tmpDir.createTempFile("select", "tsv"))
-    }
-
-    TestUtils.interceptFatal("Invalid key")(kt.select().keyBy("Sample"))
-  }
-
-  @Test def testDrop() {
-    val data = Array(Array("Sample1", 9, 5), Array("Sample2", 3, 5), Array("Sample3", 2, 5), Array("Sample4", 1, 5))
-    val rdd = sc.parallelize(data.map(Row.fromSeq(_)))
-    val signature = TStruct(("Sample", TString()), ("field1", TInt32()), ("field2", TInt32()))
-
-    val kt = Table(hc, rdd, signature, Array("Sample"))
-    kt.typeCheck()
-    val drop0 = kt.drop(Array.empty[String])
-    assert((drop0.key sameElements Array("Sample")) && (drop0.fieldNames sameElements Array("Sample", "field1", "field2")))
-    val drop1 = kt.drop(Array("Sample"))
-    assert((drop1.key sameElements Array.empty[String]) && (drop1.fieldNames sameElements Array("field1", "field2")))
-    val drop2 = kt.drop(Array("field1", "field2"))
-    assert((drop2.key sameElements Array("Sample")) && (drop2.fieldNames sameElements Array("Sample")))
-    val drop3 = kt.drop(Array("Sample", "field1"))
-    assert((drop3.key sameElements Array.empty[String]) && (drop3.fieldNames sameElements Array("field2")))
-    val drop4 = kt.drop(Array("Sample", "field2"))
-    assert((drop4.key sameElements Array.empty[String]) && (drop4.fieldNames sameElements Array("field1")))
-    val drop5 = kt.drop(Array("Sample", "field1", "field2"))
-    assert((drop5.key sameElements Array.empty[String]) && (drop5.fieldNames sameElements Array.empty[String]))
-
-    val kt2 = Table(hc, rdd, signature, Array("field1", "field2"))
-    val drop6 = kt2.drop(Array("field1"))
-    assert((drop6.key sameElements Array("field2")) && (drop6.fieldNames sameElements Array("Sample", "field2")))
-
-    for (drop <- Array(drop0, drop1, drop2, drop3, drop4, drop5, drop6)) {
-      drop.export(tmpDir.createTempFile("drop", "tsv"))
-    }
-  }
-
   @Test def testExplode() {
     val kt1 = sampleKT1
     val kt2 = sampleKT2
@@ -323,76 +135,24 @@ class TableSuite extends SparkSuite {
     val result2 = Array(Array("Sample1", 9, 5), Array("Sample1", 1, 5), Array("Sample2", 3, 5), Array("Sample3", 2, 5),
       Array("Sample3", 3, 5), Array("Sample3", 4, 5))
     val resRDD2 = sc.parallelize(result2.map(Row.fromSeq(_)))
-    val ktResult2 = Table(hc, resRDD2, TStruct(("Sample", TString()), ("field1", TInt32()), ("field2", TInt32())), key = Array("Sample"))
+    val ktResult2 = Table(hc, resRDD2,
+      TStruct(("Sample", TString()), ("field1", TInt32()), ("field2", TInt32())),
+      key = Some(IndexedSeq("Sample")))
     ktResult2.typeCheck()
 
     val result3 = Array(Array("Sample1", 9, 5), Array("Sample1", 10, 5), Array("Sample1", 9, 6), Array("Sample1", 10, 6),
       Array("Sample1", 1, 5), Array("Sample1", 1, 6), Array("Sample2", 3, 5), Array("Sample2", 3, 3))
     val resRDD3 = sc.parallelize(result3.map(Row.fromSeq(_)))
-    val ktResult3 = Table(hc, resRDD3, TStruct(("Sample", TString()), ("field1", TInt32()), ("field2", TInt32())), key = Array("Sample"))
+    val ktResult3 = Table(hc, resRDD3,
+      TStruct(("Sample", TString()), ("field1", TInt32()), ("field2", TInt32())),
+      key = Some(IndexedSeq("Sample")))
     ktResult3.typeCheck()
 
-    intercept[HailException](kt1.explode(Array("Sample")))
     assert(ktResult2.same(kt2.explode(Array("field1"))))
     assert(ktResult3.same(kt3.explode(Array("field1", "field2", "field1"))))
 
     val outputFile = tmpDir.createTempFile("explode", "tsv")
     kt2.explode(Array("field1")).export(outputFile)
-  }
-
-  @Test def testKeyTableToDF() {
-    val vds = hc.importVCF("src/test/resources/sample.vcf.bgz")
-
-    val kt = vds
-      .rowsTable()
-      .expandTypes()
-      .flatten()
-      .select("row.`info.MQRankSum`")
-      .copy2(globalSignature = TStruct.empty())
-
-    val df = kt.toDF(sqlContext)
-    assert(Table.fromDF(hc, df).same(kt))
-  }
-
-  @Test def testKeyTableToDF2() {
-    val vds = hc.importVCF("src/test/resources/sample.vcf.bgz")
-
-    val kt = vds
-      .rowsTable()
-      .annotate("locus = str(row.locus), alleles = str(row.alleles), filters = row.filters.toArray()")
-      .flatten()
-      .copy2(globalSignature = TStruct.empty())
-
-    val df = kt.toDF(sqlContext)
-    val kt2 = Table.fromDF(hc, df, key = Array("locus", "alleles"))
-    assert(kt2.same(kt))
-  }
-
-  @Test def testQuery() {
-    val kt = hc.importTable("src/test/resources/sampleAnnotations.tsv", impute = true)
-
-    case class LineData(sample: String, status: String, qPhen: Option[Int])
-
-    val localData = hadoopConf.readLines("src/test/resources/sampleAnnotations.tsv") { lines =>
-      lines.drop(1).map { l =>
-        val Array(sample, caseStatus, qPhen) = l.value.split("\t")
-        LineData(sample, caseStatus, if (qPhen != "NA") Some(qPhen.toInt) else None)
-      }.toArray
-    }
-
-    val statComb = localData.flatMap { ld => ld.qPhen }
-      .aggregate(new StatCounter())({ case (sc, i) => sc.merge(i) }, { case (sc1, sc2) => sc1.merge(sc2) })
-
-    val Array(ktMean, ktStDev) = kt.query(Array("AGG.map(r => r.qPhen.toFloat64).stats().mean", "AGG.map(r => r.qPhen.toFloat64).stats().stdev")).map(_._1)
-
-    assert(D_==(ktMean.asInstanceOf[Double], statComb.mean))
-    assert(D_==(ktStDev.asInstanceOf[Double], statComb.stdev))
-
-    val counter = localData.map(_.status).groupBy(identity).mapValues(_.length)
-
-    val ktCounter = kt.query("AGG.map(r => r.Status).counter()")._1.asInstanceOf[Map[String, Long]]
-
-    assert(ktCounter == counter)
   }
 
   @Test def testKeyOrder() {
@@ -404,7 +164,7 @@ class TableSuite extends SparkSuite {
         "f3" -> TInt32(),
         "f4" -> TString()
       ),
-      Array("f3", "f2", "f1"))
+      Some(IndexedSeq("f3", "f2", "f1")))
     kt1.typeCheck()
 
     val kt2 = Table(hc,
@@ -415,7 +175,7 @@ class TableSuite extends SparkSuite {
         "f2" -> TString(),
         "f5" -> TString()
       ),
-      Array("f3", "f2", "f1"))
+      Some(IndexedSeq("f3", "f2", "f1")))
     kt2.typeCheck()
 
     assert(kt1.join(kt2, "inner").count() == 1L)
@@ -426,89 +186,4 @@ class TableSuite extends SparkSuite {
     val kt = hc.importTable("src/test/resources/sampleAnnotations.tsv", impute = true)
     assert(kt.same(kt))
   }
-
-  @Test def testSelfJoin() {
-    val kt = hc.importTable("src/test/resources/sampleAnnotations.tsv", impute = true).keyBy("Sample")
-    assert(kt.join(kt, "inner").forall("(isMissing(row.Status) || row.Status == row.Status_1) && " +
-      "(isMissing(row.qPhen) || row.qPhen == row.qPhen_1)"))
-  }
-
-  @Test def issue2231() {
-    assert(Table.range(hc, 100)
-      .annotate("j = 1.0, i = 1")
-      .keyBy("i").join(Table.range(hc, 100), "inner")
-      .signature.fields.map(f => (f.name, f.typ)).toSet
-      ===
-      Set(("index", TInt32()), ("i", TInt32()), ("j", TFloat64())))
-  }
-
-  @Test def testGlobalAnnotations() {
-    val kt = Table.range(hc, 10)
-      .annotateGlobalExpr("foo = [1,2,3]")
-      .annotateGlobal(Map(5 -> "bar"), TDict(TInt32Optional, TStringOptional), "dict")
-      .annotateGlobalExpr("another = global.foo[1]")
-
-    assert(kt.filter("global.dict.get(row.index) == \"bar\"", true).count() == 1)
-    assert(kt.annotate("baz = global.foo").forall("row.baz == [1,2,3]"))
-    assert(kt.forall("global.foo == [1,2,3]"))
-    assert(kt.exists("global.dict.get(row.index) == \"bar\""))
-
-    val gkt = kt.aggregate("index = row.index", "x = AGG.map(r => global.dict.get(r.index)).collect()[0]")
-    assert(gkt.exists("row.x == \"bar\""))
-    assert(kt.select("baz = global.dict.get(row.index)").exists("row.baz == \"bar\""))
-
-    val tmpPath = tmpDir.createTempFile(extension = "kt")
-    kt.write(tmpPath)
-    assert(hc.readTable(tmpPath).same(kt))
-  }
-
-  @Test def testFlatten() {
-    val table = Table.range(hc, 1).annotate("x = 5").keyBy("x")
-    table.flatten()
-  }
-
-  @Test def testMaximalIndependentSet() {
-    val edges = List((0, 4), (0, 1), (0, 2), (1, 5), (1, 3), (2, 3), (2, 6), (3, 7), (4, 5), (4, 6), (5, 7), (6, 7))
-    val edgeTable = Table
-      .parallelize(SparkSuite.hc, edges.map { case (i: Int, j: Int) => Row(i.toLong, j.toLong) }.toIndexedSeq,
-        TStruct("i" -> TInt64(), "j" -> TInt64()), Array.empty[String], None)
-    val misTable = edgeTable.maximalIndependentSet("row.i", "row.j", true, None)
-
-    val mis = misTable.collect().map(row => row.getLong(0))
-
-    val maximalIndependentSets = List(Set(0, 6, 5, 3), Set(1, 4, 7, 2))
-    // imperfect greedy algorithm may also give non-maximal independent sets
-    val nonMaximalIndependentSets = List(Set(0, 7), Set(6, 1))
-
-    assert(nonMaximalIndependentSets.contains(mis.toSet) || maximalIndependentSets.contains(mis.toSet))
-    assert(misTable.signature == TStruct("node" -> TInt64())
-      && misTable.key == IndexedSeq("node")
-      && misTable.globalSignature == TStruct())
-  }
-
-  @Test def testMaximalIndependentSetWithTieBreakerAndStrings() {
-    val isCase = Map("A" -> true, "C" -> true, "E" -> true, "G" -> true, "H" -> true)
-    val edges = List(("A", "B"), ("C", "D"), ("E", "F"), ("G", "H"))
-      .map { case (strA, strB) =>
-        ((strA, isCase.getOrElse(strA, false)), (strB, isCase.getOrElse(strB, false)))
-      }
-
-    val iStruct = TStruct("id" -> TString(), "isCase" -> TBoolean())
-
-    val edgeTable = Table
-      .parallelize(SparkSuite.hc, edges.map { case (i, j) => Row(Row(i._1, i._2), Row(j._1, j._2)) }.toIndexedSeq,
-        TStruct("i" -> iStruct, "j" -> iStruct), Array.empty[String], None)
-
-    edgeTable.typeCheck()
-
-    val misTable = edgeTable.maximalIndependentSet("row.i", "row.j", true,
-      Some("(if ((l.isCase && (!(r.isCase)))) (-1) " +
-        "else (if (((!(l.isCase)) && r.isCase)) (1) " +
-        "else (0))).toInt64()"))
-
-    val mis = misTable.collect().map(row => (row.getStruct(0).get(0), row.getStruct(0).get(1))).toSet
-    val expectedSets = List(Set("A", "C", "E", "G"), Set("A", "C", "E", "H")).map(set => set.map(str => (str, true)))
-    assert(expectedSets.contains(mis))
-  }
-
 }

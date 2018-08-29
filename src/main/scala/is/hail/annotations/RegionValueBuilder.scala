@@ -2,7 +2,7 @@ package is.hail.annotations
 
 import is.hail.expr.types._
 import is.hail.utils._
-import is.hail.variant.{AltAllele, Locus, Variant}
+import is.hail.variant.Locus
 import org.apache.spark.sql.Row
 
 class RegionValueBuilder(var region: Region) {
@@ -84,6 +84,17 @@ class RegionValueBuilder(var region: Region) {
   def advance() {
     if (indexstk.nonEmpty)
       indexstk(0) = indexstk(0) + 1
+  }
+
+  /**
+    * Unsafe unless the bytesize of every type being "advanced past" is size
+    * 0. The primary use-case is when adding an array of hl.tstruct()
+    * (i.e. empty structs).
+    *
+    **/
+  def unsafeAdvance(i: Int) {
+    if (indexstk.nonEmpty)
+      indexstk(0) = indexstk(0) + i
   }
 
   def startBaseStruct(init: Boolean = true) {
@@ -231,8 +242,7 @@ class RegionValueBuilder(var region: Region) {
   def addBinary(bytes: Array[Byte]) {
     assert(currentType().isInstanceOf[TBinary])
 
-    val boff = region.appendInt(bytes.length)
-    region.appendBytes(bytes)
+    val boff = region.appendBinary(bytes)
 
     if (typestk.nonEmpty) {
       val off = currentOffset()
@@ -385,6 +395,19 @@ class RegionValueBuilder(var region: Region) {
     addElement(t, rv.region, rv.offset, i)
   }
 
+  def selectRegionValue(fromT: TStruct, fromFieldIdx: Array[Int], fromRV: RegionValue) {
+    selectRegionValue(fromT, fromFieldIdx, fromRV.region, fromRV.offset)
+  }
+
+  def selectRegionValue(fromT: TStruct, fromFieldIdx: Array[Int], region: Region, offset: Long) {
+    val t = fromT.typeAfterSelect(fromFieldIdx).fundamentalType
+    assert(currentType() == t)
+    assert(t.size == fromFieldIdx.length)
+    startStruct()
+    addFields(fromT, region, offset, fromFieldIdx)
+    endStruct()
+  }
+
   def addRegionValue(t: Type, rv: RegionValue) {
     addRegionValue(t, rv.region, rv.offset)
   }
@@ -527,6 +550,21 @@ class RegionValueBuilder(var region: Region) {
           endStruct()
       }
 
+  }
+
+  def addInlineRow(t: TBaseStruct, a: Row) {
+    var i = 0
+    if (a == null) {
+      while (i < t.size) {
+        setMissing()
+        i += 1
+      }
+    } else {
+      while(i < t.size) {
+        addAnnotation(t.types(i), a(i))
+        i += 1
+      }
+    }
   }
 
   def result(): RegionValue = RegionValue(region, start)

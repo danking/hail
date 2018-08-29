@@ -15,10 +15,9 @@ Methods
 
 .. autosummary::
 
-    export_cassandra
+    export_elasticsearch
     export_gen
     export_plink
-    export_solr
     export_vcf
     get_vcf_metadata
     import_bed
@@ -30,6 +29,7 @@ Methods
     import_plink
     import_table
     import_vcf
+    index_bgen
     read_matrix_table
     read_table
 
@@ -40,8 +40,8 @@ Methods
 
     linear_regression
     logistic_regression
-    linear_mixed_regression
     pca
+    row_correlation
 
 
 .. rubric:: Genetics
@@ -51,25 +51,28 @@ Methods
     balding_nichols_model
     concordance
     filter_intervals
-    FilterAlleles
+    filter_alleles
+    filter_alleles_hts
     genetic_relatedness_matrix
     hwe_normalized_pca
     identity_by_descent
     impute_sex
+    ld_matrix
     ld_prune
     mendel_errors
-    min_rep
+    de_novo
     nirvana
     pc_relate
     realized_relationship_matrix
     sample_qc
     skat
+    split_multi
     split_multi_hts
-    SplitMulti
     transmission_disequilibrium_test
     trio_matrix
     variant_qc
     vep
+    window_by_locus
 
 
 .. rubric:: Miscellaneous

@@ -6,14 +6,10 @@ class RegionValueFractionAggregator extends RegionValueAggregator {
   private var trues = 0L
   private var total = 0L
 
-  def seqOp(i: Boolean, missing: Boolean) {
+  def seqOp(region: Region, i: Boolean, missing: Boolean) {
     total += 1
     if (!missing && i)
       trues += 1
-  }
-
-  def seqOp(region: Region, off: Long, missing: Boolean) {
-    seqOp(region.loadBoolean(off), missing)
   }
 
   def result(rvb: RegionValueBuilder) {
@@ -29,5 +25,17 @@ class RegionValueFractionAggregator extends RegionValueAggregator {
     total += other.total
   }
 
-  def copy() = new RegionValueFractionAggregator()
+  def newInstance() = new RegionValueFractionAggregator()
+
+  override def copy(): RegionValueFractionAggregator = {
+    val rva = new RegionValueFractionAggregator()
+    rva.trues = trues
+    rva.total = total
+    rva
+  }
+
+  def clear() {
+    trues = 0L
+    total = 0L
+  }
 }

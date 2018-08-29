@@ -1,6 +1,7 @@
 package is.hail.expr.types
 
-import is.hail.annotations.ExtendedOrdering
+import is.hail.annotations.{CodeOrdering, ExtendedOrdering}
+import is.hail.expr.ir.EmitMethodBuilder
 import is.hail.utils._
 
 import scala.collection.JavaConverters._
@@ -29,7 +30,15 @@ final case class TTuple(_types: IndexedSeq[Type], override val required: Boolean
 
   val ordering: ExtendedOrdering = TBaseStruct.getOrdering(types)
 
+  def codeOrdering(mb: EmitMethodBuilder, other: Type): CodeOrdering = {
+    assert(other isOfType this)
+    CodeOrdering.rowOrdering(this, other.asInstanceOf[TTuple], mb)
+  }
+
   val size: Int = types.length
+
+  override def truncate(newSize: Int): TTuple =
+    TTuple(types.take(newSize), required)
 
   val missingIdx = new Array[Int](size)
   val nMissing: Int = TBaseStruct.getMissingness(types, missingIdx)

@@ -2,18 +2,46 @@ package is.hail.utils
 
 import java.util.regex.Pattern
 
-import is.hail.annotations.Annotation
+import is.hail.HailContext
 import is.hail.expr._
+import is.hail.expr.ir.TableImport
 import is.hail.expr.types._
+import is.hail.table.Table
 import is.hail.utils.StringEscapeUtils._
-import is.hail.variant.ReferenceGenome$
-import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.Row
+
+import scala.util.matching.Regex
+
+case class TableReaderOptions(
+  nPartitions: Int,
+  commentStartsWith: Array[String],
+  commentRegexes: Array[Regex],
+  separator: String,
+  missing: String,
+  noHeader: Boolean,
+  header: String,
+  quote: java.lang.Character,
+  skipBlankLines: Boolean,
+  useColIndices: Array[Int],
+  originalType: TStruct) {
+  assert(useColIndices.isSorted)
+
+  def isComment(s: String): Boolean = TextTableReader.isCommentLine(commentStartsWith, commentRegexes)(s)
+}
 
 object TextTableReader {
 
-  def splitLine(s: String, separator: String, quote: java.lang.Character): Array[String] = {
+  def splitLine(s: String, separator: String, quote: java.lang.Character): Array[String] =
+    splitLine(s, separator, quote, new ArrayBuilder[String], new StringBuilder)
+
+  def splitLine(
+    s: String,
+    separator: String,
+    quote: java.lang.Character,
+    ab: ArrayBuilder[String],
+    sb: StringBuilder): Array[String] = {
+    ab.clear()
+    sb.clear()
 
     val matchSep: Int => Int = separator.length match {
       case 0 => fatal("Hail does not currently support 0-character separators")
@@ -32,9 +60,6 @@ object TextTableReader {
           -1
       }
     }
-
-    val ab = new ArrayBuilder[String]
-    val sb = new StringBuilder
 
     var i = 0
     while (i < s.length) {
@@ -73,7 +98,6 @@ object TextTableReader {
         i += 1
       }
     }
-
     ab += sb.result()
 
     ab.result()
@@ -83,6 +107,10 @@ object TextTableReader {
   val doubleRegex = """^[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?$"""
   val intRegex = """^-?\d+$"""
 
+  def isCommentLine(commentStartsWith: Array[String], commentRegexes: Array[Regex])(line: String): Boolean = {
+    commentStartsWith.exists(pattern => line.startsWith(pattern)) || commentRegexes.exists(pattern => pattern.matches(line))
+  }
+
   def imputeTypes(values: RDD[WithContext[String]], header: Array[String],
     delimiter: String, missing: String, quote: java.lang.Character): Array[Option[Type]] = {
     val nFields = header.length
@@ -91,9 +119,12 @@ object TextTableReader {
     val regexTypes: Array[Type] = Array(TBoolean(), TInt32(), TFloat64())
     val nRegex = regexes.length
 
-    val imputation = values.treeAggregate(MultiArray2.fill[Boolean](nFields, nRegex + 1)(true))({ case (ma, line) =>
-      line.foreach { l =>
-        val split = splitLine(l, delimiter, quote)
+    val imputation = values.mapPartitions { it =>
+      val ma = MultiArray2.fill[Boolean](nFields, nRegex + 1)(true)
+      val ab = new ArrayBuilder[String]
+      val sb = new StringBuilder
+      it.foreach { line => line.foreach { l =>
+        val split = splitLine(l, delimiter, quote, ab, sb)
         if (split.length != nFields)
           fatal(s"expected $nFields fields, but found ${ split.length }")
 
@@ -110,9 +141,10 @@ object TextTableReader {
           }
           i += 1
         }
-      }
-      ma
-    }, { case (ma1, ma2) =>
+      }}
+      Iterator.single(ma)
+    }
+      .reduce({ case (ma1, ma2) =>
       var i = 0
       while (i < nFields) {
         var j = 0
@@ -134,21 +166,27 @@ object TextTableReader {
     }.toArray
   }
 
-  def read(sc: SparkContext)(files: Array[String],
+  def read(hc: HailContext)(files: Array[String],
     types: Map[String, Type] = Map.empty[String, Type],
-    commentChar: Option[String] = None,
+    comment: Array[String] = Array.empty[String],
     separator: String = "\t",
     missing: String = "NA",
     noHeader: Boolean = false,
     impute: Boolean = false,
-    nPartitions: Int = sc.defaultMinPartitions,
-    quote: java.lang.Character = null): (TStruct, RDD[WithContext[Row]]) = {
+    nPartitions: Int = hc.sc.defaultMinPartitions,
+    quote: java.lang.Character = null,
+    skipBlankLines: Boolean = false): Table = {
+
     require(files.nonEmpty)
 
+    val commentStartsWith = comment.filter(_.length == 1)
+    val commentRegexes = comment.filter(_.length > 1).map(_.r)
+
+    val isComment = isCommentLine(commentStartsWith, commentRegexes) _
+
     val firstFile = files.head
-    val header = sc.hadoopConfiguration.readLines(firstFile) { lines =>
-      val filt = lines
-        .filter(line => commentChar.forall(pattern => !line.value.startsWith(pattern)))
+    val header = hc.hadoopConf.readLines(firstFile) { lines =>
+      val filt = lines.filter(line => !isComment(line.value) && !(skipBlankLines && line.value.isEmpty))
 
       if (filt.isEmpty)
         fatal(
@@ -171,11 +209,12 @@ object TextTableReader {
       warn(s"Found ${ duplicates.length } duplicate ${ plural(duplicates.length, "column") }. Mangled columns follows:\n  @1",
         duplicates.map { case (pre, post) => s"'$pre' -> '$post'" }.truncatable("\n  "))
     }
-    val nField = columns.length
 
-    val rdd = sc.textFilesLines(files, nPartitions)
+    val rdd = hc.sc.textFilesLines(files, nPartitions)
       .filter { line =>
-        commentChar.forall(ch => !line.value.startsWith(ch)) && (noHeader || line.value != header)
+        !isComment(line.value) &&
+          (noHeader || line.value != header) &&
+          !(skipBlankLines && line.value.isEmpty)
       }
 
     val sb = new StringBuilder
@@ -202,7 +241,8 @@ object TextTableReader {
               }
           }
         }
-      } else {
+      }
+      else {
         sb.append("Reading table with no type imputation\n")
         columns.map { c =>
           types.get(c) match {
@@ -219,36 +259,10 @@ object TextTableReader {
 
     info(sb.result())
 
-    val schema = TStruct(namesAndTypes: _*)
-
-    val parsed = rdd
-      .map {
-        _.map { line =>
-          val a = new Array[Annotation](nField)
-
-          val split = splitLine(line, separator, quote)
-          if (split.length != nField)
-            fatal(s"expected $nField fields, but found ${ split.length } fields")
-
-          var i = 0
-          while (i < nField) {
-            val (name, t) = namesAndTypes(i)
-            val field = split(i)
-            try {
-              if (field == missing)
-                a(i) = null
-              else
-                a(i) = TableAnnotationImpex.importAnnotation(field, t)
-            } catch {
-              case e: Exception =>
-                fatal(s"""${ e.getClass.getName }: could not convert "$field" to $t in column "$name" """)
-            }
-            i += 1
-          }
-          Row.fromSeq(a)
-        }
-      }
-
-    (schema, parsed)
+    val ttyp = TableType(TStruct(namesAndTypes: _*), None, TStruct())
+    val readerOpts = TableReaderOptions(nPartitions, commentStartsWith, commentRegexes,
+      separator, missing, noHeader, header, quote, skipBlankLines, namesAndTypes.indices.toArray,
+      ttyp.rowType)
+    new Table(hc, TableImport(files, ttyp, readerOpts))
   }
 }

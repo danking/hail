@@ -1,137 +1,78 @@
 from hail.utils.java import Env
 from hail.typecheck import *
 import io
-
+import json
+from typing import Dict, List
 
 @typecheck(path=str,
+           mode=enumeration('r', 'w', 'x', 'rb', 'wb', 'xb'),
            buffer_size=int)
-def hadoop_read(path, buffer_size=8192):
-    """Open a readable file through the Hadoop filesystem API.
-    Supports distributed file systems like hdfs, gs, and s3.
+def hadoop_open(path: str, mode: str = 'r', buffer_size: int = 8192):
+    """Open a file through the Hadoop filesystem API. Supports distributed
+    file systems like hdfs, gs, and s3.
 
     Examples
     --------
 
-    .. doctest::
-        :options: +SKIP
+    >>> with hadoop_open('gs://my-bucket/notes.txt') as f: # doctest: +SKIP
+    ...     for line in f:
+    ...         print(line.strip())
 
-        >>> with hadoop_read('gs://my-bucket/notes.txt') as f:
-        ...     for line in f:
-        ...         print(line.strip())
+    >>> with hadoop_open('gs://my-bucket/notes.txt', 'w') as f: # doctest: +SKIP
+    ...     f.write('result1: %s\\n' % result1)
+    ...     f.write('result2: %s\\n' % result2)
 
-    Notes
-    -----
-    The provided source file path must be a URI (uniform resource identifier).
-
-    .. caution::
-
-        These file handles are slower than standard Python file handles.
-        If you are reading a file larger than ~50M, it will be faster to
-        use :meth:`~hail.hadoop_copy` to copy the file locally, then read it
-        with standard Python I/O tools.
-
-    Parameters
-    ----------
-    path: :obj:`str`
-        Source file URI.
-    buffer_size: :obj:`int`
-        Size of internal buffer.
-
-    Returns
-    -------
-    :class:`io.BufferedReader`
-        Iterable file reader,
-        `io.BufferedReader <https://docs.python.org/3/library/io.html#io.BufferedReader>`__.
-    """
-    return io.TextIOWrapper(io.BufferedReader(HadoopReader(path, buffer_size), buffer_size=buffer_size),
-                            encoding='iso-8859-1')
-
-
-@typecheck(path=str,
-           buffer_size=int)
-def hadoop_read_binary(path, buffer_size=8192):
-    """Open a readable binary file through the Hadoop filesystem API.
-    Supports distributed file systems like hdfs, gs, and s3.
-
-    Calling :meth:`f.read(n_bytes)` on the resulting file handle reads `n_bytes` bytes as a
-    Python bytearray. If no argument is provided, the entire file will be read.
-
-    Examples
-    --------
-
-    .. doctest::
-        :options: +SKIP
-
-        >>> from struct import unpack
-        >>> with hadoop_read('gs://my-bucket/notes.txt') as f:
-        ...     print(unpack('<f', bytearray(f.read())))
+    >>> from struct import unpack
+    >>> with hadoop_open('gs://my-bucket/notes.txt', 'rb') as f: # doctest: +SKIP
+    ...     print(unpack('<f', bytearray(f.read())))
 
     Notes
     -----
-    The provided source file path must be a URI (uniform resource identifier).
+    The supported modes are:
 
-    .. caution::
-
-        These file handles are slower than standard Python file handles.
-        If you are reading a file larger than ~50M, it will be faster to
-        use :meth:`~hail.hadoop_copy` to copy the file locally, then read it
-        with standard Python I/O tools.
-
-    Parameters
-    ----------
-    path: :obj:`str`
-        Source file URI.
-    buffer_size: :obj:`int`
-        Size of internal buffer.
-
-    Returns
-    -------
-    `io.BufferedReader`
-        Binary file reader,
-        `io.BufferedReader <https://docs.python.org/3/library/io.html#io.BufferedReader>`__.
-    """
-    return io.BufferedReader(HadoopReader(path, buffer_size), buffer_size=buffer_size)
+     - ``'r'`` -- Readable text file (:class:`io.TextIOWrapper`). Default behavior.
+     - ``'w'`` -- Writable text file (:class:`io.TextIOWrapper`).
+     - ``'x'`` -- Exclusive writable text file (:class:`io.TextIOWrapper`).
+       Throws an error if a file already exists at the path.
+     - ``'rb'`` -- Readable binary file (:class:`io.BufferedReader`).
+     - ``'wb'`` -- Writable binary file (:class:`io.BufferedWriter`).
+     - ``'xb'`` -- Exclusive writable binary file (:class:`io.BufferedWriter`).
+       Throws an error if a file already exists at the path.
 
 
-@typecheck(path=str,
-           buffer_size=int)
-def hadoop_write(path, buffer_size=8192):
-    """Open a writable file through the Hadoop filesystem API.
-    Supports distributed file systems like hdfs, gs, and s3.
-
-    Examples
-    --------
-
-    .. doctest::
-        :options: +SKIP
-
-        >>> with hadoop_write('gs://my-bucket/notes.txt') as f:
-        ...     f.write('result1: %s\\n' % result1)
-        ...     f.write('result2: %s\\n' % result2)
-
-    Notes
-    -----
     The provided destination file path must be a URI (uniform resource identifier).
 
     .. caution::
 
         These file handles are slower than standard Python file handles. If you
         are writing a large file (larger than ~50M), it will be faster to write
-        to a local file using standard Python I/O and use :meth:`~hail.hadoop_copy`
+        to a local file using standard Python I/O and use :func:`.hadoop_copy`
         to move your file to a distributed file system.
 
     Parameters
     ----------
-    path: :obj:`str`
-        Destination file URI.
+    path : :obj:`str`
+        Path to file.
+    mode : :obj:`str`
+        File access mode.
+    buffer_size : :obj:`int`
+        Buffer size, in bytes.
 
     Returns
     -------
-    :class:`io.BufferedWriter`
-        File writer object,
-        `io.BufferedWriter <https://docs.python.org/3/library/io.html#io.BufferedWriter>`__.
+        Readable or writable file handle.
     """
-    return io.TextIOWrapper(io.BufferedWriter(HadoopWriter(path), buffer_size=buffer_size), encoding='iso-8859-1')
+    if 'r' in mode:
+        handle = io.BufferedReader(HadoopReader(path, buffer_size), buffer_size=buffer_size)
+    elif 'w' in mode:
+        handle = io.BufferedWriter(HadoopWriter(path), buffer_size=buffer_size)
+    elif 'x' in mode:
+        handle = io.BufferedWriter(HadoopWriter(path, exclusive=True), buffer_size=buffer_size)
+
+    if 'b' in mode:
+        return handle
+    else:
+        return io.TextIOWrapper(handle, encoding='iso-8859-1')
 
 
 @typecheck(src=str,
@@ -179,8 +120,8 @@ class HadoopReader(io.RawIOBase):
 
 
 class HadoopWriter(io.RawIOBase):
-    def __init__(self, path):
-        self._jfile = Env.jutils().writeFile(path, Env.hc()._jhc)
+    def __init__(self, path, exclusive=False):
+        self._jfile = Env.jutils().writeFile(path, Env.hc()._jhc, exclusive)
         super(HadoopWriter, self).__init__()
 
     def writable(self):
@@ -195,3 +136,104 @@ class HadoopWriter(io.RawIOBase):
     def write(self, b):
         self._jfile.write(bytearray(b))
         return len(b)
+
+
+def hadoop_exists(path: str) -> bool:
+    """Returns ``True`` if `path` exists.
+
+    Parameters
+    ----------
+    path : :obj:`str`
+
+    Returns
+    -------
+    :obj:`.bool`
+    """
+    return Env.jutils().exists(path, Env.hc()._jhc)
+
+
+def hadoop_is_file(path: str) -> bool:
+    """Returns ``True`` if `path` both exists and is a file.
+
+    Parameters
+    ----------
+    path : :obj:`str`
+
+    Returns
+    -------
+    :obj:`.bool`
+    """
+    return Env.jutils().isFile(path, Env.hc()._jhc)
+
+
+def hadoop_is_dir(path) -> bool:
+    """Returns ``True`` if `path` both exists and is a directory.
+
+    Parameters
+    ----------
+    path : :obj:`str`
+
+    Returns
+    -------
+    :obj:`.bool`
+    """
+    return Env.jutils().isDir(path, Env.hc()._jhc)
+
+
+def hadoop_stat(path: str) -> Dict:
+    """Returns information about the file or directory at a given path.
+
+    Notes
+    -----
+    Raises an error if `path` does not exist.
+
+    The resulting dictionary contains the following data:
+
+    - is_dir (:obj:`bool`) -- Path is a directory.
+    - size_bytes (:obj:`int`) -- Size in bytes.
+    - size (:obj:`str`) -- Size as a readable string.
+    - modification_time (:obj:`str`) -- Time of last file modification.
+    - owner (:obj:`str`) -- Owner.
+    - path (:obj:`str`) -- Path.
+
+    Parameters
+    ----------
+    path : :obj:`str`
+
+    Returns
+    -------
+    :obj:`Dict`
+    """
+    return json.loads(Env.jutils().stat(path, Env.hc()._jhc))
+
+
+def hadoop_ls(path: str) -> List[Dict]:
+    """Returns information about files at `path`.
+
+    Notes
+    -----
+    Raises an error if `path` does not exist.
+
+    If `path` is a file, returns a list with one element. If `path` is a
+    directory, returns an element for each file contained in `path` (does not
+    search recursively).
+
+    Each dict element of the result list contains the following data:
+
+    - is_dir (:obj:`bool`) -- Path is a directory.
+    - size_bytes (:obj:`int`) -- Size in bytes.
+    - size (:obj:`str`) -- Size as a readable string.
+    - modification_time (:obj:`str`) -- Time of last file modification.
+    - owner (:obj:`str`) -- Owner.
+    - path (:obj:`str`) -- Path.
+
+    Parameters
+    ----------
+    path : :obj:`str`
+
+    Returns
+    -------
+    :obj:`List[Dict]`
+    """
+    r = Env.jutils().ls(path, Env.hc()._jhc)
+    return json.loads(r)

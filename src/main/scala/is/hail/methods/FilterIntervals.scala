@@ -1,36 +1,24 @@
 package is.hail.methods
 
-import is.hail.annotations.{UnsafeRow, WritableRegionValue}
+import is.hail.rvd.{OrderedRVD, OrderedRVDType}
+import is.hail.table.Table
 import is.hail.utils.{Interval, IntervalTree}
 import is.hail.variant.MatrixTable
-import org.apache.spark.sql.Row
 
 import scala.collection.JavaConverters._
 
-object FilterIntervals {
-  def apply(vsm: MatrixTable, intervals: java.util.ArrayList[Interval], keep: Boolean): MatrixTable = {
-    val iList = IntervalTree(vsm.rvd.typ.pkType.ordering, intervals.asScala.toArray)
-    apply(vsm, iList, keep)
+object MatrixFilterIntervals {
+  def apply(mt: MatrixTable, jintervals: java.util.ArrayList[Interval], keep: Boolean): MatrixTable = {
+    val intervals = IntervalTree(mt.rvd.typ.kType.ordering, jintervals.asScala.toArray)
+    mt.copy2(rvd = mt.rvd.filterIntervals(intervals, keep))
   }
+}
 
-  def apply[U](vsm: MatrixTable, intervals: IntervalTree[U], keep: Boolean): MatrixTable = {
-    if (keep) {
-      vsm.copy2(rvd = vsm.rvd.filterIntervals(intervals))
-    } else {
-      val intervalsBc = vsm.sparkContext.broadcast(intervals)
-      val pkType = vsm.rvd.typ.pkType
-      val pkRowFieldIdx = vsm.rvd.typ.pkRowFieldIdx
-      val rowType = vsm.rvd.typ.rowType
-
-      vsm.copy2(rvd = vsm.rvd.mapPartitionsPreservesPartitioning(vsm.rvd.typ) { it =>
-        val pk = WritableRegionValue(pkType)
-        val pkUR = new UnsafeRow(pkType)
-        it.filter { rv =>
-          pk.setSelect(rowType, pkRowFieldIdx, rv)
-          pkUR.set(pk.value)
-          !intervalsBc.value.contains(pkType.ordering, pkUR)
-        }
-      })
-    }
+object TableFilterIntervals {
+  def apply(ht: Table, jintervals: java.util.ArrayList[Interval], keep: Boolean): Table = {
+    assert(ht.key.isDefined)
+    val orvd = ht.value.enforceOrderingRVD.asInstanceOf[OrderedRVD]
+    val intervals = IntervalTree(orvd.typ.kType.ordering, jintervals.asScala.toArray)
+    ht.copy2(rvd = orvd.filterIntervals(intervals, keep))
   }
 }

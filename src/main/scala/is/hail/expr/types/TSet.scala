@@ -2,6 +2,7 @@ package is.hail.expr.types
 
 import is.hail.annotations.{UnsafeUtils, _}
 import is.hail.check.Gen
+import is.hail.expr.ir.EmitMethodBuilder
 import is.hail.utils._
 import org.json4s.jackson.JsonMethods
 
@@ -46,28 +47,15 @@ final case class TSet(elementType: Type, override val required: Boolean = false)
   val ordering: ExtendedOrdering =
     ExtendedOrdering.setOrdering(elementType.ordering)
 
+  def codeOrdering(mb: EmitMethodBuilder, other: Type): CodeOrdering = {
+    assert(other isOfType this)
+    CodeOrdering.setOrdering(this, other.asInstanceOf[TSet], mb)
+  }
+
+
   override def str(a: Annotation): String = JsonMethods.compact(toJSON(a))
 
   override def genNonmissingValue: Gen[Annotation] = Gen.buildableOf[Set](elementType.genValue)
-
-  override def desc: String =
-    """
-    A ``Set`` is an unordered collection with no repeated values of a given data type (ex: Int, String). Sets can be constructed by specifying ``[item1, item2, ...].toSet()``.
-
-    .. code-block:: text
-        :emphasize-lines: 2
-
-        let s = ["rabbit", "cat", "dog", "dog"].toSet()
-        result: Set("cat", "dog", "rabbit")
-
-    They can also be nested such as Set[Set[Int]]:
-
-    .. code-block:: text
-        :emphasize-lines: 2
-
-        let s = [[1, 2, 3].toSet(), [4, 5, 5].toSet()].toSet()
-        result: Set(Set(1, 2, 3), Set(4, 5))
-    """
 
   override def scalaClassTag: ClassTag[Set[AnyRef]] = classTag[Set[AnyRef]]
 }

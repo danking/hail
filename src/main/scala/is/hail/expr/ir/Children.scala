@@ -1,80 +1,114 @@
 package is.hail.expr.ir
 
-import is.hail.expr.BaseIR
+import is.hail.utils._
 
 object Children {
   private def none: IndexedSeq[BaseIR] = Array.empty[BaseIR]
+
   def apply(x: IR): IndexedSeq[BaseIR] = x match {
     case I32(x) => none
     case I64(x) => none
     case F32(x) => none
     case F64(x) => none
+    case Str(x) => none
     case True() => none
     case False() => none
+    case Literal(_, _, _) => none
+    case Void() => none
     case Cast(v, typ) =>
       Array(v)
     case NA(typ) => none
-    case MapNA(name, value, body, typ) =>
-      Array(value, body)
     case IsNA(value) =>
       Array(value)
-    case If(cond, cnsq, altr, typ) =>
+    case If(cond, cnsq, altr) =>
       Array(cond, cnsq, altr)
-    case Let(name, value, body, typ) =>
+    case Let(name, value, body) =>
       Array(value, body)
     case Ref(name, typ) =>
       none
-    case ApplyBinaryPrimOp(op, l, r, typ) =>
+    case ApplyBinaryPrimOp(op, l, r) =>
       Array(l, r)
-    case ApplyUnaryPrimOp(op, x, typ) =>
+    case ApplyUnaryPrimOp(op, x) =>
       Array(x)
+    case ApplyComparisonOp(op, l, r) =>
+      Array(l, r)
     case MakeArray(args, typ) =>
-      args.toIndexedSeq
-    case MakeArrayN(len, elementType) =>
-      Array(len)
-    case ArrayRef(a, i, typ) =>
-      Array(a, i)
-    case ArrayMissingnessRef(a, i) =>
+      args.toFastIndexedSeq
+    case ArrayRef(a, i) =>
       Array(a, i)
     case ArrayLen(a) =>
       Array(a)
     case ArrayRange(start, stop, step) =>
       Array(start, stop, step)
-    case ArrayMap(a, name, body, elementTyp) =>
+    case ArraySort(a, ascending, _) =>
+      Array(a, ascending)
+    case ToSet(a) =>
+      Array(a)
+    case ToDict(a) =>
+      Array(a)
+    case ToArray(a) =>
+      Array(a)
+    case LowerBoundOnOrderedCollection(orderedCollection, elem, _) =>
+      Array(orderedCollection, elem)
+    case GroupByKey(collection) =>
+      Array(collection)
+    case ArrayMap(a, name, body) =>
       Array(a, body)
     case ArrayFilter(a, name, cond) =>
       Array(a, cond)
-    case ArrayFold(a, zero, accumName, valueName, body, typ) =>
+    case ArrayFlatMap(a, name, body) =>
+      Array(a, body)
+    case ArrayFold(a, zero, accumName, valueName, body) =>
       Array(a, zero, body)
-    case MakeStruct(fields, _) =>
-      fields.map(_._2).toIndexedSeq
-    case InsertFields(old, fields, _) =>
-      (old +: fields.map(_._2)).toIndexedSeq
-    case AggIn(_) =>
-      none
-    case AggMap(a, _, body, _) =>
+    case ArrayFor(a, valueName, body) =>
       Array(a, body)
-    case AggFilter(a, name, body, typ) =>
-      Array(a, body)
-    case AggFlatMap(a, name, body, typ) =>
-      Array(a, body)
-    case ApplyAggOp(a, op, args, _) =>
-      (a +: args).toIndexedSeq
-    case GetField(o, name, typ) =>
+    case MakeStruct(fields) =>
+      fields.map(_._2).toFastIndexedSeq
+    case SelectFields(old, fields) =>
+      Array(old)
+    case InsertFields(old, fields) =>
+      (old +: fields.map(_._2)).toFastIndexedSeq
+    case InitOp(i, args, aggSig) =>
+      i +: args
+    case SeqOp(i, args, _) =>
+      i +: args
+    case Begin(xs) =>
+      xs
+    case ApplyAggOp(a, constructorArgs, initOpArgs, aggSig) =>
+      (a +: constructorArgs) ++ initOpArgs.getOrElse(FastIndexedSeq())
+    case ApplyScanOp(a, constructorArgs, initOpArgs, aggSig) =>
+      (a +: constructorArgs) ++ initOpArgs.getOrElse(FastIndexedSeq())
+    case GetField(o, name) =>
       Array(o)
-    case GetFieldMissingness(o, name) =>
+    case MakeTuple(types) =>
+      types.toFastIndexedSeq
+    case GetTupleElement(o, idx) =>
       Array(o)
-    case MakeTuple(types, _) =>
-      types.toIndexedSeq
-    case GetTupleElement(o, idx, _) =>
-      Array(o)
+    case StringSlice(s, start, n) =>
+      Array(s, start, n)
+    case StringLength(s) =>
+      Array(s)
     case In(i, typ) =>
       none
-    case InMissingness(i) =>
+    case Die(message, typ) =>
       none
-    case Die(message) =>
-      none
-    case ApplyFunction(impl, args) =>
-      args.toIndexedSeq
+    case ApplyIR(_, args, _) =>
+      args.toFastIndexedSeq
+    case Apply(_, args) =>
+      args.toFastIndexedSeq
+    case ApplySeeded(_, args, seed) =>
+      args.toFastIndexedSeq
+    case ApplySpecial(_, args) =>
+      args.toFastIndexedSeq
+    case Uniroot(_, fn, min, max) =>
+      FastIndexedSeq(fn, min, max)
+    // from MatrixIR
+    case MatrixWrite(child, _) => IndexedSeq(child)
+    // from TableIR
+    case TableCount(child) => IndexedSeq(child)
+    case TableAggregate(child, query) => IndexedSeq(child, query)
+    case MatrixAggregate(child, query) => IndexedSeq(child, query)
+    case TableWrite(child, _, _, _, _) => IndexedSeq(child)
+    case TableExport(child, _, _, _, _) => IndexedSeq(child)
   }
 }

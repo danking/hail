@@ -10,8 +10,6 @@ import net.sourceforge.jdistlib.{Beta, ChiSquare, Normal, Poisson}
 import org.apache.commons.math3.distribution.HypergeometricDistribution
 import org.apache.spark.sql.Row
 
-import scala.collection.mutable
-
 package object stats {
 
   def uniroot(fn: Double => Double, min: Double, max: Double, tolerance: Double = 1.220703e-4): Option[Double] = {
@@ -110,18 +108,71 @@ package object stats {
     }
   }
 
-  def FisherExactTest(a: Int, b: Int, c: Int, d: Int,
-    oddsRatio: Double = 1d, confidence_level: Double = 0.95,
-    alternative: String = "two.sided"): Array[Option[Double]] = {
+  val hweStruct = TStruct("het_freq_hwe" -> TFloat64(), "p_value" -> TFloat64())
 
+  def hardyWeinbergTest(nHomRef: Int, nHet: Int, nHomVar: Int): Array[Double] = {
+    if (nHomRef < 0 || nHet < 0 || nHomVar < 0)
+      fatal(s"hardy_weinberg_test: all arguments must be non-negative, got $nHomRef, $nHet, $nHomVar")
+  
+    val n = nHomRef + nHet + nHomVar
+    val nAB = nHet
+    val nA = nAB + 2 * nHomRef.min(nHomVar)
+
+    val LH = LeveneHaldane(n, nA)
+    Array(LH.getNumericalMean / n, LH.exactMidP(nAB))
+  }
+  
+  val chisqStruct = TStruct("p_value" -> TFloat64(), "odds_ratio" -> TFloat64())
+  
+  def chiSquaredTest(a0: Int, b0: Int, c0: Int, d0: Int): Array[Double] = {
+    if (a0 < 0 || b0 < 0 || c0 < 0 || d0 < 0)
+      fatal(s"chi_squared_test: all arguments must be non-negative, got $a0, $b0, $c0, $d0")
+
+    val a = a0.toDouble
+    val b = b0.toDouble
+    val c = c0.toDouble
+    val d = d0.toDouble
+    
+    val ad = a * d
+    val bc = b * c
+    val det = ad - bc
+    val chiSquare = (a + b + c + d) * (det / ((a + b) * (c + d))) * (det / ((b + d) * (a + c)))
+    
+    Array(chiSquaredTail(chiSquare, 1), ad / bc)
+  }
+  
+  def contingencyTableTest(a: Int, b: Int, c: Int, d: Int, minCellCount: Int): Array[Double] = {
+    if (minCellCount < 0)
+      fatal(s"contingency_table_test: 'min_cell_count' must be non-negative, found $minCellCount")
+    
+    if (a >= minCellCount && b >= minCellCount && c >= minCellCount && d >= minCellCount)
+      chiSquaredTest(a, b, c, d)
+    else
+      fisherExactTest(a, b, c, d)
+  }
+  
+  val fetStruct = TStruct(
+    "p_value" -> TFloat64(),
+    "odds_ratio" -> TFloat64(),
+    "ci_95_lower" -> TFloat64(),
+    "ci_95_upper" -> TFloat64())
+
+  def fisherExactTest(a: Int, b: Int, c: Int, d: Int): Array[Double] =
+    fisherExactTest(a, b, c, d, 1.0, 0.95, "two.sided")
+  
+  def fisherExactTest(a: Int, b: Int, c: Int, d: Int,
+    oddsRatio: Double = 1d,
+    confidenceLevel: Double = 0.95,
+    alternative: String = "two.sided"): Array[Double] = {
+    
     if (!(a >= 0 && b >= 0 && c >= 0 && d >= 0))
-      fatal(s"All inputs must be >= 0. Found [$a, $b, $c, $d]")
+      fatal(s"fisher_exact_test: all arguments must be non-negative, got $a, $b, $c, $d")
 
-    if (confidence_level < 0d || confidence_level > 1d)
+    if (confidenceLevel < 0d || confidenceLevel > 1d)
       fatal("Confidence level must be between 0 and 1")
 
     if (oddsRatio < 0d)
-      fatal("Odds ratio must be between 0 and Inf")
+      fatal("Odds ratio must be non-negative")
 
     if (alternative != "greater" && alternative != "less" && alternative != "two.sided")
       fatal("Did not recognize test type string. Use one of greater, less, two.sided")
@@ -132,7 +183,7 @@ package object stats {
     val numSuccessSample = a
 
     if (!(popSize > 0 && sampleSize > 0 && sampleSize < popSize && numSuccessPopulation > 0 && numSuccessPopulation < popSize))
-      return Array(None, None, None, None)
+      return Array(Double.NaN, Double.NaN, Double.NaN, Double.NaN)
 
     val low = math.max(0, (a + b) - (b + d))
     val high = math.min(a + b, a + c)
@@ -194,56 +245,55 @@ package object stats {
 
     def unirootMnHyper(fn: Double => Double, x: Double)(t: Double) = mnhyper(fn(t)) - x
 
-    def unirootPnHyper(fn: Double => Double, x: Int, upper_tail: Boolean, alpha: Double)(t: Double) = pnhyper(x, fn(t), upper_tail) - alpha
+    def unirootPnHyper(fn: Double => Double, x: Int, upper_tail: Boolean, alpha: Double)(t: Double) =
+      pnhyper(x, fn(t), upper_tail) - alpha
 
-    def inverse(x: Double) = divOption(1d, x)
-
-    def mle(x: Double): Option[Double] = {
+    def mle(x: Double): Double = {
       if (x == low)
-        Option(0d)
+        0.0
       else if (x == high)
-        Option(Double.PositiveInfinity) // Should be infinity
+        Double.PositiveInfinity
       else {
         val mu = mnhyper(1.0)
         if (mu > x)
-          uniroot(unirootMnHyper(d => d, x), 0.0, 1.0)
+          uniroot(unirootMnHyper(d => d, x), 0.0, 1.0).getOrElse(Double.NaN)
         else if (mu < x)
-          uniroot(unirootMnHyper(d => 1 / d, x), epsilon, 1d).flatMap(inverse)
+          1.0 / uniroot(unirootMnHyper(d => 1 / d, x), epsilon, 1d).getOrElse(Double.NaN)
         else
-          Option(1d)
+          1.0
       }
     }
 
-    def ncpLower(x: Int, alpha: Double): Option[Double] = {
+    def ncpLower(x: Int, alpha: Double): Double = {
       if (x == low)
-        Option(0d)
+        0.0
       else {
-        val p = pnhyper(x, 1, upper_tail = true)
+        val p = pnhyper(x, upper_tail = true)
         if (p > alpha)
-          uniroot(unirootPnHyper(d => d, x, upper_tail = true, alpha), 0d, 1d)
+          uniroot(unirootPnHyper(d => d, x, upper_tail = true, alpha), 0d, 1d).getOrElse(Double.NaN)
         else if (p < alpha)
-          uniroot(unirootPnHyper(d => 1 / d, x, upper_tail = true, alpha), epsilon, 1d).flatMap(inverse)
+          1.0 / uniroot(unirootPnHyper(d => 1 / d, x, upper_tail = true, alpha), epsilon, 1d).getOrElse(Double.NaN)
         else
-          Option(1d)
+          1.0
       }
     }
 
-    def ncpUpper(x: Int, alpha: Double): Option[Double] = {
+    def ncpUpper(x: Int, alpha: Double): Double = {
       if (x == high) {
-        Option(Double.PositiveInfinity)
+        Double.PositiveInfinity
       }
       else {
-        val p = pnhyper(x, 1)
+        val p = pnhyper(x)
         if (p < alpha)
-          uniroot(unirootPnHyper(d => d, x, upper_tail = false, alpha), 0d, 1d)
+          uniroot(unirootPnHyper(d => d, x, upper_tail = false, alpha), 0d, 1d).getOrElse(Double.NaN)
         else if (p > alpha)
-          uniroot(unirootPnHyper(d => 1 / d, x, upper_tail = false, alpha), epsilon, 1d).flatMap(inverse)
+          1.0 / uniroot(unirootPnHyper(d => 1 / d, x, upper_tail = false, alpha), epsilon, 1d).getOrElse(Double.NaN)
         else
-          Option(1d)
+          1.0
       }
     }
 
-    val pvalue = alternative match {
+    val pvalue: Double = (alternative: @unchecked) match {
       case "less" => pnhyper(numSuccessSample, oddsRatio)
       case "greater" => pnhyper(numSuccessSample, oddsRatio, upper_tail = true)
       case "two.sided" =>
@@ -256,7 +306,6 @@ package object stats {
           val d = dnhyper(oddsRatio)
           d.filter(_ <= d(numSuccessSample - low) * relErr).sum
         }
-      case _ => fatal("didn't recognize option for alternative. Use one of [less, greater, two.sided]")
     }
 
     assert(pvalue >= 0d && pvalue <= 1.000000000002)
@@ -264,14 +313,14 @@ package object stats {
     val oddsRatioEstimate = mle(numSuccessSample)
 
     val confInterval = alternative match {
-      case "less" => (Option(0d), ncpUpper(numSuccessSample, 1 - confidence_level))
-      case "greater" => (ncpLower(numSuccessSample, 1 - confidence_level), Option(Double.PositiveInfinity))
+      case "less" => (0d, ncpUpper(numSuccessSample, 1 - confidenceLevel))
+      case "greater" => (ncpLower(numSuccessSample, 1 - confidenceLevel), Double.PositiveInfinity)
       case "two.sided" =>
-        val alpha = (1 - confidence_level) / 2d
+        val alpha = (1 - confidenceLevel) / 2d
         (ncpLower(numSuccessSample, alpha), ncpUpper(numSuccessSample, alpha))
     }
-
-    Array(Option(pvalue), oddsRatioEstimate, confInterval._1, confInterval._2)
+    
+    Array(pvalue, oddsRatioEstimate, confInterval._1, confInterval._2)
   }
 
   // Returns the p for which p = Prob(Z < x) with Z a standard normal RV
@@ -281,32 +330,34 @@ package object stats {
   def qnorm(p: Double): Double = Normal.quantile(p, 0, 1, true, false)
 
   // Returns the p for which p = Prob(Z^2 > x) with Z^2 a chi-squared RV with df degrees of freedom
-  def chiSquaredTail(df: Double, x: Double): Double = ChiSquare.cumulative(x, df, false, false)
+  def chiSquaredTail(x: Double, df: Double): Double = ChiSquare.cumulative(x, df, false, false)
 
   // Returns the x for which p = Prob(Z^2 > x) with Z^2 a chi-squared RV with df degrees of freedom
-  def inverseChiSquaredTail(df: Double, p: Double): Double = ChiSquare.quantile(p, df, false, false)
+  def inverseChiSquaredTail(p: Double, df: Double): Double = ChiSquare.quantile(p, df, false, false)
 
   def dbeta(x: Double, a: Double, b: Double): Double = Beta.density(x, a, b, false)
 
-  def rpois(lambda: Double): Double = new Poisson(lambda).random()
+  def dpois(x: Double, lambda: Double, logP: Boolean): Double = new Poisson(lambda).density(x, logP)
 
-  def rpois(n: Int, lambda: Double): IndexedSeq[Double] = new Poisson(lambda).random(n)
+  def dpois(x: Double, lambda: Double): Double = dpois(x, lambda, logP = false)
 
-  def dpois(x: Double, lambda: Double, logP: Boolean = false): Double = new Poisson(lambda).density(x, logP)
+  def ppois(x: Double, lambda: Double, lowerTail: Boolean, logP: Boolean): Double = new Poisson(lambda).cumulative(x, lowerTail, logP)
 
-  def ppois(x: Double, lambda: Double, lowerTail: Boolean = true, logP: Boolean = false): Double = new Poisson(lambda).cumulative(x, lowerTail, logP)
+  def ppois(x: Double, lambda: Double): Double = ppois(x, lambda, lowerTail = true, logP = false)
 
-  def qpois(x: Double, lambda: Double, lowerTail: Boolean = true, logP: Boolean = false): Int = {
+  def qpois(x: Double, lambda: Double, lowerTail: Boolean, logP: Boolean): Int = {
     val result = new Poisson(lambda).quantile(x, lowerTail, logP)
     assert(result.isValidInt, s"qpois result is not a valid int. Found $result.")
     result.toInt
   }
 
-  def binomTest(nSuccess: Int, n: Int, p: Double, alternative: String): Double = {
+  def qpois(x: Double, lambda: Double): Int = qpois(x, lambda, lowerTail = true, logP = false)
+
+  def binomTest(nSuccess: Int, n: Int, p: Double, alternative: Int): Double = {
     val kind = alternative match {
-      case "two.sided" => TestKind.TWO_SIDED
-      case "less" => TestKind.LOWER
-      case "greater" => TestKind.GREATER
+      case 0 => TestKind.TWO_SIDED
+      case 1 => TestKind.LOWER
+      case 2 => TestKind.GREATER
       case _ => fatal(s"""Invalid alternative "$alternative". Must be "two_sided", "less" or "greater".""")
     }
 
@@ -322,8 +373,11 @@ package object stats {
       length += count
       acc += count * math.log(count)
     }
-
-    (math.log(length) - (acc / length)) / math.log(2)
+    
+    if (length != 0)
+      (math.log(length) - (acc / length)) / math.log(2)
+    else
+      0.0
   }
 
   def uninitialized[T]: T = null.asInstanceOf[T]
@@ -340,7 +394,7 @@ package object stats {
 
     val rdd = hc.sc.parallelize(
       (0 until callMat.cols).map { j =>
-        (Annotation(Locus("1", j + 1), Array("A", "C").toFastIndexedSeq),
+        (Annotation(Locus("1", j + 1), FastIndexedSeq("A", "C")),
           (0 until callMat.rows).map { i =>
             Genotype(callMat(i, j))
           }: Iterable[Annotation])
@@ -374,7 +428,7 @@ package object stats {
 
     val rdd = hc.sc.parallelize(
       (0 until gpMat.cols).map { j =>
-        (Annotation(Locus("1", j + 1), Array("A", "C").toFastIndexedSeq),
+        (Annotation(Locus("1", j + 1), FastIndexedSeq("A", "C")),
           (0 until gpMat.rows).map { i =>
             Row(gpMat(i, j): IndexedSeq[Annotation])
           }: Iterable[Annotation])

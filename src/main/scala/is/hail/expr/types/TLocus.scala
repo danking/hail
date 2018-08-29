@@ -1,7 +1,9 @@
 package is.hail.expr.types
 
 import is.hail.annotations._
+import is.hail.asm4s.Code
 import is.hail.check._
+import is.hail.expr.ir.EmitMethodBuilder
 import is.hail.utils._
 import is.hail.variant._
 
@@ -34,8 +36,6 @@ case class TLocus(rg: RGBase, override val required: Boolean = false) extends Co
 
   override def genNonmissingValue: Gen[Annotation] = Locus.gen(rg.asInstanceOf[ReferenceGenome])
 
-  override def desc: String = "A ``Locus(GR)`` is a Hail data type representing a specific genomic location in the Variant Dataset. It is parameterized by a reference genome (RG) such as GRCh37 or GRCh38."
-
   override def scalaClassTag: ClassTag[Locus] = classTag[Locus]
 
   val ordering: ExtendedOrdering =
@@ -64,6 +64,34 @@ case class TLocus(rg: RGBase, override val required: Boolean = false) extends Co
     }
   }
 
+  def codeOrdering(mb: EmitMethodBuilder, other: Type): CodeOrdering = {
+    assert(other isOfType this)
+    new CodeOrdering {
+      type T = Long
+
+      override def compareNonnull(rx: Code[Region], x: Code[Long], ry: Code[Region], y: Code[Long], missingGreatest: Boolean): Code[Int] = {
+        val cmp = mb.newLocal[Int]
+
+        val c1 = representation.loadField(rx, x, 0)
+        val c2 = representation.loadField(ry, y, 0)
+
+        val s1 = Code.invokeScalaObject[Region, Long, String](TString.getClass, "loadString", rx, c1)
+        val s2 = Code.invokeScalaObject[Region, Long, String](TString.getClass, "loadString", ry, c2)
+
+        val p1 = rx.loadInt(representation.fieldOffset(x, 1))
+        val p2 = ry.loadInt(representation.fieldOffset(y, 1))
+
+        val codeRG = mb.getReferenceGenome(rg.asInstanceOf[ReferenceGenome])
+
+        Code(
+          cmp := codeRG.invoke[String, String, Int]("compare", s1, s2),
+          cmp.ceq(0).mux(
+            Code.invokeStatic[java.lang.Integer, Int, Int, Int]("compare", p1, p2),
+            cmp))
+      }
+    }
+  }
+
   val representation: TStruct = TLocus.representation(required)
 
   def locusOrdering: Ordering[Locus] = rg.locusOrdering
@@ -76,4 +104,8 @@ case class TLocus(rg: RGBase, override val required: Boolean = false) extends Co
   override def clear(): Unit = rg.clear()
 
   override def subst() = rg.subst().locusType
+  
+  def contig(region: Code[Region], off: Code[Long]): Code[Long] = representation.loadField(region, off, 0)
+  
+  def position(region: Code[Region], off: Code[Long]): Code[Int] = region.loadInt(representation.loadField(region, off, 1))
 }

@@ -2,17 +2,20 @@ package is.hail.variant
 
 import java.io.FileNotFoundException
 
+import is.hail.asm4s.FunctionBuilder
 import is.hail.check.Prop._
 import is.hail.check.Properties
+import is.hail.expr.ir.EmitFunctionBuilder
 import is.hail.expr.types.{TInterval, TLocus, TStruct}
 import is.hail.io.reference.FASTAReader
 import is.hail.table.Table
-import is.hail.utils.{HailException, Interval}
+import is.hail.utils.{HailException, Interval, SerializableHadoopConfiguration}
 import is.hail.testUtils._
 import is.hail.{SparkSuite, TestUtils}
 import org.apache.spark.SparkException
 import org.apache.spark.sql.Row
 import org.testng.annotations.Test
+import org.apache.hadoop
 
 class ReferenceGenomeSuite extends SparkSuite {
   @Test def testGRCh37() {
@@ -58,21 +61,6 @@ class ReferenceGenomeSuite extends SparkSuite {
     TestUtils.interceptFatal("in both X and Y contigs.")(ReferenceGenome("test", Array("1", "2", "3"), Map("1" -> 5, "2" -> 5, "3" -> 5), xContigs = Set("1"), yContigs = Set("1")))
   }
 
-  @Test def testParser() {
-    val rg = ReferenceGenome("foo", Array("1", "2", "3"), Map("1" -> 5, "2" -> 5, "3" -> 5))
-    ReferenceGenome.addReference(rg)
-
-    val vds = hc.importVCF("src/test/resources/sample.vcf")
-      .annotateRowsExpr("l = NA: Locus(foo), i = NA: Interval[Locus(foo)]")
-
-    val vas = vds.rowType.asInstanceOf[TStruct]
-
-    assert(vas.field("l").typ == TLocus(rg))
-    assert(vas.field("i").typ == TInterval(TLocus(rg)))
-
-    ReferenceGenome.removeReference("foo")
-  }
-
   @Test def testDefaultReference() {
     ReferenceGenome.setDefaultReference(hc, "GRCh38")
     assert(ReferenceGenome.defaultReference.name == "GRCh38")
@@ -84,75 +72,6 @@ class ReferenceGenomeSuite extends SparkSuite {
     TestUtils.interceptFatal("Cannot add reference genome. `GRCh38' already exists.")(ReferenceGenome.setDefaultReference(hc, "src/main/resources/reference/grch38.json"))
     intercept[FileNotFoundException](ReferenceGenome.setDefaultReference(hc, "grch38.json"))
     TestUtils.interceptFatal("is a built-in Hail reference")(ReferenceGenome.removeReference("GRCh37"))
-  }
-
-  @Test def testFuncReg() {
-    val sig = TStruct(("v37", TLocus(ReferenceGenome.GRCh37)), ("v38", TLocus(ReferenceGenome.GRCh38)))
-
-    val data1 = Array(Row(Locus("X", 154931044), Locus("chrX", 156030895)))
-    val kt1 = Table(hc, sc.parallelize(data1), sig)
-    kt1.typeCheck()
-    assert(kt1.forall("row.v37.inXPar() && row.v38.inXPar()"))
-
-    val data2 = Array(Row(Locus("Y", 2649520), Locus("chrY", 2649520)))
-    val kt2 = Table(hc, sc.parallelize(data2), sig)
-    kt2.typeCheck()
-    assert(kt2.forall("row.v37.inYPar() && row.v38.inYPar()"))
-
-    val data3 = Array(Row(Locus("X", 157701382), Locus("chrX", 157701382)))
-    val kt3 = Table(hc, sc.parallelize(data3), sig)
-    kt3.typeCheck()
-    assert(kt3.forall("row.v37.inXNonPar() && row.v38.inXNonPar()"))
-
-    val data4 = Array(Row(Locus("Y", 2781480), Locus("chrY", 2781480)))
-    val kt4 = Table(hc, sc.parallelize(data4), sig)
-    kt4.typeCheck()
-    assert(kt4.forall("row.v37.inYNonPar() && row.v38.inYNonPar()"))
-
-    val data5 = Array(
-      Row(Locus("1", 2781480), Locus("X", 2781480), Locus("chr1", 2781480), Locus("chrX", 2781480)),
-      Row(Locus("6", 2781480), Locus("Y", 2781480), Locus("chr6", 2781480), Locus("chrY", 2781480)),
-      Row(Locus("21", 2781480), Locus("MT", 2781480), Locus("chr21", 2781480), Locus("chrM", 2781480)))
-    val kt5 = Table(hc, sc.parallelize(data5), TStruct(
-      ("v37a", TLocus(ReferenceGenome.GRCh37)), ("v37na", TLocus(ReferenceGenome.GRCh37)),
-      ("v38a", TLocus(ReferenceGenome.GRCh38)), ("v38na", TLocus(ReferenceGenome.GRCh38))))
-    kt5.typeCheck()
-    assert(kt5.forall("row.v37a.isAutosomal() && !row.v37na.isAutosomal() && " +
-      "row.v38a.isAutosomal() && !row.v38na.isAutosomal()"))
-  }
-
-  @Test def testConstructors() {
-    val kt = hc.importTable("src/test/resources/sampleAnnotations.tsv")
-    val ktann = kt.annotate("""l1 = Locus(GRCh38)("chr1", 100), l2 = Locus(GRCh37)("1:100"),
-    |i1 = LocusInterval(GRCh37)("1:5-10"), i2 = LocusInterval(GRCh38)("chrX", 156030890, 156030895, true, false)""".stripMargin)
-
-    assert(ktann.signature.field("l1").typ == ReferenceGenome.GRCh38.locusType &&
-    ktann.signature.field("l2").typ == ReferenceGenome.GRCh37.locusType &&
-    ktann.signature.field("i1").typ == TInterval(ReferenceGenome.GRCh37.locusType) &&
-    ktann.signature.field("i2").typ == TInterval(ReferenceGenome.GRCh38.locusType))
-
-    assert(ktann.forall("row.l1.position == 100 && row.l2.position == 100 &&" +
-      """row.i1.start == Locus(GRCh37)("1", 5) && !row.i2.contains(row.l1)"""))
-
-    val rg = ReferenceGenome("foo2", Array("1", "2", "3"), Map("1" -> 5, "2" -> 5, "3" -> 5))
-    ReferenceGenome.addReference(rg)
-    ReferenceGenome.setDefaultReference(rg)
-    assert(kt.annotate("""i1 = Interval(Locus(foo2)("1:100"), Locus(foo2)("1:104"), true, false)""").signature.field("i1").typ == TInterval(rg.locusType))
-
-    // check for invalid contig names or positions
-    intercept[SparkException](kt.annotate("""l1bad = Locus("MT:17000") """).collect())
-    intercept[SparkException](kt.annotate("""l1bad = Locus("foo:17000") """).collect())
-    intercept[SparkException](kt.annotate("""l1bad = Locus("foo", 17000) """).collect())
-
-    intercept[SparkException](kt.annotate("""i1bad = LocusInterval("MT:4789-17000") """).collect())
-    intercept[SparkException](kt.annotate("""i1bad = LocusInterval("foo:4789-17000") """).collect())
-    intercept[SparkException](kt.annotate("""i1bad = LocusInterval("foo", 1, 10, true, false) """).collect())
-    intercept[SparkException](kt.annotate("""i1bad = LocusInterval("MT", 5, 17000, true, false) """).collect())
-
-    intercept[HailException](kt.annotate("""i1bad = Interval(Locus(foo2)("1:100"), Locus(GRCh37)("1:104"), true, false)""").collect())
-
-    ReferenceGenome.setDefaultReference(ReferenceGenome.GRCh37)
-    ReferenceGenome.removeReference("foo2")
   }
 
   @Test def testContigRemap() {
@@ -207,31 +126,6 @@ class ReferenceGenomeSuite extends SparkSuite {
     ReferenceGenome.removeReference("GRCh37_2")
   }
 
-  @Test def testWriteRG() {
-    val outKT = tmpDir.createTempFile("grWrite", "kt")
-    val outKT2 = tmpDir.createTempFile("grWrite", "kt")
-    val outVDS = tmpDir.createTempFile("grWrite", "vds")
-
-    val kt = hc.importTable("src/test/resources/sampleAnnotations.tsv")
-    val vds = hc.importVCF("src/test/resources/sample.vcf")
-
-    val rg = ReferenceGenome("foo", Array("1", "2", "3"), Map("1" -> 5, "2" -> 5, "3" -> 5))
-    ReferenceGenome.addReference(rg)
-    kt.annotate("""l1 = Locus(foo)("1:3")""").write(outKT)
-    vds.annotateRowsExpr("""l2 = Locus(foo)("1:3")""").write(outVDS)
-    ReferenceGenome.removeReference("foo")
-
-    val rg2 = ReferenceGenome("foo", Array("1"), Map("1" -> 5))
-    ReferenceGenome.addReference(rg2)
-    kt.annotate("""l1 = Locus(foo)("1:3")""").write(outKT2)
-    ReferenceGenome.removeReference("foo")
-
-    assert(hc.readTable(outKT).signature.field("l1").typ == TLocus(rg))
-    assert(hc.read(outVDS).rowType.fieldOption("l2").get.typ == TLocus(rg))
-    TestUtils.interceptFatal("`foo' already exists and is not identical to the imported reference from")(hc.readTable(outKT2))
-    ReferenceGenome.removeReference("foo")
-  }
-
   @Test def testFasta() {
     val fastaFile = "src/test/resources/fake_reference.fasta"
     val fastaFileGzip = "src/test/resources/fake_reference.fasta.gz"
@@ -284,16 +178,50 @@ class ReferenceGenomeSuite extends SparkSuite {
     assert(fr.lookup(Interval(Locus("a", 20), Locus("b", 5), includesStart = false, includesEnd = false)) == "ACGTATAAT")
     assert(fr.lookup(Interval(Locus("a", 20), Locus("c", 5), includesStart = false, includesEnd = false)) == "ACGTATAATTAAATTAGCCAGGAT")
 
-    rg.addSequence(hc, fastaFile, indexFile)
-    val table = hc.importTable("src/test/resources/fake_reference.tsv")
-    assert(table.annotate("""baseComputed = getReferenceSequence(test)(row.contig, row.pos.toInt32(), 0, 0)""")
-      .forall("row.base == row.baseComputed"))
-    
     ReferenceGenome.removeReference(rg.name)
+  }
 
-    val rg2 = ReferenceGenome.fromFASTAFile(hc, "test2", fastaFileGzip, indexFile)
-    assert(table.annotate("""baseComputed = getReferenceSequence(test2)(row.contig, row.pos.toInt32(), 0, 0)""")
-      .forall("row.base == row.baseComputed"))
-    ReferenceGenome.removeReference(rg2.name)
+  @Test def testSerializeOnFB() {
+    val grch38 = ReferenceGenome.GRCh38
+    val fb = EmitFunctionBuilder[String, Boolean]
+
+    val rgfield = fb.newLazyField(grch38.codeSetup(fb))
+    fb.emit(rgfield.invoke[String, Boolean]("isValidContig", fb.getArg[String](1)))
+
+    val f = fb.resultWithIndex()(0)
+    assert(f("X") == grch38.isValidContig("X"))
+  }
+
+  @Test def testSerializeWithFastaOnFB() {
+    val fastaFile = "src/test/resources/fake_reference.fasta"
+    val indexFile = "src/test/resources/fake_reference.fasta.fai"
+
+    val rg = ReferenceGenome("test", Array("a", "b", "c"), Map("a" -> 25, "b" -> 15, "c" -> 10))
+    ReferenceGenome.addReference(rg)
+    rg.addSequence(hc, fastaFile, indexFile)
+
+    val fb = EmitFunctionBuilder[String, Int, Int, Int, String]
+
+    val rgfield = fb.newLazyField(rg.codeSetup(fb))
+    fb.emit(rgfield.invoke[String, Int, Int, Int, String]("getSequence", fb.getArg[String](1), fb.getArg[Int](2), fb.getArg[Int](3), fb.getArg[Int](4)))
+
+    val f = fb.resultWithIndex()(0)
+    assert(f("a", 25, 0, 5) == rg.getSequence("a", 25, 0, 5))
+    ReferenceGenome.removeReference(rg.name)
+  }
+
+  @Test def testSerializeWithLiftoverOnFB() {
+    val grch37 = ReferenceGenome.GRCh37
+    val liftoverFile = "src/test/resources/grch37_to_grch38_chr20.over.chain.gz"
+
+    grch37.addLiftover(hc, liftoverFile, "GRCh38")
+
+    val fb = EmitFunctionBuilder[String, Locus, Double, Locus]
+    val rgfield = fb.newLazyField(grch37.codeSetup(fb))
+    fb.emit(rgfield.invoke[String, Locus, Double, Locus]("liftoverLocus", fb.getArg[String](1), fb.getArg[Locus](2), fb.getArg[Double](3)))
+
+    val f = fb.resultWithIndex()(0)
+    assert(f("GRCh38", Locus("20", 60001), 0.95) == grch37.liftoverLocus("GRCh38", Locus("20", 60001), 0.95))
+    grch37.removeLiftover("GRCh38")
   }
 }

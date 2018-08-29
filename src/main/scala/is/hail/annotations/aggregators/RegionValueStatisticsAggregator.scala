@@ -8,23 +8,19 @@ import org.apache.spark.util.StatCounter
 object RegionValueStatisticsAggregator {
   val typ: TStruct = TStruct(
     "mean" -> TFloat64(),
-    "stddev" -> TFloat64(),
+    "stdev" -> TFloat64(),
     "min" -> TFloat64(), // FIXME should really preserve the input type
     "max" -> TFloat64(), // FIXME should really preserve the input type
-    "count" -> TInt64(),
+    "n" -> TInt64(),
     "sum" -> TFloat64())
 }
 
 class RegionValueStatisticsAggregator extends RegionValueAggregator {
-  private val sc = new StatCounter()
+  private var sc = new StatCounter()
 
-  def seqOp(x: Double, missing: Boolean) {
+  def seqOp(region: Region, x: Double, missing: Boolean) {
     if (!missing)
       sc.merge(x)
-  }
-
-  def seqOp(region: Region, off: Long, missing: Boolean) {
-    seqOp(region.loadDouble(off), missing)
   }
 
   def combOp(agg2: RegionValueAggregator) {
@@ -46,5 +42,15 @@ class RegionValueStatisticsAggregator extends RegionValueAggregator {
     }
   }
 
-  def copy() = new RegionValueStatisticsAggregator()
+  def newInstance() = new RegionValueStatisticsAggregator()
+
+  def copy(): RegionValueStatisticsAggregator = {
+    val rva = new RegionValueStatisticsAggregator()
+    rva.sc = sc.copy()
+    rva
+  }
+
+  def clear() {
+    sc = new StatCounter()
+  }
 }

@@ -1,5 +1,6 @@
+from typing import *
+
 import hail as hl
-from hail.expr.expr_ast import VariableReference
 from hail.expr.expressions import *
 from hail.expr.types import *
 from hail.matrixtable import MatrixTable
@@ -13,28 +14,30 @@ from hail.utils.java import Env, joption
            j=Expression,
            keep=bool,
            tie_breaker=nullable(func_spec(2, expr_numeric)))
-def maximal_independent_set(i, j, keep=True, tie_breaker=None):
+def maximal_independent_set(i, j, keep=True, tie_breaker=None) -> Table:
     """Return a table containing the vertices in a near
     `maximal independent set <https://en.wikipedia.org/wiki/Maximal_independent_set>`_
     of an undirected graph whose edges are given by a two-column table.
 
     Examples
     --------
+    Run PC-relate and compute pairs of closely related individuals:
 
-    Prune individuals from a dataset until no close relationships remain with
-    respect to a PC-Relate measure of kinship.
+    >>> pc_rel = hl.pc_relate(dataset.GT, 0.001, k=2, statistics='kin')
+    >>> pairs = pc_rel.filter(pc_rel['kin'] > 0.125)
 
-    >>> pc_rel = hl.pc_relate(dataset, 2, 0.001)
-    >>> pairs = pc_rel.filter(pc_rel['kin'] > 0.125).select('i', 'j')
+    Starting from the above pairs, prune individuals from a dataset until no
+    close relationships remain:
+
     >>> related_samples_to_remove = hl.maximal_independent_set(pairs.i, pairs.j, False)
-    >>> result = dataset.filter_cols(hl.is_defined(related_samples_to_remove[dataset.s]), keep=False)
+    >>> result = dataset.filter_cols(
+    ...     hl.is_defined(related_samples_to_remove[dataset.col_key]), keep=False)
 
-    Prune individuals from a dataset, preferring to keep cases over controls.
+    Starting from the above pairs, prune individuals from a dataset until no
+    close relationships remain, preferring to keep cases over controls:
 
-    >>> pc_rel = hl.pc_relate(dataset, 2, 0.001)
-    >>> pairs = pc_rel.filter(pc_rel['kin'] > 0.125).select('i', 'j')
     >>> samples = dataset.cols()
-    >>> pairs_with_case = pairs.select(
+    >>> pairs_with_case = pairs.key_by(
     ...     i=hl.struct(id=pairs.i, is_case=samples[pairs.i].is_case),
     ...     j=hl.struct(id=pairs.j, is_case=samples[pairs.j].is_case))
     >>> def tie_breaker(l, r):
@@ -43,8 +46,8 @@ def maximal_independent_set(i, j, keep=True, tie_breaker=None):
     >>> related_samples_to_remove = hl.maximal_independent_set(
     ...    pairs_with_case.i, pairs_with_case.j, False, tie_breaker)
     >>> result = dataset.filter_cols(hl.is_defined(
-    ...     related_samples_to_remove.select(
-    ...        s = related_samples_to_remove.node.id).key_by('s')[dataset.s]), keep=False)
+    ...     related_samples_to_remove.key_by(
+    ...        s = related_samples_to_remove.node.id.s)[dataset.col_key]), keep=False)
 
     Notes
     -----
@@ -80,6 +83,9 @@ def maximal_independent_set(i, j, keep=True, tie_breaker=None):
 
     For example, the usual ordering on the integers is defined by: ``l - r``.
 
+    The `tie_breaker` function must satisfy the following property:
+    ``tie_breaker(l, r) == -tie_breaker(r, l)``.
+
     When multiple nodes have the same degree, this algorithm will order the
     nodes according to ``tie_breaker`` and remove the *largest* node.
 
@@ -97,32 +103,52 @@ def maximal_independent_set(i, j, keep=True, tie_breaker=None):
     Returns
     -------
     :class:`.Table`
+        Table with the set of independent vertices. The table schema is one row
+        field `node` which has the same type as input expressions `i` and `j`.
     """
+
     if i.dtype != j.dtype:
         raise ValueError("'maximal_independent_set' expects arguments `i` and `j` to have same type. "
                          "Found {} and {}.".format(i.dtype, j.dtype))
+
     source = i._indices.source
     if not isinstance(source, Table):
         raise ValueError("'maximal_independent_set' expects an expression of 'Table'. Found {}".format(
             "expression of '{}'".format(
                 source.__class__) if source is not None else 'scalar expression'))
+
     if i._indices.source != j._indices.source:
         raise ValueError(
             "'maximal_independent_set' expects arguments `i` and `j` to be expressions of the same Table. "
             "Found\n{}\n{}".format(i, j))
 
     node_t = i.dtype
-    l = construct_expr(VariableReference('l'), node_t)
-    r = construct_expr(VariableReference('r'), node_t)
+
     if tie_breaker:
-        tie_breaker_expr = hl.int64(tie_breaker(l, r))
-        edges, _ = source._process_joins(i, j, tie_breaker_expr)
-        tie_breaker_hql = tie_breaker_expr._ast.to_hql()
+        wrapped_node_t = ttuple(node_t)
+        l = construct_variable('l', wrapped_node_t)
+        r = construct_variable('r', wrapped_node_t)
+        tie_breaker_expr = hl.int64(tie_breaker(l[0], r[0]))
+        t, _ = source._process_joins(i, j, tie_breaker_expr)
+        tie_breaker_str = str(tie_breaker_expr._ir)
     else:
-        edges, _ = source._process_joins(i, j)
-        tie_breaker_hql = None
-    return Table(edges._jt.maximalIndependentSet(
-        i._ast.to_hql(), j._ast.to_hql(), keep, joption(tie_breaker_hql)))
+        t, _ = source._process_joins(i, j)
+        tie_breaker_str = None
+
+    nodes = (t.select(node=[i, j])
+             .explode('node')
+             .key_by('node')
+             .select())
+
+    edges = t.key_by(None).select('i', 'j')
+    nodes_in_set = Env.hail().utils.Graph.maximalIndependentSet(edges._jt.collect(), node_t._jtype, joption(tie_breaker_str))
+
+    nt = Table(nodes._jt.annotateGlobal(nodes_in_set, hl.tset(node_t)._jtype, 'nodes_in_set'))
+    nt = (nt
+          .filter(nt.nodes_in_set.contains(nt.node), keep)
+          .drop('nodes_in_set'))
+
+    return nt
 
 
 def require_col_key_str(dataset: MatrixTable, method: str):
@@ -130,12 +156,37 @@ def require_col_key_str(dataset: MatrixTable, method: str):
         raise ValueError(f"Method '{method}' requires column key to be one field of type 'str', found "
                          f"{list(str(x.dtype) for x in dataset.col_key.values())}")
 
+def require_table_key_variant(ht, method):
+    if (list(ht.key) != ['locus', 'alleles'] or
+            not isinstance(ht['locus'].dtype, tlocus) or
+            not ht['alleles'].dtype == tarray(tstr)):
+        raise ValueError("Method '{}' requires key to be two fields 'locus' (type 'locus<any>') and "
+                         "'alleles' (type 'array<str>')\n"
+                         "  Found:{}".format(method, ''.join(
+            "\n    '{}': {}".format(k, str(ht[k].dtype)) for k in ht.key)))
 
 def require_row_key_variant(dataset, method):
-    if (list(dataset.row_key) != ['locus', 'alleles'] or
+    if isinstance(dataset, Table):
+        key = dataset.key
+    else:
+        assert isinstance(dataset, MatrixTable)
+        key = dataset.row_key
+    if (list(key) != ['locus', 'alleles'] or
             not isinstance(dataset['locus'].dtype, tlocus) or
             not dataset['alleles'].dtype == tarray(tstr)):
         raise ValueError("Method '{}' requires row key to be two fields 'locus' (type 'locus<any>') and "
+                         "'alleles' (type 'array<str>')\n"
+                         "  Found:{}".format(method, ''.join(
+            "\n    '{}': {}".format(k, str(dataset[k].dtype)) for k in key)))
+
+
+def require_row_key_variant_w_struct_locus(dataset, method):
+    if (list(dataset.row_key) != ['locus', 'alleles'] or
+            not dataset['alleles'].dtype == tarray(tstr) or
+            (not isinstance(dataset['locus'].dtype, tlocus) and
+                     dataset['locus'].dtype != hl.dtype('struct{contig: str, position: int32}'))):
+        raise ValueError("Method '{}' requires row key to be two fields 'locus'"
+                         " (type 'locus<any>' or 'struct{contig: str, position: int32}') and "
                          "'alleles' (type 'array<str>')\n"
                          "  Found:{}".format(method, ''.join(
             "\n    '{}': {}".format(k, str(dataset[k].dtype)) for k in dataset.row_key)))
@@ -149,15 +200,31 @@ def require_partition_key_locus(dataset, method):
             "\n    '{}': {}".format(k, str(dataset[k].dtype)) for k in dataset.partition_key)))
 
 
+def require_first_key_field_locus(table, method):
+    if (len(table.key) == 0 or
+            not isinstance(table.key[0].dtype, tlocus)):
+        raise ValueError("Method '{}' requires first key field of type 'locus<any>'.\n"
+                         "  Found:{}".format(method, ''.join(
+            "\n    '{}': {}".format(k, str(table[k].dtype)) for k in table.key)))
+
+
+@typecheck(table=Table, method=str)
+def require_key(table, method):
+    if table.key is None:
+        raise ValueError("Method '{}' requires keyed table".format(method))
+
+
 @typecheck(dataset=MatrixTable, method=str)
-def require_biallelic(dataset, method):
+def require_biallelic(dataset, method) -> MatrixTable:
     require_row_key_variant(dataset, method)
-    dataset = MatrixTable(Env.hail().methods.VerifyBiallelic.apply(dataset._jvds, method))
-    return dataset
+    return dataset._select_rows(method,
+                                hl.case()
+                                .when(dataset.alleles.length() == 2, dataset._rvrow)
+                                .or_error(f"'{method}' expects biallelic variants ('alleles' field has length 2)"))
 
 
 @typecheck(dataset=MatrixTable, name=str)
-def rename_duplicates(dataset, name='unique_id'):
+def rename_duplicates(dataset, name='unique_id') -> MatrixTable:
     """Rename duplicate column keys.
 
     .. include:: ../_templates/req_tstring.rst
@@ -167,7 +234,7 @@ def rename_duplicates(dataset, name='unique_id'):
 
     >>> renamed = hl.rename_duplicates(dataset).cols()
     >>> duplicate_samples = (renamed.filter(renamed.s != renamed.unique_id)
-    ...                             .select('s')
+    ...                             .select()
     ...                             .collect())
 
     Notes
@@ -194,10 +261,10 @@ def rename_duplicates(dataset, name='unique_id'):
     return MatrixTable(dataset._jvds.renameDuplicates(name))
 
 
-@typecheck(ds=MatrixTable,
+@typecheck(ds=oneof(Table, MatrixTable),
            intervals=expr_array(expr_interval(expr_any)),
            keep=bool)
-def filter_intervals(ds, intervals, keep=True):
+def filter_intervals(ds, intervals, keep=True) -> Union[Table, MatrixTable]:
     """Filter rows with a list of intervals.
 
     Examples
@@ -210,7 +277,7 @@ def filter_intervals(ds, intervals, keep=True):
     Remove all loci within list of intervals:
 
     >>> intervals = [hl.parse_locus_interval(x) for x in ['1:50M-75M', '2:START-400000', '3-22']]
-    >>> ds_result = hl.filter_intervals(dataset, intervals)
+    >>> ds_result = hl.filter_intervals(dataset, intervals, keep=False)
 
     Notes
     -----
@@ -224,13 +291,13 @@ def filter_intervals(ds, intervals, keep=True):
 
     Parameters
     ----------
-    ds : :class:`.MatrixTable`
-        Dataset.
+    ds : :class:`.MatrixTable` or :class:`.Table`
+        Dataset to filter.
     intervals : :class:`.ArrayExpression` of type :py:data:`.tinterval`
-        Intervals to filter on. If there is only one row partition key, the
-        point type of the interval can be the type of the first partition key.
-        Otherwise, the interval point type must be a :class:`.Struct` matching
-        the row partition key schema.
+        Intervals to filter on.  The point type of the interval must
+        be a prefix of the partition key (when filtering a matrix
+        table) or the key (when filtering a table), or equal to the
+        first field of the key.
     keep : :obj:`bool`
         If ``True``, keep only rows that fall within any interval in `intervals`.
         If ``False``, keep only rows that fall outside all intervals in
@@ -238,19 +305,36 @@ def filter_intervals(ds, intervals, keep=True):
 
     Returns
     -------
-    :class:`.MatrixTable`
+    :class:`.MatrixTable` or :class:`.Table`
+
     """
 
-    n_pk = len(ds.partition_key)
-    pk_type = ds.partition_key.dtype
+    if isinstance(ds, MatrixTable):
+        n_pk = len(ds.partition_key)
+        pk_type = ds.partition_key.dtype
+    else:
+        assert isinstance(ds, Table)
+        if ds.key is None:
+            raise TypeError("cannot filter intervals of an unkeyed Table")
+        n_pk = len(ds.key)
+        pk_type = ds.key.dtype
+
     point_type = intervals.dtype.element_type.point_type
 
-    if point_type == pk_type:
-        needs_wrapper = False
-    elif n_pk == 1 and point_type == ds.partition_key[0].dtype:
+    def is_struct_prefix(partial, full):
+        if list(partial) != list(full)[:len(partial)]:
+            return False
+        for k, v in partial.items():
+            if full[k] != v:
+                return False
+        return True
+
+    if point_type == pk_type[0]:
         needs_wrapper = True
+    elif isinstance(point_type, tstruct) and is_struct_prefix(point_type, pk_type):
+        needs_wrapper = False
     else:
-        raise TypeError("The point type does not match the row partition key type of the dataset ('{}', '{}')".format(repr(point_type), repr(pk_type)))
+        raise TypeError("The point type is incompatible with key type of the dataset ('{}', '{}')".format(repr(point_type), repr(pk_type)))
 
     def wrap_input(interval):
         if interval is None:
@@ -264,5 +348,60 @@ def filter_intervals(ds, intervals, keep=True):
             return interval
 
     intervals = [wrap_input(x)._jrep for x in intervals.value]
-    jmt = Env.hail().methods.FilterIntervals.apply(ds._jvds, intervals, keep)
-    return MatrixTable(jmt)
+    if isinstance(ds, MatrixTable):
+        jmt = Env.hail().methods.MatrixFilterIntervals.apply(ds._jvds, intervals, keep)
+        return MatrixTable(jmt)
+    else:
+        jt = Env.hail().methods.TableFilterIntervals.apply(ds._jt, intervals, keep)
+        return Table(jt)
+
+
+@typecheck(mt=MatrixTable, bp_window_size=int)
+def window_by_locus(mt: MatrixTable, bp_window_size: int) -> MatrixTable:
+    """Collect arrays of row and entry values from preceding loci.
+
+    .. include:: ../_templates/req_tlocus.rst
+
+    .. include:: ../_templates/experimental.rst
+
+    Examples
+    --------
+    >>> ds_result = hl.window_by_locus(ds, 3)
+
+    Notes
+    -----
+    This method groups each row (variant) with the previous rows in a window of
+    `bp_window_size` base pairs, putting the row values from the previous
+    variants into `prev_rows` (row field of type ``array<struct>``) and entry
+    values from those variants into `prev_entries` (entry field of type
+    ``array<struct>``).
+
+    The `bp_window_size` argument is inclusive; if `base_pairs` is 2 and the
+    loci are
+
+    .. code-block:: text
+
+        1:100
+        1:100
+        1:102
+        1:102
+        1:103
+        2:100
+        2:101
+
+    then the size of `prev_rows` is 0, 1, 2, 3, 2, 0, and 1, respectively (and
+    same for the size of prev_entries).
+
+    Parameters
+    ----------
+    mt : :class:`.MatrixTable`
+        Input dataset.
+    bp_window_size : :obj:`int`
+        Base pairs to include in the backwards window (inclusive).
+
+    Returns
+    -------
+    :class:`.MatrixTable`
+    """
+    require_partition_key_locus(mt, 'window_by_locus')
+    return MatrixTable(mt._jvds.windowVariants(bp_window_size))

@@ -1,14 +1,24 @@
 package is.hail.annotations
 
-import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
+import java.io.{ObjectInputStream, ObjectOutputStream}
 
-import com.esotericsoftware.kryo.io.{Input, Output}
 import com.esotericsoftware.kryo.{Kryo, KryoSerializable}
+import com.esotericsoftware.kryo.io.{Input, Output}
 import is.hail.expr.types._
-import is.hail.io._
 import is.hail.utils._
-import is.hail.variant.{RGBase, Locus}
+import is.hail.variant.{Locus, RGBase}
 import org.apache.spark.sql.Row
+import sun.reflect.generics.reflectiveObjects.NotImplementedException
+
+trait UnKryoSerializable extends KryoSerializable {
+  def write(kryo: Kryo, output: Output): Unit = {
+    throw new NotImplementedException()
+  }
+
+  def read(kryo: Kryo, input: Input): Unit = {
+    throw new NotImplementedException()
+  }
+}
 
 object UnsafeIndexedSeq {
   def apply(t: TArray, elements: Array[RegionValue]): UnsafeIndexedSeq = {
@@ -52,7 +62,7 @@ object UnsafeIndexedSeq {
 
 class UnsafeIndexedSeq(
   var t: TContainer,
-  var region: Region, var aoff: Long) extends IndexedSeq[Annotation] with KryoSerializable with Serializable {
+  var region: Region, var aoff: Long) extends IndexedSeq[Annotation] with UnKryoSerializable {
 
   var length: Int = t.loadLength(region, aoff)
 
@@ -65,60 +75,7 @@ class UnsafeIndexedSeq(
       null
   }
 
-  override def write(kryo: Kryo, output: Output) {
-    kryo.writeObject(output, t)
-
-    val aos = new ByteArrayOutputStream()
-    val enc = CodecSpec.default.buildEncoder(aos)
-    enc.writeRegionValue(t, region, aoff)
-    enc.flush()
-
-    val a = aos.toByteArray
-    output.writeInt(a.length)
-    output.write(a, 0, a.length)
-  }
-
-  private def writeObject(out: ObjectOutputStream) {
-    out.writeObject(t)
-
-    val aos = new ByteArrayOutputStream()
-    val enc = CodecSpec.default.buildEncoder(aos)
-    enc.writeRegionValue(t, region, aoff)
-    enc.flush()
-
-    val a = aos.toByteArray
-    out.writeInt(a.length)
-    out.write(a, 0, a.length)
-  }
-
-  override def read(kryo: Kryo, input: Input) {
-    t = kryo.readObject(input, classOf[TArray])
-
-    val smallInOff = input.readInt()
-    val a = new Array[Byte](smallInOff)
-    input.readFully(a, 0, smallInOff)
-    using(CodecSpec.default.buildDecoder(new ByteArrayInputStream(a))) { dec =>
-
-      region = Region()
-      aoff = dec.readRegionValue(t, region)
-
-      length = region.loadInt(aoff)
-    }
-  }
-
-  private def readObject(in: ObjectInputStream) {
-    t = in.readObject().asInstanceOf[TArray]
-
-    val smallInOff = in.readInt()
-    val a = new Array[Byte](smallInOff)
-    in.readFully(a, 0, smallInOff)
-    using(CodecSpec.default.buildDecoder(new ByteArrayInputStream(a))) { dec =>
-      region = Region()
-      aoff = dec.readRegionValue(t, region)
-
-      length = region.loadInt(aoff)
-    }
-  }
+  override def toString: String = s"[${this.mkString(",")}]"
 }
 
 object UnsafeRow {
@@ -182,7 +139,7 @@ object UnsafeRow {
 }
 
 class UnsafeRow(var t: TBaseStruct,
-  var region: Region, var offset: Long) extends Row with KryoSerializable {
+  var region: Region, var offset: Long) extends Row with UnKryoSerializable {
 
   def this(t: TBaseStruct, rv: RegionValue) = this(t, rv.region, rv.offset)
 
@@ -212,6 +169,8 @@ class UnsafeRow(var t: TBaseStruct,
   }
 
   def copy(): Row = new UnsafeRow(t, region, offset)
+
+  def pretty(): String = region.pretty(t, offset)
 
   override def getInt(i: Int): Int = {
     assertDefined(i)
@@ -249,55 +208,52 @@ class UnsafeRow(var t: TBaseStruct,
     !t.isFieldDefined(region, offset, i)
   }
 
-  override def write(kryo: Kryo, output: Output) {
-    output.writeBoolean(t.isInstanceOf[TStruct])
-    kryo.writeObject(output, t)
-
-    val aos = new ByteArrayOutputStream()
-    val enc = CodecSpec.default.buildEncoder(aos)
-    enc.writeRegionValue(t, region, offset)
-    enc.flush()
-
-    val a = aos.toByteArray
-    output.writeInt(a.length)
-    output.write(a, 0, a.length)
+  private def writeObject(s: ObjectOutputStream): Unit = {
+    throw new NotImplementedException()
   }
 
-  private def writeObject(out: ObjectOutputStream) {
-    out.writeObject(t)
+  private def readObject(s: ObjectInputStream): Unit = {
+    throw new NotImplementedException()
+  }
+}
 
-    val aos = new ByteArrayOutputStream()
-    val enc = CodecSpec.default.buildEncoder(aos)
-    enc.writeRegionValue(t, region, offset)
-    enc.flush()
-
-    val a = aos.toByteArray
-    out.writeInt(a.length)
-    out.write(a, 0, a.length)
+object SafeRow {
+  def apply(t: TBaseStruct, region: Region, off: Long): Row = {
+    Annotation.copy(t, new UnsafeRow(t, region, off)).asInstanceOf[Row]
   }
 
-  override def read(kryo: Kryo, input: Input) {
-    val isStruct = input.readBoolean()
-    t = kryo.readObject(input, if (isStruct) classOf[TStruct] else classOf[TTuple])
+  def apply(t: TBaseStruct, rv: RegionValue): Row = SafeRow(t, rv.region, rv.offset)
 
-    val smallInOff = input.readInt()
-    val a = new Array[Byte](smallInOff)
-    input.readFully(a, 0, smallInOff)
-    using(CodecSpec.default.buildDecoder(new ByteArrayInputStream(a))) { dec =>
-      region = Region()
-      offset = dec.readRegionValue(t, region)
-    }
+  def selectFields(t: TBaseStruct, region: Region, off: Long)(selectIdx: Array[Int]): Row = {
+    val fullRow = new UnsafeRow(t, region, off)
+    Row(selectIdx.map(i => Annotation.copy(t.types(i), fullRow.get(i))): _*)
   }
 
-  private def readObject(in: ObjectInputStream) {
-    t = in.readObject().asInstanceOf[TBaseStruct]
+  def selectFields(t: TBaseStruct, rv: RegionValue)(selectIdx: Array[Int]): Row =
+    SafeRow.selectFields(t, rv.region, rv.offset)(selectIdx)
 
-    val smallInOff = in.readInt()
-    val a = new Array[Byte](smallInOff)
-    in.readFully(a, 0, smallInOff)
-    using(CodecSpec.default.buildDecoder(new ByteArrayInputStream(a))) { dec =>
-      region = Region()
-      offset = dec.readRegionValue(t, region)
-    }
+  def read(t: Type, region: Region, off: Long): Annotation =
+    Annotation.copy(t, UnsafeRow.read(t, region, off))
+
+  def read(t: Type, rv: RegionValue): Annotation =
+    read(t, rv.region, rv.offset)
+}
+
+object SafeIndexedSeq {
+  def apply(t: TArray, region: Region, off: Long): IndexedSeq[Annotation] =
+    Annotation.copy(t, new UnsafeIndexedSeq(t, region, off))
+      .asInstanceOf[IndexedSeq[Annotation]]
+
+  def apply(t: TArray, rv: RegionValue): IndexedSeq[Annotation] =
+    apply(t, rv.region, rv.offset)
+}
+
+class KeyedRow(var row: Row, keyFields: Array[Int]) extends Row {
+  def length: Int = row.size
+  def get(i: Int): Any = row.get(keyFields(i))
+  def copy(): Row = new KeyedRow(row, keyFields)
+  def set(newRow: Row): KeyedRow = {
+    row = newRow
+    this
   }
 }

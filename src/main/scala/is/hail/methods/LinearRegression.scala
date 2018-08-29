@@ -11,8 +11,8 @@ import net.sourceforge.jdistlib.T
 
 object LinearRegression {
   def schema = TStruct(
-    ("n_complete_samples", TInt32()),
-    ("AC", TFloat64()),
+    ("n", TInt32()),
+    ("sum_x", TFloat64()),
     ("y_transpose_x", TArray(TFloat64())),
     ("beta", TArray(TFloat64())),
     ("standard_error", TArray(TFloat64())),
@@ -20,12 +20,10 @@ object LinearRegression {
     ("p_value", TArray(TFloat64())))
 
   def apply(vsm: MatrixTable,
-    ysExpr: Array[String], xExpr: String, covExpr: Array[String], root: String, variantBlockSize: Int
+    yFields: Array[String], xField: String, covFields: Array[String], root: String, rowBlockSize: Int
   ): MatrixTable = {
-    val ec = vsm.matrixType.genotypeEC
-    val xf = RegressionUtils.parseFloat64Expr(xExpr, ec)
 
-    val (y, cov, completeSampleIndex) = RegressionUtils.getPhenosCovCompleteSamples(vsm, ysExpr, covExpr)
+    val (y, cov, completeColIdx) = RegressionUtils.getPhenosCovCompleteSamples(vsm, yFields, covFields)
 
     val n = y.rows // n_complete_samples
     val k = cov.cols // nCovariates
@@ -33,81 +31,77 @@ object LinearRegression {
     val dRec = 1d / d
 
     if (d < 1)
-      fatal(s"$n samples and ${ k + 1 } ${ plural(k, "covariate") } (including x and intercept) implies $d degrees of freedom.")
+      fatal(s"$n samples and ${ k + 1 } ${ plural(k, "covariate") } (including x) implies $d degrees of freedom.")
 
-    info(s"linear_regression: running linear regression on $n samples for ${ y.cols } response ${ plural(y.cols, "variable") } y,\n"
-       + s"    with input variable x, intercept, and ${ k - 1 } additional ${ plural(k - 1, "covariate") }...")
+    info(s"linear_regression: running on $n samples for ${ y.cols } response ${ plural(y.cols, "variable") } y,\n"
+       + s"    with input variable x, and ${ k } additional ${ plural(k, "covariate") }...")
 
-    val Qt = qr.reduced.justQ(cov).t
+    val Qt =
+      if (k > 0)
+        qr.reduced.justQ(cov).t
+      else
+        DenseMatrix.zeros[Double](0, n)
+
     val Qty = Qt * y
 
     val sc = vsm.sparkContext
-
-    val localGlobalAnnotationBc = vsm.globals.broadcast
-    val sampleAnnotationsBc = vsm.colValuesBc
-
-    val completeSampleIndexBc = sc.broadcast(completeSampleIndex)
+    val completeColIdxBc = sc.broadcast(completeColIdx)
     val yBc = sc.broadcast(y)
     val QtBc = sc.broadcast(Qt)
     val QtyBc = sc.broadcast(Qty)
     val yypBc = sc.broadcast(y.t(*, ::).map(r => r dot r) - Qty.t(*, ::).map(r => r dot r))
 
-
     val fullRowType = vsm.rvRowType
-    val localEntriesIndex = vsm.entriesIndex
+    val entryArrayType = vsm.matrixType.entryArrayType
+    val entryType = vsm.entryType
+    val fieldType = entryType.field(xField).typ
+
+    assert(fieldType.isOfType(TFloat64()))
+
+    val entryArrayIdx = vsm.entriesIndex
+    val fieldIdx = entryType.fieldIdx(xField)
 
     val (newRVType, ins) = fullRowType.unsafeStructInsert(LinearRegression.schema, List(root))
 
     val newMatrixType = vsm.matrixType.copy(rvRowType = newRVType)
 
-    val newRDD2 = vsm.rvd.mapPartitionsPreservesPartitioning(newMatrixType.orvdType) { it =>
+    val newRDD2 = vsm.rvd.boundary.mapPartitionsPreservesPartitioning(
+      newMatrixType.orvdType, { (ctx, it) =>
+        val rvb = new RegionValueBuilder()
+        val rv2 = RegionValue()
 
-        val region2 = Region()
-        val rvb = new RegionValueBuilder(region2)
-        val rv2 = RegionValue(region2)
-
-        val missingSamples = new ArrayBuilder[Int]
-
-        // columns are genotype vectors
-        var X: DenseMatrix[Double] = new DenseMatrix[Double](n, variantBlockSize)
-
-        val blockWRVs = new Array[WritableRegionValue](variantBlockSize)
+        val missingCompleteCols = new ArrayBuilder[Int]
+        val data = new Array[Double](n * rowBlockSize)
+      
+        val blockWRVs = new Array[WritableRegionValue](rowBlockSize)
         var i = 0
-        while (i < variantBlockSize) {
-          blockWRVs(i) = WritableRegionValue(fullRowType)
+        while (i < rowBlockSize) {
+          blockWRVs(i) = WritableRegionValue(fullRowType, ctx.freshRegion)
           i += 1
         }
 
-        val fullRow = new UnsafeRow(fullRowType)
-        val row = fullRow.deleteField(localEntriesIndex)
-        it.trueGroupedIterator(variantBlockSize)
+        it.trueGroupedIterator(rowBlockSize)
           .flatMap { git =>
             var i = 0
             while (git.hasNext) {
               val rv = git.next()
-              fullRow.set(rv)
-
-
-              RegressionUtils.inputVector(X(::, i),
-                localGlobalAnnotationBc.value, sampleAnnotationsBc.value, row,
-                fullRow.getAs[IndexedSeq[Annotation]](localEntriesIndex),
-                ec, xf,
-                completeSampleIndexBc.value, missingSamples)
-
+              RegressionUtils.setMeanImputedDoubles(data, i * n, completeColIdxBc.value, missingCompleteCols,
+                rv, fullRowType, entryArrayType, entryType, entryArrayIdx, fieldIdx)
               blockWRVs(i).set(rv)
               i += 1
             }
             val blockLength = i
 
-            // val AC: DenseMatrix[Double] = sum(X(::, *))
+            val X = new DenseMatrix[Double](n, blockLength, data)
+            
             val AC: DenseVector[Double] = X.t(*, ::).map(r => sum(r))
-            assert(AC.length == variantBlockSize)
+            assert(AC.length == blockLength)
 
             val qtx: DenseMatrix[Double] = QtBc.value * X
             val qty: DenseMatrix[Double] = QtyBc.value
             val xxpRec: DenseVector[Double] = 1.0 / (X.t(*, ::).map(r => r dot r) - qtx.t(*, ::).map(r => r dot r))
             val ytx: DenseMatrix[Double] = yBc.value.t * X
-            assert(ytx.rows == yBc.value.cols && ytx.cols == variantBlockSize)
+            assert(ytx.rows == yBc.value.cols && ytx.cols == blockLength)
 
             val xyp: DenseMatrix[Double] = ytx - (qty.t * qtx)
             val yyp: DenseVector[Double] = yypBc.value
@@ -136,17 +130,16 @@ object LinearRegression {
                 p(::, i).toArray: IndexedSeq[Double])
 
               val wrv = blockWRVs(i)
-              region2.setFrom(wrv.region)
-              val offset2 = wrv.offset
 
+              rvb.set(wrv.region)
               rvb.start(newRVType)
-              ins(region2, offset2, rvb,
+              ins(wrv.region, wrv.offset, rvb,
                 () => rvb.addAnnotation(LinearRegression.schema, result))
-              rv2.setOffset(rvb.end())
+              rv2.set(wrv.region, rvb.end())
               rv2
             }
           }
-      }
+      })
 
     vsm.copyMT(matrixType = newMatrixType,
       rvd = newRDD2)

@@ -1,19 +1,24 @@
 from .check import *
 
-__all__ = ['typecheck',
+__all__ = ['TypeChecker',
+           'typecheck',
            'typecheck_method',
            'anytype',
            'nullable',
-           'listof',
+           'sequenceof',
            'tupleof',
            'sized_tupleof',
            'dictof',
            'setof',
            'oneof',
+           'exactly',
            'numeric',
            'char',
            'lazy',
            'enumeration',
            'identity',
            'transformed',
-           'func_spec']
+           'func_spec',
+           'table_key_type',
+           'TypecheckFailure',
+           ]

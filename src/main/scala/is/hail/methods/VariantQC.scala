@@ -47,6 +47,7 @@ final class VariantQCCombiner {
     val nA = nAB + 2 * math.min(nHomRef, nHomVar)
 
     val LH = LeveneHaldane(nCalled, nA)
+    val hweHetFreq = LH.getNumericalMean / n
     val hweP = LH.exactMidP(nAB)
 
     rvb.startStruct() // qc
@@ -99,12 +100,7 @@ final class VariantQCCombiner {
     else
       rvb.setMissing()
 
-    // rExpectedHetFreq
-    if (nCalled != 0)
-      rvb.addDouble(LH.getNumericalMean / nCalled)
-    else
-      rvb.setMissing()
-
+    rvb.addDouble(hweHetFreq)
     rvb.addDouble(hweP)
     rvb.endStruct()
   }
@@ -127,8 +123,8 @@ object VariantQC {
     "n_non_ref" -> TInt32(),
     "r_heterozygosity" -> TFloat64(),
     "r_het_hom_var" -> TFloat64(),
-    "r_expected_het_freq" -> TFloat64(),
-    "p_hwe" -> TFloat64())
+    "het_freq_hwe" -> TFloat64(),
+    "p_value_hwe" -> TFloat64())
 
   def apply(vsm: MatrixTable, root: String = "qc"): MatrixTable = {
     vsm.requireRowKeyVariant("variant_qc")

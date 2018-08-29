@@ -6,6 +6,7 @@ Genetics functions
 .. autosummary::
 
     locus
+    locus_from_global_position
     locus_interval
     parse_locus
     parse_variant
@@ -25,12 +26,18 @@ Genetics functions
     is_star
     is_complex
     is_strand_ambiguous
+    is_valid_contig
+    is_valid_locus
     allele_type
     pl_dosage
     gp_dosage
     get_sequence
+    mendel_error_code
+    liftover
+    min_rep
 
 .. autofunction:: locus
+.. autofunction:: locus_from_global_position
 .. autofunction:: locus_interval
 .. autofunction:: parse_locus
 .. autofunction:: parse_variant
@@ -50,7 +57,12 @@ Genetics functions
 .. autofunction:: is_star
 .. autofunction:: is_complex
 .. autofunction:: is_strand_ambiguous
+.. autofunction:: is_valid_contig
+.. autofunction:: is_valid_locus
 .. autofunction:: allele_type
 .. autofunction:: pl_dosage
 .. autofunction:: gp_dosage
 .. autofunction:: get_sequence
+.. autofunction:: mendel_error_code
+.. autofunction:: liftover
+.. autofunction:: min_rep

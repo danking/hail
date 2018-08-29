@@ -3,8 +3,13 @@ package is.hail.utils
 import java.io.{InputStream, OutputStream}
 
 import is.hail.HailContext
+import is.hail.expr.JSONAnnotationImpex
+import is.hail.expr.types.Type
 import is.hail.table.Table
 import is.hail.variant.MatrixTable
+import org.apache.hadoop.fs.FileStatus
+import org.json4s.JsonAST._
+import org.json4s.jackson.JsonMethods
 
 import scala.collection.JavaConverters._
 
@@ -48,11 +53,62 @@ trait Py4jUtils {
 
   def makeDouble(d: Double): Double = d
 
+  def exists(path: String, hc: HailContext): Boolean = hc.hadoopConf.exists(path)
+
+  def isFile(path: String, hc: HailContext): Boolean = hc.hadoopConf.isFile(path)
+
+  def isDir(path: String, hc: HailContext): Boolean = hc.hadoopConf.isDir(path)
+
+  def ls(path: String, hc: HailContext): String = {
+    val statuses = hc.hadoopConf.listStatus(path)
+    JsonMethods.compact(JArray(statuses.map(fs => statusToJson(fs)).toList))
+  }
+
+  def stat(path: String, hc: HailContext): String = {
+    val stat = hc.hadoopConf.fileStatus(path)
+    JsonMethods.compact(statusToJson(stat))
+  }
+
+  private def statusToJson(fs: FileStatus): JObject = {
+    JObject(
+      "path" -> JString(fs.getPath.toString),
+      "size_bytes" -> JInt(fs.getLen),
+      "size" -> JString(readableBytes(fs.getLen)),
+      "is_dir" -> JBool(fs.isDirectory),
+      "modification_time" -> JString(new java.util.Date(fs.getModificationTime).toString),
+      "owner" -> JString(fs.getOwner)
+    )
+  }
+
+  private val kilo: Long = 1024
+  private val mega: Long = kilo * 1024
+  private val giga: Long = mega * 1024
+  private val tera: Long = giga * 1024
+
+  private def readableBytes(bytes: Long): String = {
+    if (bytes < kilo)
+      bytes.toString
+    else if (bytes < mega)
+      formatDigits(bytes, kilo) + "K"
+    else if (bytes < giga)
+      formatDigits(bytes, mega) + "M"
+    else if (bytes < tera)
+      formatDigits(bytes, giga) + "G"
+    else
+      formatDigits(bytes, tera) + "T"
+  }
+
+  private def formatDigits(n: Long, factor: Long): String = {
+    (n / factor.toDouble).formatted("%.1f")
+  }
+
   def readFile(path: String, hc: HailContext, buffSize: Int): HadoopPyReader = hc.hadoopConf.readFile(path) { in =>
     new HadoopPyReader(hc.hadoopConf.unsafeReader(path), buffSize)
   }
 
-  def writeFile(path: String, hc: HailContext): HadoopPyWriter = {
+  def writeFile(path: String, hc: HailContext, exclusive: Boolean): HadoopPyWriter = {
+    if (exclusive && hc.hadoopConf.exists(path))
+      fatal(s"a file already exists at '$path'")
     new HadoopPyWriter(hc.hadoopConf.unsafeWriter(path))
   }
 
@@ -96,6 +152,24 @@ trait Py4jUtils {
   def escapePyString(s: String): String = StringEscapeUtils.escapeString(s)
 
   def escapeIdentifier(s: String): String = prettyIdentifier(s)
+
+  def fileExists(hc: HailContext, path: String): Boolean = hc.hadoopConf.exists(path) && hc.hadoopConf.isFile(path)
+
+  def dirExists(hc: HailContext, path: String): Boolean = hc.hadoopConf.exists(path) && hc.hadoopConf.isDir(path)
+
+  def mkdir(hc: HailContext, path: String): Boolean = hc.hadoopConf.mkDir(path)
+
+  def copyToTmp(hc: HailContext, path: String, extension: String): String = {
+    val codecExt = hc.hadoopConf.getCodec(path)
+    val tmpFile = hc.getTemporaryFile(suffix = Some(extension + codecExt))
+    hc.hadoopConf.copy(path, tmpFile)
+    tmpFile
+  }
+
+  def makeJSON(t: Type, value: Any): String = {
+    val jv = JSONAnnotationImpex.exportAnnotation(value, t)
+    JsonMethods.compact(jv)
+  }
 }
 
 class HadoopPyReader(in: InputStream, buffSize: Int) {

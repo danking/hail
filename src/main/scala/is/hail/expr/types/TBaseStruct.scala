@@ -3,6 +3,7 @@ package is.hail.expr.types
 import is.hail.annotations._
 import is.hail.asm4s.{Code, _}
 import is.hail.check.Gen
+import is.hail.expr.ir.EmitMethodBuilder
 import is.hail.utils._
 import org.apache.spark.sql.Row
 import org.json4s.jackson.JsonMethods
@@ -10,6 +11,11 @@ import org.json4s.jackson.JsonMethods
 import scala.reflect.{ClassTag, classTag}
 
 object TBaseStruct {
+  /**
+    * Define an ordering on Row objects. Works with any row r such that the list
+    * of types of r is a prefix of types, or types is a prefix of the list of
+    * types of r.
+    */
   def getOrdering(types: Array[Type]): ExtendedOrdering =
     ExtendedOrdering.rowOrdering(types.map(_.ordering))
 
@@ -75,14 +81,38 @@ abstract class TBaseStruct extends Type {
     sb.result()
   }
 
-  override def _typeCheck(a: Any): Boolean =
-    a.isInstanceOf[Row] && {
-      val r = a.asInstanceOf[Row]
-      r.length == types.length &&
-        r.toSeq.zip(types).forall {
-          case (v, t) => t.typeCheck(v)
-        }
-    }
+  override def _typeCheck(a: Any): Boolean = a match {
+    case row: Row =>
+      row.length == types.length &&
+        isComparableAt(a)
+    case _ => false
+  }
+
+  def relaxedTypeCheck(a: Any): Boolean = a match {
+    case row: Row =>
+      row.length <= types.length &&
+        isComparableAt(a)
+    case _ => false
+  }
+
+  def isComparableAt(a: Annotation): Boolean = a match {
+    case row: Row =>
+      row.toSeq.zip(types).forall {
+        case (v, t) => t.typeCheck(v)
+      }
+    case _ => false
+  }
+
+  def isIsomorphicTo(other: TBaseStruct): Boolean =
+    size == other.size && isCompatibleWith(other)
+
+  def isPrefixOf(other: TBaseStruct): Boolean =
+    size <= other.size && isCompatibleWith(other)
+
+  def isCompatibleWith(other: TBaseStruct): Boolean =
+    fields.zip(other.fields).forall{ case (l, r) => l.typ isOfType r.typ }
+
+  def truncate(newSize: Int): TBaseStruct
 
   override def str(a: Annotation): String = JsonMethods.compact(toJSON(a))
 
@@ -97,28 +127,35 @@ abstract class TBaseStruct extends Type {
           Gen.uniformSequence(types.map(t => t.genValue)).map(a => Annotation(a: _*)))
   }
 
-  override def valuesSimilar(a1: Annotation, a2: Annotation, tolerance: Double): Boolean =
+  override def valuesSimilar(a1: Annotation, a2: Annotation, tolerance: Double, absolute: Boolean): Boolean =
     a1 == a2 || (a1 != null && a2 != null
       && types.zip(a1.asInstanceOf[Row].toSeq).zip(a2.asInstanceOf[Row].toSeq)
       .forall {
         case ((t, x1), x2) =>
-          t.valuesSimilar(x1, x2, tolerance)
+          t.valuesSimilar(x1, x2, tolerance, absolute)
       })
 
   override def scalaClassTag: ClassTag[Row] = classTag[Row]
 
-  override def unsafeOrdering(missingGreatest: Boolean): UnsafeOrdering = {
-    val fieldOrderings = types.map(_.unsafeOrdering(missingGreatest))
+  override def unsafeOrdering(missingGreatest: Boolean): UnsafeOrdering =
+    unsafeOrdering(this, missingGreatest)
+
+  override def unsafeOrdering(rightType: Type, missingGreatest: Boolean): UnsafeOrdering = {
+    require(this.isOfType(rightType))
+
+    val right = rightType.asInstanceOf[TBaseStruct]
+    val fieldOrderings: Array[UnsafeOrdering] =
+      types.zip(right.types).map { case (l, r) => l.unsafeOrdering(r, missingGreatest)}
 
     new UnsafeOrdering {
       def compare(r1: Region, o1: Long, r2: Region, o2: Long): Int = {
         var i = 0
         while (i < types.length) {
           val leftDefined = isFieldDefined(r1, o1, i)
-          val rightDefined = isFieldDefined(r2, o2, i)
+          val rightDefined = right.isFieldDefined(r2, o2, i)
 
           if (leftDefined && rightDefined) {
-            val c = fieldOrderings(i).compare(r1, loadField(r1, o1, i), r2, loadField(r2, o2, i))
+            val c = fieldOrderings(i).compare(r1, loadField(r1, o1, i), r2, right.loadField(r2, o2, i))
             if (c != 0)
               return c
           } else if (leftDefined != rightDefined) {

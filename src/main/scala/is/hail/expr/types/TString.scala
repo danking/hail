@@ -1,8 +1,11 @@
 package is.hail.expr.types
 
+import is.hail.asm4s._
+import is.hail.annotations.CodeOrdering
 import is.hail.annotations.{UnsafeOrdering, _}
 import is.hail.check.Arbitrary._
 import is.hail.check.Gen
+import is.hail.expr.ir.EmitMethodBuilder
 import is.hail.utils._
 
 import scala.reflect.{ClassTag, _}
@@ -31,6 +34,10 @@ class TString(override val required: Boolean) extends Type {
 
   override def fundamentalType: Type = TBinary(required)
 
+  def codeOrdering(mb: EmitMethodBuilder, other: Type): CodeOrdering = {
+    assert(this isOfType other)
+    TBinary(required).codeOrdering(mb, TBinary(other.required))
+  }
 }
 
 object TString {
@@ -42,4 +49,16 @@ object TString {
     val length = TBinary.loadLength(region, boff)
     new String(region.loadBytes(TBinary.bytesOffset(boff), length))
   }
+
+  def loadString(region: Code[Region], boff: Code[Long]): Code[String] = {
+    val length = TBinary.loadLength(region, boff)
+    Code.newInstance[String, Array[Byte]](
+      region.loadBytes(TBinary.bytesOffset(boff), length))
+  }
+
+  def loadLength(region: Region, boff: Long): Int =
+    TBinary.loadLength(region, boff)
+
+  def loadLength(region: Code[Region], boff: Code[Long]): Code[Int] =
+    TBinary.loadLength(region, boff)
 }

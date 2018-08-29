@@ -2,12 +2,12 @@ package is.hail.utils
 
 import is.hail.expr.types._
 import is.hail.annotations._
-import scala.collection.mutable.BitSet
+import scala.collection.mutable
 
-class MissingFloatArrayBuilder {
+class MissingFloatArrayBuilder extends Serializable {
   private var len = 0
-  private val elements = new ArrayBuilder[Float]()
-  private val isMissing = new BitSet()
+  private var elements = new ArrayBuilder[Float]()
+  private var isMissing = new mutable.BitSet()
 
   def addMissing() {
     isMissing.add(len)
@@ -42,13 +42,30 @@ class MissingFloatArrayBuilder {
   def write(rvb: RegionValueBuilder) {
     rvb.startArray(len)
     var i = 0
+    var j = 0
     while (i < len) {
       if (isMissing(i))
         rvb.setMissing()
-      else
-        rvb.addFloat(elements(i))
+      else {
+        rvb.addFloat(elements(j))
+        j += 1
+      }
       i += 1
     }
     rvb.endArray()
+  }
+
+  def clear() {
+    len = 0
+    elements.clear()
+    isMissing.clear()
+  }
+
+  override def clone(): MissingFloatArrayBuilder = {
+    val ab = new MissingFloatArrayBuilder()
+    ab.len = len
+    ab.elements = elements.clone()
+    ab.isMissing = isMissing.clone()
+    ab
   }
 }

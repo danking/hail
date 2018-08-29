@@ -1,8 +1,9 @@
 package is.hail.expr.types
 
-import is.hail.expr.{EvalContext, Parser}
+import is.hail.expr.Parser
 import is.hail.utils._
 import is.hail.expr.ir._
+import is.hail.rvd.OrderedRVDType
 import org.json4s.CustomSerializer
 import org.json4s.JsonAST.JString
 
@@ -10,12 +11,35 @@ class TableTypeSerializer extends CustomSerializer[TableType](format => (
   { case JString(s) => Parser.parseTableType(s) },
   { case tt: TableType => JString(tt.toString) }))
 
-case class TableType(rowType: TStruct, key: IndexedSeq[String], globalType: TStruct) extends BaseType {
+case class TableType(rowType: TStruct, key: Option[IndexedSeq[String]], globalType: TStruct) extends BaseType {
+
+  val keyOrEmpty: IndexedSeq[String] = key.getOrElse(IndexedSeq.empty)
+  val keyOrNull: IndexedSeq[String] = key.orNull
+  val rvdType = OrderedRVDType(keyOrEmpty, rowType)
+
   def env: Env[Type] = {
     Env.empty[Type]
       .bind(("global", globalType))
       .bind(("row", rowType))
   }
+
+  def tAgg: TAggregable = TAggregable(rowType, Map(
+    "global" -> (0, globalType),
+    "row" -> (1, rowType)
+  ))
+
+  def aggEnv: Env[Type] = Env.empty[Type]
+    .bind("global" -> globalType)
+    .bind("AGG" -> tAgg)
+
+  def refMap: Map[String, Type] = Map(
+    "global" -> globalType,
+    "row" -> rowType)
+
+  def keyType: Option[TStruct] = key.map(_ => rvdType.kType)
+  val keyFieldIdx: Option[Array[Int]] = key.map(_ => rvdType.kFieldIdx)
+  def valueType: TStruct = rvdType.valueType
+  val valueFieldIdx: Array[Int] = rvdType.valueFieldIdx
 
   def pretty(sb: StringBuilder, indent0: Int = 0, compact: Boolean = false) {
     var indent = indent0
@@ -38,9 +62,14 @@ case class TableType(rowType: TStruct, key: IndexedSeq[String], globalType: TStr
     sb += ','
     newline()
 
-    sb.append(s"key:$space[")
-    key.foreachBetween(k => sb.append(prettyIdentifier(k)))(sb.append(s",$space"))
-    sb += ']'
+    key match {
+      case Some(key) =>
+        sb.append(s"key:$space[")
+        key.foreachBetween(k => sb.append(prettyIdentifier(k)))(sb.append(s",$space"))
+        sb += ']'
+      case None =>
+        sb.append(s"key:${space}None")
+    }
     sb += ','
     newline()
 

@@ -1,9 +1,10 @@
 package is.hail.expr.types
 
-import is.hail.annotations.{Region, UnsafeOrdering, _}
+import is.hail.annotations._
+import is.hail.asm4s.Code
 import is.hail.check.Arbitrary._
 import is.hail.check.Gen
-import is.hail.expr.FloatNumericConversion
+import is.hail.expr.ir.EmitMethodBuilder
 import is.hail.utils._
 
 import scala.reflect.{ClassTag, _}
@@ -17,7 +18,6 @@ class TFloat32(override val required: Boolean) extends TNumeric {
   override def pyString(sb: StringBuilder): Unit = {
     sb.append("float32")
   }
-  val conv = FloatNumericConversion
 
   def _typeCheck(a: Any): Boolean = a.isInstanceOf[Float]
 
@@ -25,11 +25,19 @@ class TFloat32(override val required: Boolean) extends TNumeric {
 
   override def genNonmissingValue: Gen[Annotation] = arbitrary[Double].map(_.toFloat)
 
-  override def valuesSimilar(a1: Annotation, a2: Annotation, tolerance: Double): Boolean =
-    a1 == a2 || (a1 != null && a2 != null &&
-      (math.abs(a1.asInstanceOf[Float] - a2.asInstanceOf[Float]) <= tolerance ||
-        D_==(a1.asInstanceOf[Float], a2.asInstanceOf[Float], tolerance) ||
-        (a1.asInstanceOf[Double].isNaN && a2.asInstanceOf[Double].isNaN)))
+  override def valuesSimilar(a1: Annotation, a2: Annotation, tolerance: Double, absolute: Boolean): Boolean =
+    a1 == a2 || (a1 != null && a2 != null && {
+      val f1 = a1.asInstanceOf[Float]
+      val f2 = a2.asInstanceOf[Float]
+
+      val withinTol =
+        if (absolute)
+          math.abs(f1 - f2) <= tolerance
+        else
+          D_==(f1, f2, tolerance)
+
+      f1 == f2 || withinTol || (f1.isNaN && f2.isNaN)
+    })
 
   override def scalaClassTag: ClassTag[java.lang.Float] = classTag[java.lang.Float]
 
@@ -41,6 +49,31 @@ class TFloat32(override val required: Boolean) extends TNumeric {
 
   val ordering: ExtendedOrdering =
     ExtendedOrdering.extendToNull(implicitly[Ordering[Float]])
+
+  def codeOrdering(mb: EmitMethodBuilder, other: Type): CodeOrdering = {
+    assert(other isOfType this)
+    new CodeOrdering {
+      type T = Float
+
+      def compareNonnull(rx: Code[Region], x: Code[T], ry: Code[Region], y: Code[T], missingGreatest: Boolean): Code[Int] =
+        Code.invokeStatic[java.lang.Float, Float, Float, Int]("compare", x, y)
+
+      override def ltNonnull(rx: Code[Region], x: Code[T], ry: Code[Region], y: Code[T], missingGreatest: Boolean): Code[Boolean] =
+        x < y
+
+      override def lteqNonnull(rx: Code[Region], x: Code[T], ry: Code[Region], y: Code[T], missingGreatest: Boolean): Code[Boolean] =
+        x <= y
+
+      override def gtNonnull(rx: Code[Region], x: Code[T], ry: Code[Region], y: Code[T], missingGreatest: Boolean): Code[Boolean] =
+        x > y
+
+      override def gteqNonnull(rx: Code[Region], x: Code[T], ry: Code[Region], y: Code[T], missingGreatest: Boolean): Code[Boolean] =
+        x >= y
+
+      override def equivNonnull(rx: Code[Region], x: Code[T], ry: Code[Region], y: Code[T], missingGreatest: Boolean): Code[Boolean] =
+        x.ceq(y)
+    }
+  }
 
   override def byteSize: Long = 4
 }

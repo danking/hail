@@ -1,16 +1,28 @@
 package is.hail.expr
 
+import is.hail.HailContext
+import is.hail.annotations.BroadcastRow
+import is.hail.expr.ir.{AggSignature, BaseIR, IR, MatrixIR, TableIR}
 import is.hail.expr.types._
 import is.hail.rvd.OrderedRVDType
+import is.hail.table.{Ascending, Descending, SortField, TableSpec}
 import is.hail.utils.StringEscapeUtils._
 import is.hail.utils._
 import is.hail.variant._
 import org.apache.spark.sql.Row
+import org.json4s.jackson.{JsonMethods, Serialization}
 
-import scala.collection.mutable
-import scala.reflect.ClassTag
 import scala.util.parsing.combinator.JavaTokenParsers
 import scala.util.parsing.input.Position
+
+object IRParserEnvironment {
+  var theEnv: IRParserEnvironment = null
+}
+
+case class IRParserEnvironment(
+  ref_map: Map[String, Type] = Map.empty,
+  ir_map: Map[String, BaseIR] = Map.empty
+)
 
 class RichParser[T](parser: Parser.Parser[T]) {
   def parse(input: String): T = {
@@ -53,150 +65,21 @@ object ParserUtils {
 }
 
 object Parser extends JavaTokenParsers {
-  private def evalNoTypeCheck(t: AST, ec: EvalContext): () => Any = {
-    val typedNames = ec.st.toSeq
-      .sortBy { case (name, (i, _)) => i }
-      .map { case (name, (i, typ)) => (name, typ, i) }
-    val f = t.compile().runWithDelayedValues(typedNames, ec)
-
-    // FIXME: ec.a is actually mutable.ArrayBuffer[AnyRef] because Annotation is
-    // actually AnyRef, but there's a lot to change
-    () => f(ec.a.asInstanceOf[mutable.ArrayBuffer[AnyRef]])
-  }
-
-  def eval(t: AST, ec: EvalContext): (Type, () => Any) = {
-    t.typecheck(ec)
-
-    if (!t.`type`.isRealizable)
-      t.parseError(s"unrealizable type `${ t.`type` }' as result of expression")
-
-    val thunk = evalNoTypeCheck(t, ec)
-    (t.`type`, thunk)
-  }
-
-  def evalTypedExpr[T](ast: AST, ec: EvalContext)(implicit hr: HailRep[T]): () => T = {
-    val (t, f) = evalExpr(ast, ec)
-    if (!t.isOfType(hr.typ))
-      fatal(s"expression has wrong type: expected `${ hr.typ }', got $t")
-
-    () => f().asInstanceOf[T]
-  }
-
-  def evalExpr(ast: AST, ec: EvalContext): (Type, () => Any) = eval(ast, ec)
-
-  def parseExpr(code: String, ec: EvalContext): (Type, () => Any) = {
-    eval(expr.parse(code), ec)
-  }
-
-  def parseToAST(code: String, ec: EvalContext): AST = {
-    val t = expr.parse(code)
-    t.typecheck(ec)
-    t
-  }
-
-  def parseTypedExpr[T](code: String, ec: EvalContext)(implicit hr: HailRep[T]): () => T = {
-    val (t, f) = parseExpr(code, ec)
-    if (!t.isOfType(hr.typ))
-      fatal(s"expression has wrong type: expected `${ hr.typ }', got $t")
-
-    () => f().asInstanceOf[T]
-  }
-
-  def parseExprs(code: String, ec: EvalContext): (Array[Type], () => Array[Any]) = {
-    val (types, fs) = args.parse(code).map(eval(_, ec)).unzip
-    (types.toArray, () => fs.map(f => f()).toArray)
-  }
-
-  def parseSelectExprs(codes: Array[String], ec: EvalContext): (Array[Either[String, List[String]]], Array[Type], () => Array[Any]) = {
-
-    // Left is string assignment, right is referenced path
-    val names = new Array[Either[String, List[String]]](codes.length)
-    val types = new Array[Type](codes.length)
-    val fs = new Array[() => Any](codes.length)
-
-    codes.indices.foreach { i =>
-      val code = codes(i)
-      annotationIdentifier.parseOpt(code) match {
-        case Some(ids) =>
-          val ast = expr.parse(code)
-          assert(ids.nonEmpty)
-          names(i) = Right(ids)
-          val (t, f) = eval(ast, ec)
-          types(i) = t
-          fs(i) = f
-        case None =>
-          val (name, ast) = named_expr(identifier).parse(code)
-          names(i) = Left(name)
-          val (t, f) = eval(ast, ec)
-          types(i) = t
-          fs(i) = f
-      }
-    }
-    (names, types, () => fs.map(_()))
-  }
-
-  def parseAnnotationExprs(code: String, ec: EvalContext, expectedHead: Option[String]): (
-    Array[List[String]], Array[Type], () => Array[Any]) = {
-
-    val (prePaths, ts, f) = parseNamedExprs(code, annotationIdentifier, ec)
-    (prePaths.map { path =>
-      expectedHead match {
-        case Some(h) =>
-          require(path.head == h)
-          path.tail
-        case None => path
-      }
-    }, ts, f)
-  }
-  
-  def parseAnnotationExprsToAST(code: String, ec: EvalContext): Array[(String, AST)] = {
-    val as = named_exprs(identifier).parse(code)
-    as.foreach { case (_, ast) => ast.typecheck(ec) }
-    as
-  }
-
-  def parseAnnotationExprsToAST(code: String, ec: EvalContext, expectedHead: Option[String]): Array[(String, AST)] = {
-    named_exprs(annotationIdentifier)
-      .parse(code).map { case (p, ast) =>
-      ast.typecheck(ec)
-      val n = expectedHead match {
-        case Some(h) =>
-          require(p.head == h && p.length == 2)
-          p.last
-        case None =>
-          require(p.length == 1)
-          p.head
-      }
-      (n, ast)
-    }
-  }
-
-  def parseNamedExprs(code: String, ec: EvalContext): (Array[String], Array[Type], () => Array[Any]) = {
-    val (names, types, f) = parseNamedExprs[String](code, identifier, ec)
-
-    (names, types, f)
-  }
-
-  def parseNamedExprs[T](code: String, name: Parser[T], ec: EvalContext)(implicit ct: ClassTag[T]): (
-    Array[T], Array[Type], () => Array[Any]) = {
-
-    val parsed = named_exprs(name).parse(code)
-    val nExprs = parsed.length
-
-    val names = parsed.map(_._1)
-    val asts = parsed.map(_._2)
-    val tf = asts.map(eval(_, ec))
-    val types = tf.map(_._1)
-    val fs = tf.map(_._2)
-    val f = () => fs.map(_())
-
-    (names, types, f)
-  }
-
   def parse[T](parser: Parser[T], code: String): T = {
     parseAll(parser, code) match {
       case Success(result, _) => result
       case NoSuccess(msg, next) => ParserUtils.error(next.pos, msg)
+    }
+  }
+
+  private def parseWithEnv[T](parser: Parser[T], code: String, env: IRParserEnvironment): T = {
+    synchronized {
+      try {
+        IRParserEnvironment.theEnv = env
+        parse(parser, code)
+      } finally {
+        IRParserEnvironment.theEnv = null
+      }
     }
   }
 
@@ -221,20 +104,6 @@ object Parser extends JavaTokenParsers {
       }
   }
 
-  def parseIdentifierList(code: String): Array[String] = {
-    parseAll(identifierList, code) match {
-      case Success(result, _) => result
-      case NoSuccess(msg, next) => ParserUtils.error(next.pos, msg)
-    }
-  }
-
-  def parseCommaDelimitedDoubles(code: String): Array[Double] = {
-    parseAll(comma_delimited_doubles, code) match {
-      case Success(r, _) => r
-      case NoSuccess(msg, next) => ParserUtils.error(next.pos, msg)
-    }
-  }
-
   def parseAnnotationRoot(code: String, root: String): List[String] = {
     val path = parseAll(annotationIdentifier, code) match {
       case Success(result, _) => result.asInstanceOf[List[String]]
@@ -247,10 +116,6 @@ object Parser extends JavaTokenParsers {
       fatal(s"expected an annotation path starting in `$root', but got a path starting in '${ path.head }'")
     else
       path.tail
-  }
-
-  def validateAnnotationRoot(a: String, root: String): Unit = {
-    parseAnnotationRoot(a, root)
   }
 
   def parseLocusInterval(input: String, rg: RGBase): Interval = {
@@ -305,69 +170,8 @@ object Parser extends JavaTokenParsers {
     }
   }
 
-  def expr: Parser[AST] = ident ~ withPos("=>") ~ expr ^^ { case param ~ arrow ~ body =>
-    Lambda(arrow.pos, param, body)
-  } |
-    if_expr |
-    let_expr |
-    or_expr
-
-  def if_expr: Parser[AST] =
-    withPos("if") ~ ("(" ~> expr <~ ")") ~ expr ~ ("else" ~> expr) ^^ { case ifx ~ cond ~ thenTree ~ elseTree =>
-      If(ifx.pos, cond, thenTree, elseTree)
-    }
-
-  def let_expr: Parser[AST] =
-    withPos("let") ~ rep1sep((identifier <~ "=") ~ expr, "and") ~ ("in" ~> expr) ^^ { case let ~ bindings ~ body =>
-      Let(let.pos, bindings.iterator.map { case id ~ v => (id, v) }.toArray, body)
-    }
-
-  def or_expr: Parser[AST] =
-    and_expr ~ rep(withPos("||" | "|") ~ and_expr) ^^ { case lhs ~ lst =>
-      lst.foldLeft(lhs) { case (acc, op ~ rhs) => Apply(op.pos, op.x, Array(acc, rhs)) }
-    }
-
-  def and_expr: Parser[AST] =
-    lt_expr ~ rep(withPos("&&" | "&") ~ lt_expr) ^^ { case lhs ~ lst =>
-      lst.foldLeft(lhs) { case (acc, op ~ rhs) => Apply(op.pos, op.x, Array(acc, rhs)) }
-    }
-
-  def lt_expr: Parser[AST] =
-    eq_expr ~ rep(withPos("<=" | ">=" | "<" | ">") ~ eq_expr) ^^ { case lhs ~ lst =>
-      lst.foldLeft(lhs) { case (acc, op ~ rhs) => Apply(op.pos, op.x, Array(acc, rhs)) }
-    }
-
-  def eq_expr: Parser[AST] =
-    add_expr ~ rep(withPos("==" | "!=") ~ add_expr) ^^ { case lhs ~ lst =>
-      lst.foldLeft(lhs) { case (acc, op ~ rhs) => Apply(op.pos, op.x, Array(acc, rhs)) }
-    }
-
-  def add_expr: Parser[AST] =
-    mul_expr ~ rep(withPos("+" | "-") ~ mul_expr) ^^ { case lhs ~ lst =>
-      lst.foldLeft(lhs) { case (acc, op ~ rhs) => Apply(op.pos, op.x, Array(acc, rhs)) }
-    }
-
-  def mul_expr: Parser[AST] =
-    tilde_expr ~ rep(withPos("*" | "//" | "/" | "%") ~ tilde_expr) ^^ { case lhs ~ lst =>
-      lst.foldLeft(lhs) { case (acc, op ~ rhs) => Apply(op.pos, op.x, Array(acc, rhs)) }
-    }
-
-  def tilde_expr: Parser[AST] =
-    unary_expr ~ rep(withPos("~") ~ unary_expr) ^^ { case lhs ~ lst =>
-      lst.foldLeft(lhs) { case (acc, op ~ rhs) => Apply(op.pos, op.x, Array(acc, rhs)) }
-    }
-
   def comma_delimited_doubles: Parser[Array[Double]] =
     repsep(floatingPointNumber, ",") ^^ (_.map(_.toDouble).toArray)
-
-  def annotationExpressions: Parser[Array[(List[String], AST)]] =
-    repsep(annotationExpression, ",") ^^ {
-      _.toArray
-    }
-
-  def annotationExpression: Parser[(List[String], AST)] = annotationIdentifier ~ "=" ~ expr ^^ {
-    case id ~ eq ~ expr => (id, expr)
-  }
 
   def annotationIdentifier: Parser[List[String]] =
     rep1sep(identifier, ".") ^^ {
@@ -383,97 +187,6 @@ object Parser extends JavaTokenParsers {
 
   def identifier = backtickLiteral | ident
 
-  def identifierList: Parser[Array[String]] = repsep(identifier, ",") ^^ {
-    _.toArray
-  }
-
-  def args: Parser[Array[AST]] =
-    repsep(expr, ",") ^^ {
-      _.toArray
-    }
-
-  def unary_expr: Parser[AST] =
-    rep(withPos("-" | "+" | "!")) ~ exponent_expr ^^ { case lst ~ rhs =>
-      lst.foldRight(rhs) { case (op, acc) =>
-        Apply(op.pos, op.x, Array(acc))
-      }
-    }
-
-  def exponent_expr: Parser[AST] =
-    dot_expr ~ rep(withPos("**") ~ dot_expr) ^^ { case lhs ~ lst =>
-      lst.foldLeft(lhs) { case (acc, op ~ rhs) => Apply(op.pos, op.x, Array(acc, rhs)) }
-    }
-
-  def dot_expr: Parser[AST] =
-    primary_expr ~ rep((withPos(".") ~ identifier ~ "(" ~ args ~ ")")
-      | (withPos(".") ~ identifier)
-      | withPos("[") ~ expr ~ "]"
-      | withPos("[") ~ opt(expr) ~ ":" ~ opt(expr) ~ "]") ^^ { case lhs ~ lst =>
-      lst.foldLeft(lhs) { (acc, t) =>
-        (t: @unchecked) match {
-          case (dot: Positioned[_]) ~ sym => Select(dot.pos, acc, sym)
-          case (dot: Positioned[_]) ~ (sym: String) ~ "(" ~ (args: Array[AST]) ~ ")" =>
-            ApplyMethod(dot.pos, acc, sym, args)
-          case (lbracket: Positioned[_]) ~ (idx: AST) ~ "]" => ApplyMethod(lbracket.pos, acc, "[]", Array(idx))
-          case (lbracket: Positioned[_]) ~ None ~ ":" ~ None ~ "]" =>
-            ApplyMethod(lbracket.pos, acc, "[:]", Array())
-          case (lbracket: Positioned[_]) ~ Some(idx1: AST) ~ ":" ~ None ~ "]" =>
-            ApplyMethod(lbracket.pos, acc, "[*:]", Array(idx1))
-          case (lbracket: Positioned[_]) ~ None ~ ":" ~ Some(idx2: AST) ~ "]" =>
-            ApplyMethod(lbracket.pos, acc, "[:*]", Array(idx2))
-          case (lbracket: Positioned[_]) ~ Some(idx1: AST) ~ ":" ~ Some(idx2: AST) ~ "]" =>
-            ApplyMethod(lbracket.pos, acc, "[*:*]", Array(idx1, idx2))
-        }
-      }
-    }
-
-  def primary_expr: Parser[AST] =
-    withPos("f32#" ~> """-?\d+(\.\d+)?[eE][+-]?\d+""".r) ^^ (r => Const(r.pos, r.x.toFloat, TFloat32())) |
-    withPos("f64#" ~> """-?\d+(\.\d+)?[eE][+-]?\d+""".r) ^^ (r => Const(r.pos, r.x.toDouble, TFloat64())) |
-      withPos("f32#" ~> """-?\d*(\.\d+)?""".r) ^^ (r => Const(r.pos, r.x.toFloat, TFloat32())) |
-      withPos("f64#" ~> """-?\d*(\.\d+)?""".r) ^^ (r => Const(r.pos, r.x.toDouble, TFloat64())) |
-      withPos("""-?\d+(\.\d+)?[eE][+-]?\d+[fF]""".r) ^^ (r => Const(r.pos, r.x.toFloat, TFloat32())) |
-      withPos("""-?\d*\.\d+[fF]""".r) ^^ (r => Const(r.pos, r.x.toFloat, TFloat32())) |
-      withPos("""-?\d+[fF]""".r) ^^ (r => Const(r.pos, r.x.toFloat, TFloat32())) |
-      withPos("""-?\d+[dD]""".r) ^^ (r => Const(r.pos, r.x.toDouble, TFloat64())) |
-      withPos("""-?\d+(\.\d+)?[eE][+-]?\d+[dD]?""".r) ^^ (r => Const(r.pos, r.x.toDouble, TFloat64())) |
-      withPos("""-?\d*\.\d+[dD]?""".r) ^^ (r => Const(r.pos, r.x.toDouble, TFloat64())) |
-      withPos("i64#" ~> wholeNumber) ^^ (r => Const(r.pos, r.x.toLong, TInt64())) |
-      withPos("i32#" ~> wholeNumber) ^^ (r => Const(r.pos, r.x.toInt, TInt32())) |
-      withPos(wholeNumber <~ "[Ll]".r) ^^ (r => Const(r.pos, r.x.toLong, TInt64())) |
-      withPos(wholeNumber) ^^ (r => Const(r.pos, r.x.toInt, TInt32())) |
-      withPos(stringLiteral) ^^ { r => Const(r.pos, r.x, TString()) } |
-      withPos("NA" ~> ":" ~> type_expr) ^^ (r => Const(r.pos, null, r.x)) |
-      withPos(arrayDeclaration) ^^ (r => ArrayConstructor(r.pos, r.x)) |
-      withPos(structDeclaration) ^^ (r => StructConstructor(r.pos, r.x.map(_._1), r.x.map(_._2))) |
-      withPos(tupleDeclaration) ^^ (r => TupleConstructor(r.pos, r.x)) |
-      withPos("true") ^^ (r => Const(r.pos, true, TBoolean())) |
-      withPos("false") ^^ (r => Const(r.pos, false, TBoolean())) |
-      referenceGenomeDependentFunction ~ ("(" ~> identifier <~ ")") ~ withPos("(") ~ (args <~ ")") ^^ {
-        case fn ~ rg ~ lparen ~ args => ReferenceGenomeDependentFunction(lparen.pos, fn, rg, args)
-      } |
-      referenceGenomeDependentFunction ~ withPos("(") ~ (args <~ ")") ^^ {
-        case fn ~ lparen ~ args => ReferenceGenomeDependentFunction(lparen.pos, fn, ReferenceGenome.defaultReference.name, args)
-      } |
-      (guard(not("if" | "else")) ~> identifier) ~ withPos("(") ~ (args <~ ")") ^^ {
-        case id ~ lparen ~ args =>
-          Apply(lparen.pos, id, args)
-      } |
-      guard(not("if" | "else")) ~> withPos(identifier) ^^ (r => SymRef(r.pos, r.x)) |
-      "{" ~> expr <~ "}" |
-      "(" ~> expr <~ ")"
-
-  def annotationSignature: Parser[TStruct] =
-    type_fields ^^ { fields => TStruct(fields) }
-
-  def arrayDeclaration: Parser[Array[AST]] = "[" ~> repsep(expr, ",") <~ "]" ^^ (_.toArray)
-
-  def structDeclaration: Parser[Array[(String, AST)]] = "{" ~> repsep(structField, ",") <~ "}" ^^ (_.toArray)
-
-  def tupleDeclaration: Parser[Array[AST]] = "Tuple(" ~> repsep(expr, ",") <~ ")" ^^ (_.toArray)
-
-  def structField: Parser[(String, AST)] = (identifier ~ ":" ~ expr) ^^ { case id ~ _ ~ ast => (id, ast) }
-
   def advancePosition(pos: Position, delta: Int) = new Position {
     def line = pos.line
 
@@ -483,26 +196,45 @@ object Parser extends JavaTokenParsers {
   }
 
   def quotedLiteral(delim: Char, what: String): Parser[String] =
-    withPos(s"$delim([^$delim\\\\]|\\\\.)*$delim".r) ^^ { s =>
-      try {
-        unescapeString(s.x.substring(1, s.x.length - 1))
-      } catch {
-        case e: Exception =>
-          val toSearch = s.x.substring(1, s.x.length - 1)
-          """\\[^\\"bfnrt'"`]""".r.findFirstMatchIn(toSearch) match {
-            case Some(m) =>
-              // + 1 for the opening "
-              ParserUtils.error(advancePosition(s.pos, m.start + 1),
-                s"""invalid escape character in $what: ${ m.matched }""")
+    new Parser[String] {
+      def apply(in: Input): ParseResult[String] = {
+        var r = in
 
-            case None =>
-              // For safety.  Should never happen.
-              ParserUtils.error(s.pos, s"invalid $what")
+        val source = in.source
+        val offset = in.offset
+        val start = handleWhiteSpace(source, offset)
+        r = r.drop(start - offset)
+
+        if (r.atEnd || r.first != delim)
+          return Failure(s"expected $what", r)
+        r = r.rest
+
+        val sb = new StringBuilder()
+
+        val escapeChars = "\\bfnrt'\"`".toSet
+        var continue = true
+        while (continue) {
+          if (r.atEnd)
+            return Failure(s"unterminated $what", r)
+          val c = r.first
+          r = r.rest
+          if (c == delim)
+            continue = false
+          else {
+            sb += c
+            if (c == '\\') {
+              if (r.atEnd)
+                return Failure(s"unterminated $what", r)
+              val d = r.first
+              if (!escapeChars.contains(d))
+                return Failure(s"invalid escape character in $what", r)
+              sb += d
+              r = r.rest
+            }
           }
-
+        }
+        Success(unescapeString(sb.result()), r)
       }
-    } | withPos(s"$delim([^$delim\\\\]|\\\\.)*\\z".r) ^^ { s =>
-      ParserUtils.error(s.pos, s"unterminated $what")
     }
 
   def backtickLiteral: Parser[String] = quotedLiteral('`', "backtick identifier")
@@ -517,12 +249,6 @@ object Parser extends JavaTokenParsers {
   def tuplify[T, S, V](p: ~[~[T, S], V]): (T, S, V) = p match {
     case t ~ s ~ v => (t, s, v)
   }
-
-  def named_expr[T](name: Parser[T]): Parser[(T, AST)] =
-    (name <~ "=") ~ expr ^^ { case n ~ e => n -> e }
-
-  def named_exprs[T](name: Parser[T]): Parser[Array[(T, AST)]] =
-    repsep(named_expr(name), ",") ^^ (_.toArray)
 
   def decorator: Parser[(String, String)] =
     ("@" ~> (identifier <~ "=")) ~ stringLiteral ^^ { case name ~ desc =>
@@ -568,19 +294,23 @@ object Parser extends JavaTokenParsers {
 
   def _struct_expr: Parser[TStruct] = ("Struct" ~ "{") ~> type_fields <~ "}" ^^ { fields => TStruct(fields) }
 
-  def key: Parser[Array[String]] = "[" ~> (repsep(identifier, ",") ^^ { _.toArray }) <~ "]"
+  def key: Parser[Array[String]] = "[" ~> (repsep(identifier, ",") ^^ {
+    _.toArray
+  }) <~ "]"
 
-  def trailing_keys: Parser[Array[String]] = rep("," ~> identifier) ^^ { _.toArray }
+  def trailing_keys: Parser[Array[String]] = rep("," ~> identifier) ^^ {
+    _.toArray
+  }
 
   def ordered_rvd_type_expr: Parser[OrderedRVDType] =
     (("OrderedRVDType" ~ "{" ~ "key" ~ ":" ~ "[") ~> key) ~ (trailing_keys <~ "]") ~
       (("," ~ "row" ~ ":") ~> struct_expr <~ "}") ^^ { case partitionKey ~ restKey ~ rowType =>
-      new OrderedRVDType(partitionKey, partitionKey ++ restKey, rowType)
+      new OrderedRVDType(partitionKey ++ restKey, rowType)
     }
 
   def table_type_expr: Parser[TableType] =
     (("Table" ~ "{" ~ "global" ~ ":") ~> struct_expr) ~
-      (("," ~ "key" ~ ":") ~> key) ~
+      (("," ~ "key" ~ ":") ~> ("None" ^^ { _ => None } | key ^^ { key => Some(key.toFastIndexedSeq) })) ~
       (("," ~ "row" ~ ":") ~> struct_expr <~ "}") ^^ { case globalType ~ key ~ rowType =>
       TableType(rowType, key, globalType)
     }
@@ -595,77 +325,68 @@ object Parser extends JavaTokenParsers {
       MatrixType.fromParts(globalType, colKey, colType, rowPartitionKey, rowPartitionKey ++ rowRestKey, rowType, entryType)
     }
 
-  def parsePhysicalType(code: String): PhysicalType = parse(physical_type, code)
+  def parsePhysicalType(code: String): PType = parse(physical_type, code)
 
-  def physical_type: Parser[PhysicalType] =
+  def physical_type: Parser[PType] =
     ("Default" ~ "[") ~> type_expr <~ "]" ^^ { t => PDefault(t) }
 
-  def parseEncodedType(code: String): PhysicalType = parse(physical_type, code)
+  def parseEncodedType(code: String): PType = parse(physical_type, code)
 
   def encoded_type: Parser[EncodedType] =
     ("Default" ~ "[") ~> type_expr <~ "]" ^^ { t => EDefault(t) }
 
-  def solr_named_args: Parser[Array[(String, Map[String, AnyRef], AST)]] =
-    repsep(solr_named_arg, ",") ^^ (_.toArray)
-
-  def solr_field_spec: Parser[Map[String, AnyRef]] =
-    "{" ~> repsep(solr_field_spec1, ",") <~ "}" ^^ (_.toMap)
-
-  def solr_field_spec1: Parser[(String, AnyRef)] =
-    (identifier <~ "=") ~ solr_literal ^^ { case id ~ v => (id, v) }
-
-  def solr_literal: Parser[AnyRef] =
-    "true" ^^ { _ => true.asInstanceOf[AnyRef] } |
-      "false" ^^ { _ => false.asInstanceOf[AnyRef] } |
-      stringLiteral ^^ (_.asInstanceOf[AnyRef])
-
-  def solr_named_arg: Parser[(String, Map[String, AnyRef], AST)] =
-    identifier ~ opt(solr_field_spec) ~ ("=" ~> expr) ^^ { case id ~ spec ~ expr => (id, spec.getOrElse(Map.empty), expr) }
-
-  def parseSolrNamedArgs(code: String, ec: EvalContext): Array[(String, Map[String, AnyRef], Type, () => Any)] = {
-    val args = parseAll(solr_named_args, code) match {
-      case Success(result, _) => result.asInstanceOf[Array[(String, Map[String, AnyRef], AST)]]
-      case NoSuccess(msg, next) => ParserUtils.error(next.pos, msg)
-    }
-    args.map { case (id, spec, ast) =>
-      ast.typecheck(ec)
-      val t = ast.`type`
-      if (!t.isRealizable)
-        fatal(s"unrealizable type in Solr export expression: $t")
-      val f = evalNoTypeCheck(ast, ec)
-      (id, spec, t, f)
-    }
-  }
-
   def call: Parser[Call] = {
     wholeNumber ~ "/" ~ rep1sep(wholeNumber, "/") ^^ { case a0 ~ _ ~ arest =>
-      CallN(coerceInt(a0) +: arest.map(coerceInt).toArray, phased = false) } |
+      CallN(coerceInt(a0) +: arest.map(coerceInt).toArray, phased = false)
+    } |
       wholeNumber ~ "|" ~ rep1sep(wholeNumber, "|") ^^ { case a0 ~ _ ~ arest =>
-        CallN(coerceInt(a0) +: arest.map(coerceInt).toArray, phased = true) } |
+        CallN(coerceInt(a0) +: arest.map(coerceInt).toArray, phased = true)
+      } |
       wholeNumber ^^ { a => Call1(coerceInt(a), phased = false) } |
       "|" ~ wholeNumber ^^ { case _ ~ a => Call1(coerceInt(a), phased = true) } |
       "-" ^^ { _ => Call0(phased = false) } |
       "|-" ^^ { _ => Call0(phased = true) }
   }
-  
-  def referenceGenomeDependentFunction: Parser[String] = "LocusInterval" | "LocusAlleles" | "Locus" | "getReferenceSequence"
 
-  def intervalWithEndpoints[T](bounds: Parser[(T, T)]): Parser[Interval] = {
+  def referenceGenomeDependentFunction: Parser[String] = "LocusInterval" | "LocusAlleles" | "Locus" |
+    "getReferenceSequence" | "isValidContig" | "isValidLocus" | "liftoverLocusInterval" | "liftoverLocus" |
+    "locusToGlobalPos" | "globalPosToLocus"
+
+  def intervalWithEndpoints[T](bounds: Parser[(T, T, Boolean, Boolean)]): Parser[Interval] = {
     val start = ("[" ^^^ true) | ("(" ^^^ false)
     val end = ("]" ^^^ true) | (")" ^^^ false)
 
-    start ~ bounds ~ end ^^ {case istart ~ int ~ iend => Interval(int._1, int._2, istart, iend)} |
-      bounds ^^ {int => Interval(int._1, int._2, true, false)}
+    start ~ bounds ~ end ^^ { case istart ~ int ~ iend => Interval(int._1, int._2, istart, iend) } |
+      bounds ^^ { int => Interval(int._1, int._2, int._3, int._4) }
   }
 
-  def locusInterval(rg: RGBase): Parser[Interval] = {
+  def locusInterval(rgBase: RGBase): Parser[Interval] = {
+    val rg = rgBase.asInstanceOf[ReferenceGenome]
     val contig = rg.contigParser
-    val valueParser = locus(rg) ~ "-" ~ locus(rg) ^^ { case l1 ~ _ ~ l2 => (l1, l2) } |
-      locus(rg) ~ "-" ~ pos ^^ { case l1 ~ _ ~ p2 => (l1, l1.copyChecked(rg, position = p2.getOrElse(rg.contigLength(l1.contig)))) } |
-      contig ~ "-" ~ contig ^^ { case c1 ~ _ ~ c2 => (Locus(c1, 1, rg), Locus(c2, rg.contigLength(c2), rg)) } |
-      contig ^^ { c => (Locus(c, 1), Locus(c, rg.contigLength(c))) }
-      intervalWithEndpoints(valueParser)
+
+    val valueParser =
+      locusUnchecked(rg) ~ "-" ~ rg.contigParser ~ ":" ~ pos ^^ { case l1 ~ _ ~ c2 ~ _ ~ p2 => p2 match {
+        case Some(p) => (l1, Locus(c2, p), true, false)
+        case None => (l1, Locus(c2, rg.contigLength(c2)), true, true)
+      }
+      } |
+        locusUnchecked(rg) ~ "-" ~ pos ^^ { case l1 ~ _ ~ p2 => p2 match {
+          case Some(p) => (l1, l1.copy(position = p), true, false)
+          case None => (l1, l1.copy(position = rg.contigLength(l1.contig)), true, true)
+        }
+        } |
+        contig ~ "-" ~ contig ^^ { case c1 ~ _ ~ c2 => (Locus(c1, 1), Locus(c2, rg.contigLength(c2)), true, true) } |
+        contig ^^ { c => (Locus(c, 1), Locus(c, rg.contigLength(c)), true, true) }
+
+    intervalWithEndpoints(valueParser) ^^ { i =>
+      val normInterval = rg.normalizeLocusInterval(i)
+      rg.checkLocusInterval(normInterval)
+      normInterval
+    }
   }
+
+  def locusUnchecked(rg: RGBase): Parser[Locus] =
+    (rg.contigParser ~ ":" ~ pos) ^^ { case c ~ _ ~ p => Locus(c, p.getOrElse(rg.contigLength(c))) }
 
   def locus(rg: RGBase): Parser[Locus] =
     (rg.contigParser ~ ":" ~ pos) ^^ { case c ~ _ ~ p => Locus(c, p.getOrElse(rg.contigLength(c)), rg) }
@@ -695,4 +416,297 @@ object Parser extends JavaTokenParsers {
       "\\d+".r ~ "." ~ "\\d{1,6}".r ~ "[Mm]".r ^^ { case lft ~ _ ~ rt ~ _ => Some(coerceInt(lft + rt) * exp10(6 - rt.length)) } |
       "\\d+".r ^^ { i => Some(coerceInt(i)) }
   }
+
+  def int32_literal: Parser[Int] = wholeNumber.map(_.toInt)
+
+  def int64_literal: Parser[Long] = wholeNumber.map(_.toLong)
+
+  def float32_literal: Parser[Float] =
+    "nan" ^^ { _ => Float.NaN } |
+      "inf" ^^ { _ => Float.PositiveInfinity } |
+      "neginf" ^^ { _ => Float.NegativeInfinity } |
+      """-?\d+(\.\d+)?[eE][+-]?\d+""".r ^^ {
+        _.toFloat
+      } |
+      """-?\d*(\.\d+)?""".r ^^ {
+        _.toFloat
+      }
+
+  def float64_literal: Parser[Double] =
+    "nan" ^^ { _ => Double.NaN } |
+      "inf" ^^ { _ => Double.PositiveInfinity } |
+      "-inf" ^^ { _ => Double.NegativeInfinity } |
+      "neginf" ^^ { _ => Double.NegativeInfinity } |
+      """-?\d+(\.\d+)?[eE][+-]?\d+""".r ^^ {
+        _.toDouble
+      } |
+      """-?\d*(\.\d+)?""".r ^^ {
+        _.toDouble
+      }
+
+  def int32_literals: Parser[IndexedSeq[Int]] = "(" ~> rep(int32_literal) <~ ")" ^^ {
+    _.toFastIndexedSeq
+  }
+
+  def int32_literal_opt: Parser[Option[Int]] = int32_literal ^^ {
+    Some(_)
+  } | "None" ^^ { _ => None }
+
+  def int64_literals: Parser[IndexedSeq[Long]] = "(" ~> rep(int64_literal) <~ ")" ^^ {
+    _.toFastIndexedSeq
+  }
+
+  def int64_literals_opt: Parser[Option[IndexedSeq[Long]]] = int64_literals ^^ {
+    Some(_)
+  } | "None" ^^ { _ => None }
+
+  def string_literal: Parser[String] = stringLiteral
+
+  def string_literals: Parser[IndexedSeq[String]] = "(" ~> rep(string_literal).map(_.toFastIndexedSeq) <~ ")"
+
+  def string_literals_opt: Parser[Option[IndexedSeq[String]]] = string_literals ^^ {
+    Some(_)
+  } | "None" ^^ { _ => None }
+
+  def boolean_literal: Parser[Boolean] = "True" ^^ { _ => true } | "False" ^^ { _ => false }
+
+  def ir_identifier: Parser[String] = identifier
+
+  def ir_identifiers: Parser[IndexedSeq[String]] = "(" ~> rep(ir_identifier) <~ ")" ^^ {
+    _.toFastIndexedSeq
+  }
+
+  def ir_binary_op: Parser[ir.BinaryOp] =
+    ir_identifier ^^ { x => ir.BinaryOp.fromString(x) }
+
+  def ir_unary_op: Parser[ir.UnaryOp] =
+    ir_identifier ^^ { x => ir.UnaryOp.fromString(x) }
+
+  def ir_comparison_op: Parser[ir.ComparisonOp] =
+    "(" ~> ir_identifier ~ type_expr ~ type_expr <~ ")" ^^ { case x ~ t1 ~ t2 => ir.ComparisonOp.fromStringAndTypes(x, t1, t2) }
+
+  def ir_untyped_comparison_op: Parser[String] =
+    "(" ~> ir_identifier <~ ")" ^^ { x => x }
+
+  def ir_agg_op: Parser[ir.AggOp] =
+    ir_keyed_agg_op | ir_identifier ^^ { x => ir.AggOp.fromString(x) }
+
+  def ir_keyed_agg_op: Parser[ir.Keyed] =
+    "Keyed(" ~> ir_agg_op <~ ")" ^^ { aggOp => ir.Keyed(aggOp) }
+
+  def ir_children: Parser[IndexedSeq[ir.IR]] =
+    rep(ir_value_expr) ^^ (_.toFastIndexedSeq)
+
+  def table_ir_children: Parser[IndexedSeq[ir.TableIR]] = rep(table_ir) ^^ (_.toFastIndexedSeq)
+
+  def matrix_ir_children: Parser[IndexedSeq[ir.MatrixIR]] = rep(matrix_ir) ^^ (_.toFastIndexedSeq)
+
+  def ir_value_exprs: Parser[IndexedSeq[ir.IR]] =
+    "(" ~> rep(ir_value_expr) <~ ")" ^^ (_.toFastIndexedSeq)
+
+  def ir_value_exprs_opt: Parser[Option[IndexedSeq[ir.IR]]] =
+    ir_value_exprs ^^ { xs => Some(xs) } |
+      "None" ^^ { _ => None }
+
+  def matrix_type_expr_opt: Parser[Option[MatrixType]] = matrix_type_expr ^^ {
+    Some(_)
+  } | "None" ^^ { _ => None }
+
+  def type_exprs: Parser[Seq[Type]] = "(" ~> rep(type_expr) <~ ")"
+
+  def type_exprs_opt: Parser[Option[Seq[Type]]] = type_exprs ^^ { ts => Some(ts) } | "None" ^^ { _ => None }
+
+  def agg_signature: Parser[AggSignature] =
+    "(" ~> ir_agg_op ~ type_exprs ~ type_exprs_opt ~ type_exprs <~ ")" ^^ { case op ~ ctorArgTypes ~ initOpArgTypes ~ seqOpArgTypes =>
+      AggSignature(op, ctorArgTypes, initOpArgTypes, seqOpArgTypes)
+    }
+
+  def ir_named_value_exprs: Parser[Seq[(String, ir.IR)]] = rep(ir_named_value_expr)
+
+  def ir_named_value_expr: Parser[(String, ir.IR)] =
+    "(" ~> ir_identifier ~ ir_value_expr <~ ")" ^^ { case n ~ x => (n, x) }
+
+  def ir_opt[T](p: Parser[T]): Parser[Option[T]] = p ^^ {
+    Some(_)
+  } | "None" ^^ { _ => None }
+
+  def ir_value_expr: Parser[ir.IR] = "(" ~> ir_value_expr_1 <~ ")"
+
+  def ir_value_expr_1: Parser[ir.IR] = {
+    "I32" ~> int32_literal ^^ { x => ir.I32(x) } |
+      "I64" ~> int64_literal ^^ { x => ir.I64(x) } |
+      "F32" ~> float32_literal ^^ { x => ir.F32(x) } |
+      "F64" ~> float64_literal ^^ { x => ir.F64(x) } |
+      "Str" ~> string_literal ^^ { x => ir.Str(x) } |
+      "True" ^^ { x => ir.True() } |
+      "False" ^^ { x => ir.False() } |
+      "Literal" ~> ir_value ~ string_literal ^^ { case (value ~ id) => ir.Literal(value._1, value._2, id) } |
+      "Void" ^^ { x => ir.Void() } |
+      "Cast" ~> type_expr ~ ir_value_expr ^^ { case t ~ v => ir.Cast(v, t) } |
+      "NA" ~> type_expr ^^ { t => ir.NA(t) } |
+      "IsNA" ~> ir_value_expr ^^ { value => ir.IsNA(value) } |
+      "If" ~> ir_value_expr ~ ir_value_expr ~ ir_value_expr ^^ { case cond ~ consq ~ altr => ir.If(cond, consq, altr) } |
+      "Let" ~> ir_identifier ~ ir_value_expr ~ ir_value_expr ^^ { case name ~ value ~ body => ir.Let(name, value, body) } |
+      "Ref" ~> type_expr ~ ir_identifier ^^ { case t ~ name => ir.Ref(name, t) } |
+      "Ref" ~> ir_identifier ^^ { name => ir.Ref(name, IRParserEnvironment.theEnv.ref_map(name)) } |
+      "ApplyBinaryPrimOp" ~> ir_binary_op ~ ir_value_expr ~ ir_value_expr ^^ { case op ~ l ~ r => ir.ApplyBinaryPrimOp(op, l, r) } |
+      "ApplyUnaryPrimOp" ~> ir_unary_op ~ ir_value_expr ^^ { case op ~ x => ir.ApplyUnaryPrimOp(op, x) } |
+      "ApplyComparisonOp" ~> ir_comparison_op ~ ir_value_expr ~ ir_value_expr ^^ { case op ~ l ~ r => ir.ApplyComparisonOp(op, l, r) } |
+      "ApplyComparisonOp" ~> ir_untyped_comparison_op ~ ir_value_expr ~ ir_value_expr ^^ { case op ~ l ~ r => ir.ApplyComparisonOp(ir.ComparisonOp.fromStringAndTypes(op, l.typ, r.typ), l, r) } |
+      "MakeArray" ~> type_expr ~ ir_children ^^ { case t ~ args => ir.MakeArray(args, t.asInstanceOf[TArray]) } |
+      "ArrayRef" ~> ir_value_expr ~ ir_value_expr ^^ { case a ~ i => ir.ArrayRef(a, i) } |
+      "ArrayLen" ~> ir_value_expr ^^ { a => ir.ArrayLen(a) } |
+      "ArrayRange" ~> ir_value_expr ~ ir_value_expr ~ ir_value_expr ^^ { case start ~ stop ~ step => ir.ArrayRange(start, stop, step) } |
+      "ArraySort" ~> boolean_literal ~ ir_value_expr ~ ir_value_expr ^^ { case onKey ~ a ~ ascending => ir.ArraySort(a, ascending, onKey) } |
+      "ToSet" ~> ir_value_expr ^^ { a => ir.ToSet(a) } |
+      "ToDict" ~> ir_value_expr ^^ { a => ir.ToDict(a) } |
+      "ToArray" ~> ir_value_expr ^^ { a => ir.ToArray(a) } |
+      "LowerBoundOnOrderedCollection" ~> boolean_literal ~ ir_value_expr ~ ir_value_expr ^^ { case onKey ~ col ~ elem => ir.LowerBoundOnOrderedCollection(col, elem, onKey) } |
+      "GroupByKey" ~> ir_value_expr ^^ { a => ir.GroupByKey(a) } |
+      "ArrayMap" ~> ir_identifier ~ ir_value_expr ~ ir_value_expr ^^ { case name ~ a ~ body => ir.ArrayMap(a, name, body) } |
+      "ArrayFilter" ~> ir_identifier ~ ir_value_expr ~ ir_value_expr ^^ { case name ~ a ~ body => ir.ArrayFilter(a, name, body) } |
+      "ArrayFlatMap" ~> ir_identifier ~ ir_value_expr ~ ir_value_expr ^^ { case name ~ a ~ body => ir.ArrayFlatMap(a, name, body) } |
+      "ArrayFold" ~> ir_identifier ~ ir_identifier ~ ir_value_expr ~ ir_value_expr ~ ir_value_expr ^^ { case accumName ~ valueName ~ a ~ zero ~ body => ir.ArrayFold(a, zero, accumName, valueName, body) } |
+      "ArrayFor" ~> ir_identifier ~ ir_value_expr ~ ir_value_expr ^^ { case name ~ a ~ body => ir.ArrayFor(a, name, body) } |
+      "ApplyAggOp" ~> agg_signature ~ ir_value_expr ~ ir_value_exprs ~ ir_value_exprs_opt ^^ { case aggSig ~ a ~ ctorArgs ~ initOpArgs => ir.ApplyAggOp(a, ctorArgs, initOpArgs, aggSig) } |
+      "ApplyScanOp" ~> agg_signature ~ ir_value_expr ~ ir_value_exprs ~ ir_value_exprs_opt ^^ { case aggSig ~ a ~ ctorArgs ~ initOpArgs => ir.ApplyScanOp(a, ctorArgs, initOpArgs, aggSig) } |
+      "InitOp" ~> agg_signature ~ ir_value_expr ~ ir_value_exprs ^^ { case aggSig ~ i ~ args => ir.InitOp(i, args, aggSig) } |
+      "SeqOp" ~> agg_signature ~ ir_value_expr ~ ir_value_exprs ^^ { case aggSig ~ i ~ args => ir.SeqOp(i, args, aggSig) } |
+      "Begin" ~> ir_children ^^ { xs => ir.Begin(xs) } |
+      "MakeStruct" ~> ir_named_value_exprs ^^ { fields => ir.MakeStruct(fields) } |
+      "SelectFields" ~> ir_identifiers ~ ir_value_expr ^^ { case fields ~ old => ir.SelectFields(old, fields) } |
+      "InsertFields" ~> ir_value_expr ~ ir_named_value_exprs ^^ { case old ~ fields => ir.InsertFields(old, fields) } |
+      "GetField" ~> ir_identifier ~ ir_value_expr ^^ { case name ~ o => ir.GetField(o, name) } |
+      "MakeTuple" ~> ir_children ^^ { xs => ir.MakeTuple(xs) } |
+      "GetTupleElement" ~> int32_literal ~ ir_value_expr ^^ { case idx ~ o => ir.GetTupleElement(o, idx) } |
+      "StringSlice" ~> ir_value_expr ~ ir_value_expr ~ ir_value_expr ^^ { case s ~ start ~ end => ir.StringSlice(s, start, end) } |
+      "StringLength" ~> ir_value_expr ^^ { s => ir.StringLength(s) } |
+      "In" ~> type_expr ~ int32_literal ^^ { case t ~ i => ir.In(i, t) } |
+      "Die" ~> type_expr ~ string_literal ^^ { case t ~ message => ir.Die(message, t) } |
+      "ApplySeeded" ~> ir_identifier ~ int64_literal ~ ir_children ^^ { case function ~ seed ~ args => ir.ApplySeeded(function, args, seed) } |
+      ("ApplyIR" | "ApplySpecial" | "Apply") ~> ir_identifier ~ ir_children ^^ { case function ~ args => ir.invoke(function, args: _*) } |
+      "Uniroot" ~> ir_identifier ~ ir_value_expr ~ ir_value_expr ~ ir_value_expr ^^ { case name ~ f ~ min ~ max => ir.Uniroot(name, f, min, max) } |
+      "CachedValue" ~> ir_identifier ^^ { name => IRParserEnvironment.theEnv.ir_map(name).asInstanceOf[IR] }
+  }
+
+  def ir_value: Parser[(Type, Any)] = type_expr ~ string_literal ^^ { case t ~ vJSONStr =>
+    val vJSON = JsonMethods.parse(vJSONStr)
+    val v = JSONAnnotationImpex.importAnnotation(vJSON, t)
+    (t, v)
+  }
+
+  def table_ir: Parser[ir.TableIR] = "(" ~> table_ir_1 <~ ")"
+
+  def table_irs: Parser[IndexedSeq[ir.TableIR]] = "(" ~> rep(table_ir) <~ ")" ^^ {
+    _.toFastIndexedSeq
+  }
+
+  def table_ir_1: Parser[ir.TableIR] = {
+    // FIXME TableImport
+    "TableUnkey" ~> table_ir ^^ { t => ir.TableUnkey(t) } |
+      "TableKeyBy" ~> ir_identifiers ~ boolean_literal ~ table_ir ^^ { case key ~ isSorted ~ child =>
+        ir.TableKeyBy(child, key, isSorted)
+      } |
+      "TableDistinct" ~> table_ir ^^ { t => ir.TableDistinct(t) } |
+      "TableFilter" ~> table_ir ~ ir_value_expr ^^ { case child ~ pred => ir.TableFilter(child, pred) } |
+      "TableRead" ~> string_literal ~ boolean_literal ~ ir_opt(table_type_expr) ^^ { case path ~ dropRows ~ typ =>
+        TableIR.read(HailContext.get, path, dropRows, typ)
+      } |
+      "MatrixColsTable" ~> matrix_ir ^^ { child => ir.MatrixColsTable(child) } |
+      "MatrixRowsTable" ~> matrix_ir ^^ { child => ir.MatrixRowsTable(child) } |
+      "MatrixEntriesTable" ~> matrix_ir ^^ { child => ir.MatrixEntriesTable(child) } |
+      "TableAggregateByKey" ~> table_ir ~ ir_value_expr ^^ { case child ~ expr => ir.TableAggregateByKey(child, expr) } |
+      "TableKeyByAndAggregate" ~> int32_literal_opt ~ int32_literal ~ table_ir ~ ir_value_expr ~ ir_value_expr ^^ {
+        case nPartitions ~ bufferSize ~ child ~ expr ~ newKey => ir.TableKeyByAndAggregate(child, expr, newKey, nPartitions, bufferSize)
+      } |
+      "TableRepartition" ~> int32_literal ~ boolean_literal ~ table_ir ^^ { case n ~ shuffle ~ child => ir.TableRepartition(child, n, shuffle) } |
+      "TableHead" ~> int64_literal ~ table_ir ^^ { case n ~ child => ir.TableHead(child, n) } |
+      "TableJoin" ~> ir_identifier ~ int32_literal ~ table_ir ~ table_ir ^^ { case joinType ~ joinKey ~ left ~ right =>
+        ir.TableJoin(left, right, joinType, joinKey) } |
+      "TableLeftJoinRightDistinct" ~> ir_identifier ~ table_ir ~ table_ir ^^ { case root ~ left ~ right => ir.TableLeftJoinRightDistinct(left, right, root) } |
+      "TableParallelize" ~> table_type_expr ~ ir_value ~ int32_literal_opt ^^ { case typ ~ ((rowsType, rows)) ~ nPartitions =>
+        ir.TableParallelize(typ, rows.asInstanceOf[IndexedSeq[Row]], nPartitions)
+      } |
+      "TableMapRows" ~> string_literals_opt ~ int32_literal_opt ~ table_ir ~ ir_value_expr ^^ { case newKey ~ preservedKeyFields ~ child ~ newRow =>
+        ir.TableMapRows(child, newRow, newKey, preservedKeyFields)
+      } |
+      "TableMapGlobals" ~> table_ir ~ ir_value_expr ^^ { case child ~ newRow =>
+        ir.TableMapGlobals(child, newRow)
+      } |
+      "TableRange" ~> int32_literal ~ int32_literal ^^ { case n ~ nPartitions => ir.TableRange(n, nPartitions) } |
+      "TableUnion" ~> table_ir_children ^^ { children => ir.TableUnion(children) } |
+      "TableOrderBy" ~> ir_identifiers ~ table_ir ^^ { case identifiers ~ child =>
+        ir.TableOrderBy(child, identifiers.map(i =>
+          if (i.charAt(0) == 'A')
+            SortField(i.substring(1), Ascending)
+          else
+            SortField(i.substring(1), Descending)))
+      } |
+      "TableExplode" ~> ir_identifier ~ table_ir ^^ { case field ~ child => ir.TableExplode(child, field) } |
+      "LocalizeEntries" ~> string_literal ~ matrix_ir ^^ { case field ~ child =>
+        ir.LocalizeEntries(child, field)
+      } |
+      "CachedTable" ~> ir_identifier ^^ { ident => IRParserEnvironment.theEnv.ir_map(ident).asInstanceOf[TableIR] }
+  }
+
+  def matrix_ir: Parser[ir.MatrixIR] = "(" ~> matrix_ir_1 <~ ")"
+
+  def matrix_ir_1: Parser[ir.MatrixIR] = {
+    "MatrixFilterCols" ~> matrix_ir ~ ir_value_expr ^^ { case child ~ pred => ir.MatrixFilterCols(child, pred) } |
+      "MatrixFilterRows" ~> matrix_ir ~ ir_value_expr ^^ { case child ~ pred => ir.MatrixFilterRows(child, pred) } |
+      "MatrixFilterEntries" ~> matrix_ir ~ ir_value_expr ^^ { case child ~ pred => ir.MatrixFilterEntries(child, pred) } |
+      "MatrixMapCols" ~> string_literals_opt ~ matrix_ir ~ ir_value_expr ^^ { case newKey ~ child ~ newCol => ir.MatrixMapCols(child, newCol, newKey) } |
+      "MatrixMapRows" ~> string_literals_opt ~ string_literals_opt ~ matrix_ir ~ ir_value_expr ^^ { case newKey ~ newPartitionKey ~ child ~ newRow =>
+        val newKPK = ((newKey, newPartitionKey): @unchecked) match {
+          case (Some(k), Some(pk)) => Some((k, pk))
+          case (None, None) => None
+        }
+        ir.MatrixMapRows(child, newRow, newKPK)
+      } |
+      "MatrixMapEntries" ~> matrix_ir ~ ir_value_expr ^^ { case child ~ newEntries => ir.MatrixMapEntries(child, newEntries) } |
+      "MatrixMapGlobals" ~> matrix_ir ~ ir_value_expr ^^ { case child ~ newGlobals => ir.MatrixMapGlobals(child, newGlobals) } |
+      "MatrixAggregateColsByKey" ~> matrix_ir ~ ir_value_expr ^^ { case child ~ agg => ir.MatrixAggregateColsByKey(child, agg) } |
+      "MatrixAggregateRowsByKey" ~> matrix_ir ~ ir_value_expr ^^ { case child ~ agg => ir.MatrixAggregateRowsByKey(child, agg) } |
+      "MatrixRead" ~> matrix_type_expr_opt ~ boolean_literal ~ boolean_literal ~ string_literal ^^ {
+        case typ ~ dropCols ~ dropRows ~ readerStr =>
+          implicit val formats = ir.MatrixReader.formats
+          val reader = Serialization.read[ir.MatrixReader](readerStr)
+          ir.MatrixRead(typ.getOrElse(reader.fullType), dropCols, dropRows, reader)
+      } |
+      "TableToMatrixTable" ~> string_literals ~ string_literals ~ string_literals ~ string_literals ~ string_literals ~ int32_literal_opt ~ table_ir ^^ {
+        case rowKey ~ colKey ~ rowFields ~ colFields ~ partitionKey ~ nPartitions ~ child =>
+          ir.TableToMatrixTable(child, rowKey, colKey, rowFields, colFields, partitionKey, nPartitions)
+      } |
+      "MatrixAnnotateRowsTable" ~> string_literal ~ boolean_literal ~ matrix_ir ~ table_ir ~ rep(ir_value_expr) ^^ {
+        case uid ~ hasKey ~ child ~ table ~ key =>
+          val keyIRs = if (hasKey) Some(key.toFastIndexedSeq) else None
+          ir.MatrixAnnotateRowsTable(child, table, uid, keyIRs)
+      } |
+      "MatrixAnnotateColsTable" ~> string_literal ~ matrix_ir ~ table_ir ^^ {
+        case root ~ child ~ table =>
+          ir.MatrixAnnotateColsTable(child, table, root)
+      } |
+      "MatrixExplodeRows" ~> ir_identifiers ~ matrix_ir ^^ { case path ~ child => ir.MatrixExplodeRows(child, path) } |
+      "MatrixExplodeCols" ~> ir_identifiers ~ matrix_ir ^^ { case path ~ child => ir.MatrixExplodeCols(child, path) } |
+      "MatrixChooseCols" ~> int32_literals ~ matrix_ir ^^ { case oldIndices ~ child => ir.MatrixChooseCols(child, oldIndices) } |
+      "MatrixCollectColsByKey" ~> matrix_ir ^^ { child => ir.MatrixCollectColsByKey(child) } |
+      "MatrixUnionRows" ~> matrix_ir_children ^^ { children => ir.MatrixUnionRows(children) } |
+      "UnlocalizeEntries" ~> string_literal ~ table_ir ~ table_ir ^^ {
+        case entryField ~ rowsEntries ~ cols => ir.UnlocalizeEntries(rowsEntries, cols, entryField)
+      } |
+      "CachedMatrixTable" ~> ir_identifier ^^ { ident => IRParserEnvironment.theEnv.ir_map(ident).asInstanceOf[MatrixIR] }
+  }
+
+  def parse_value_ir(s: String): IR = parse_value_ir(s, IRParserEnvironment())
+  def parse_value_ir(s: String, env: IRParserEnvironment): IR = parseWithEnv(ir_value_expr, s, env)
+
+  def parse_named_value_irs(s: String): Array[(String, IR)] = parse_named_value_irs(s, IRParserEnvironment())
+  def parse_named_value_irs(s: String, env: IRParserEnvironment): Array[(String, IR)] =
+    parseWithEnv(ir_named_value_exprs, s, env).toArray
+
+  def parse_table_ir(s: String): TableIR = parse_table_ir(s, IRParserEnvironment())
+  def parse_table_ir(s: String, env: IRParserEnvironment): TableIR = parseWithEnv(table_ir, s, env)
+
+  def parse_matrix_ir(s: String): MatrixIR = parse_matrix_ir(s, IRParserEnvironment())
+  def parse_matrix_ir(s: String, env: IRParserEnvironment): MatrixIR = parseWithEnv(matrix_ir, s, env)
 }

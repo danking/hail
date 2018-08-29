@@ -1,10 +1,13 @@
 package is.hail.expr.types
 
+import is.hail.annotations.Annotation
 import is.hail.expr.{EvalContext, Parser}
 import is.hail.rvd.OrderedRVDType
 import is.hail.utils._
 import org.json4s.CustomSerializer
 import org.json4s.JsonAST.JString
+import org.apache.spark.sql.Row
+
 
 class MatrixTypeSerializer extends CustomSerializer[MatrixType](format => (
   { case JString(s) => Parser.parseMatrixType(s) },
@@ -42,6 +45,9 @@ case class MatrixType(
   val entryArrayType: TArray = rvRowType.types(entriesIdx).asInstanceOf[TArray]
   val entryType: TStruct = entryArrayType.elementType.asInstanceOf[TStruct]
 
+  val entriesRVType: TStruct = TStruct(
+    MatrixType.entriesIdentifier -> TArray(entryType))
+
   assert({
     val rowFields = rowType.fieldNames.toSet
     rowKey.forall(rowFields.contains)
@@ -49,26 +55,47 @@ case class MatrixType(
 
   assert(rowKey.startsWith(rowPartitionKey))
 
-  val rowKeyStruct = TStruct(rowKey.map(k => k -> rowType.fieldByName(k).typ): _*)
+  val (rowKeyStruct, _) = rowType.select(rowKey)
+  def extractRowKey: Row => Row = rowType.select(rowKey)._2
+  val rowKeyFieldIdx: Array[Int] = rowKey.toArray.map(rowType.fieldIdx)
+  val (rowValueStruct, _) = rowType.filterSet(rowKey.toSet, include = false)
+  def extractRowValue: Annotation => Annotation = rowType.filterSet(rowKey.toSet, include = false)._2
+  val rowValueFieldIdx: Array[Int] = rowValueStruct.fieldNames.map(rowType.fieldIdx)
 
-  val colsTableType: TableType = TableType(colType, colKey, globalType)
+  val (colKeyStruct, _) = colType.select(colKey)
+  def extractColKey: Row => Row = colType.select(colKey)._2
+  val colKeyFieldIdx: Array[Int] = colKey.toArray.map(colType.fieldIdx)
+  val (colValueStruct, _) = colType.filterSet(colKey.toSet, include = false)
+  def extractColValue: Annotation => Annotation = colType.filterSet(colKey.toSet, include = false)._2
+  val colValueFieldIdx: Array[Int] = colValueStruct.fieldNames.map(colType.fieldIdx)
 
-  val rowsTableType: TableType = TableType(rowType, rowKey, globalType)
+  val colsTableType: TableType =
+    TableType(
+      colType,
+      Some(colKey),
+      globalType)
 
-  def orvdType: OrderedRVDType = {
-    new OrderedRVDType(rowPartitionKey.toArray,
-      rowKey.toArray,
-      rvRowType)
+  val rowsTableType: TableType =
+    TableType(
+      rowType,
+      Some(rowKey),
+      globalType)
+
+  lazy val entriesTableType: TableType = {
+    val resultStruct = TStruct((rowType.fields ++ colType.fields ++ entryType.fields).map(f => f.name -> f.typ): _*)
+    TableType(resultStruct, Some(rowKey ++ colKey), globalType)
   }
 
-  def rowORVDType: OrderedRVDType = new OrderedRVDType(rowPartitionKey.toArray, rowKey.toArray, rowType)
+  def orvdType: OrderedRVDType = OrderedRVDType(rowKey, rvRowType)
+
+  def rowORVDType: OrderedRVDType = OrderedRVDType(rowKey, rowType)
 
   def colEC: EvalContext = {
     val aggregationST = Map(
       "global" -> (0, globalType),
       "sa" -> (1, colType),
       "g" -> (2, entryType),
-      "va" -> (3, rowType))
+      "va" -> (3, rvRowType))
     EvalContext(Map(
       "global" -> (0, globalType),
       "sa" -> (1, colType),
@@ -78,22 +105,28 @@ case class MatrixType(
   def rowEC: EvalContext = {
     val aggregationST = Map(
       "global" -> (0, globalType),
-      "va" -> (1, rowType),
+      "va" -> (1, rvRowType),
       "g" -> (2, entryType),
       "sa" -> (3, colType))
     EvalContext(Map(
       "global" -> (0, globalType),
-      "va" -> (1, rowType),
+      "va" -> (1, rvRowType),
       "AGG" -> (2, TAggregable(entryType, aggregationST))))
   }
 
   def genotypeEC: EvalContext = {
     EvalContext(Map(
       "global" -> (0, globalType),
-      "va" -> (1, rowType),
+      "va" -> (1, rvRowType),
       "sa" -> (2, colType),
       "g" -> (3, entryType)))
   }
+
+  def refMap: Map[String, Type] = Map(
+    "global" -> globalType,
+    "va" -> rvRowType,
+    "sa" -> colType,
+    "g" -> entryType)
 
   def pretty(sb: StringBuilder, indent0: Int = 0, compact: Boolean = false) {
     var indent = indent0

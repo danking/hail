@@ -1,6 +1,7 @@
 import abc
 import json
-from collections import Mapping
+import math
+from collections import Mapping, Sequence
 
 import hail as hl
 from hail import genetics
@@ -15,6 +16,7 @@ __all__ = [
     'HailType',
     'hail_type',
     'is_container',
+    'is_compound',
     'is_numeric',
     'is_primitive',
     'types_match',
@@ -43,22 +45,21 @@ def dtype(type_str):
 
     Examples
     --------
-    .. doctest::
 
-        >>> hl.dtype('int')
-        dtype('int32')
+    >>> hl.dtype('int')
+    dtype('int32')
 
-        >>> hl.dtype('float')
-        dtype('float64')
+    >>> hl.dtype('float')
+    dtype('float64')
 
-        >>> hl.dtype('array<int32>')
-        dtype('array<int32>')
+    >>> hl.dtype('array<int32>')
+    dtype('array<int32>')
 
-        >>> hl.dtype('dict<str, bool>')
-        dtype('dict<str, bool>')
+    >>> hl.dtype('dict<str, bool>')
+    dtype('dict<str, bool>')
 
-        >>> hl.dtype('struct{a: int32, `field with spaces`: int64}')
-        dtype('struct{a: int32, `field with spaces`: int64}')
+    >>> hl.dtype('struct{a: int32, `field with spaces`: int64}')
+    dtype('struct{a: int32, `field with spaces`: int64}')
 
     Notes
     -----
@@ -161,16 +162,38 @@ class HailType(object):
 
     @classmethod
     def _from_java(cls, jtype):
-        return hl.dtype(jtype.toString())
+        t = hl.dtype(jtype.toString())
+        t._add_jtype(jtype)
+        return t
+
+    def _add_jtype(self, jtype):
+        if self.__class__ not in _interned_types:
+            self._cached_jtype = jtype
+        self._propagate_jtypes(jtype)
+
+    def _propagate_jtypes(self, jtype):
+        pass
+
+    def typecheck(self, value):
+        """Check that `value` matches a type.
+
+        Parameters
+        ----------
+        value
+            Value to check.
+
+        Raises
+        ------
+        :obj:`TypeError`
+        """
+        def check(t, obj):
+            t._typecheck_one_level(obj)
+            return True
+        self._traverse(value, check)
 
     @abc.abstractmethod
-    def _typecheck(self, annotation):
-        """
-        Raise an exception if the given annotation is not the appropriate type.
-
-        :param annotation: value to check
-        """
-        return
+    def _typecheck_one_level(self, annotation):
+        pass
 
     def _to_json(self, x):
         converted = self._convert_to_json_na(x)
@@ -198,12 +221,18 @@ class HailType(object):
     def _convert_from_json(self, x):
         return x
 
-    def _scalar_type(self):
-        if isinstance(self, tarray):
-            return self.element_type
-        else:
-            assert is_numeric(self)
-            return self
+
+    def _traverse(self, obj, f):
+        """Traverse a nested type and object.
+
+        Parameters
+        ----------
+        obj : Any
+        f : Callable[[HailType, Any], bool]
+            Function to evaluate on the type and object. Traverse children if
+            the function returns ``True``.
+        """
+        f(self, obj)
 
 
 hail_type = oneof(HailType, transformed((str, dtype)))
@@ -231,9 +260,13 @@ class _tint32(HailType):
         else:
             return None
 
-    def _typecheck(self, annotation):
-        if annotation is not None and not isinstance(annotation, int):
-            raise TypeError("type 'tint32' expected Python 'int', but found type '%s'" % type(annotation))
+    def _typecheck_one_level(self, annotation):
+        if annotation is not None:
+            if not isinstance(annotation, int):
+                raise TypeError("type 'tint32' expected Python 'int', but found type '%s'" % type(annotation))
+            elif not self.min_value <= annotation <= self.max_value:
+                raise TypeError(f"Value out of range for 32-bit integer: "
+                                f"expected [{self.min_value}, {self.max_value}], found {annotation}")
 
     def __str__(self):
         return "int32"
@@ -268,9 +301,13 @@ class _tint64(HailType):
     def _convert_to_j(self, annotation):
         raise NotImplementedError('int64 conversion from Python to JVM')
 
-    def _typecheck(self, annotation):
-        if annotation and not isinstance(annotation, int):
-            raise TypeError("type 'int64' expected Python 'int', but found type '%s'" % type(annotation))
+    def _typecheck_one_level(self, annotation):
+        if annotation is not None:
+            if not isinstance(annotation, int):
+                raise TypeError("type 'int64' expected Python 'int', but found type '%s'" % type(annotation))
+            if not self.min_value <= annotation <= self.max_value:
+                raise TypeError(f"Value out of range for 64-bit integer: "
+                                f"expected [{self.min_value}, {self.max_value}], found {annotation}")
 
     def __str__(self):
         return "int64"
@@ -309,7 +346,7 @@ class _tfloat32(HailType):
         # FIXME: This function is unsupported until py4j-0.10.4: https://github.com/bartdag/py4j/issues/255
         raise NotImplementedError('float32 is currently unsupported in certain operations, use float64 instead')
 
-    def _typecheck(self, annotation):
+    def _typecheck_one_level(self, annotation):
         if annotation is not None and not isinstance(annotation, (float, int)):
             raise TypeError("type 'float32' expected Python 'float', but found type '%s'" % type(annotation))
 
@@ -321,6 +358,12 @@ class _tfloat32(HailType):
 
     def _convert_from_json(self, x):
         return float(x)
+
+    def _convert_to_json(self, x):
+        if math.isfinite(x):
+            return x
+        else:
+            return str(x)
 
 
 class _tfloat64(HailType):
@@ -342,7 +385,7 @@ class _tfloat64(HailType):
         else:
             return None
 
-    def _typecheck(self, annotation):
+    def _typecheck_one_level(self, annotation):
         if annotation is not None and not isinstance(annotation, (float, int)):
             raise TypeError("type 'float64' expected Python 'float', but found type '%s'" % type(annotation))
     def __str__(self):
@@ -353,6 +396,13 @@ class _tfloat64(HailType):
 
     def _convert_from_json(self, x):
         return float(x)
+
+    def _convert_to_json(self, x):
+        if math.isfinite(x):
+            return x
+        else:
+            return str(x)
+
 
 class _tstr(HailType):
     """Hail type for text strings.
@@ -370,7 +420,7 @@ class _tstr(HailType):
     def _convert_to_j(self, annotation):
         return annotation
 
-    def _typecheck(self, annotation):
+    def _typecheck_one_level(self, annotation):
         if annotation and not isinstance(annotation, str):
             raise TypeError("type 'str' expected Python 'str', but found type '%s'" % type(annotation))
 
@@ -397,7 +447,7 @@ class _tbool(HailType):
     def _convert_to_j(self, annotation):
         return annotation
 
-    def _typecheck(self, annotation):
+    def _typecheck_one_level(self, annotation):
         if annotation is not None and not isinstance(annotation, bool):
             raise TypeError("type 'bool' expected Python 'bool', but found type '%s'" % type(annotation))
 
@@ -461,12 +511,15 @@ class tarray(HailType):
         else:
             return None
 
-    def _typecheck(self, annotation):
+    def _traverse(self, obj, f):
+        if f(self, obj):
+            for elt in obj:
+                self.element_type._traverse(elt, f)
+
+    def _typecheck_one_level(self, annotation):
         if annotation is not None:
-            if not isinstance(annotation, list):
+            if not isinstance(annotation, Sequence):
                 raise TypeError("type 'array' expected Python 'list', but found type '%s'" % type(annotation))
-            for elt in annotation:
-                self.element_type._typecheck(elt)
 
     def __str__(self):
         return "array<{}>".format(self.element_type)
@@ -484,6 +537,9 @@ class tarray(HailType):
 
     def _convert_to_json(self, x):
         return [self.element_type._convert_to_json_na(elt) for elt in x]
+
+    def _propagate_jtypes(self, jtype):
+        self._element_type._add_jtype(jtype.elementType())
 
 
 class tset(HailType):
@@ -539,12 +595,15 @@ class tset(HailType):
         else:
             return None
 
-    def _typecheck(self, annotation):
+    def _traverse(self, obj, f):
+        if f(self, obj):
+            for elt in obj:
+                self.element_type._traverse(elt, f)
+
+    def _typecheck_one_level(self, annotation):
         if annotation is not None:
             if not isinstance(annotation, set):
                 raise TypeError("type 'set' expected Python 'set', but found type '%s'" % type(annotation))
-            for elt in annotation:
-                self.element_type._typecheck(elt)
 
     def __str__(self):
         return "set<{}>".format(self.element_type)
@@ -562,6 +621,10 @@ class tset(HailType):
 
     def _convert_to_json(self, x):
         return [self.element_type._convert_to_json_na(elt) for elt in x]
+
+    def _propagate_jtypes(self, jtype):
+        self._element_type._add_jtype(jtype.elementType())
+
 
 class tdict(HailType):
     """Hail type for key-value maps.
@@ -633,13 +696,16 @@ class tdict(HailType):
         else:
             return None
 
-    def _typecheck(self, annotation):
-        if annotation:
+    def _traverse(self, obj, f):
+        if f(self, obj):
+            for k, v in obj.items():
+                self.key_type._traverse(k, f)
+                self.value_type._traverse(v, f)
+
+    def _typecheck_one_level(self, annotation):
+        if annotation is not None:
             if not isinstance(annotation, dict):
                 raise TypeError("type 'dict' expected Python 'dict', but found type '%s'" % type(annotation))
-            for k, v in annotation.items():
-                self.key_type._typecheck(k)
-                self.value_type._typecheck(v)
 
     def __str__(self):
         return "dict<{}, {}>".format(self.key_type, self.value_type)
@@ -662,6 +728,9 @@ class tdict(HailType):
         return [{'key': self.key_type._convert_to_json(k),
                  'value':self.value_type._convert_to_json(v)} for k, v in x.items()]
 
+    def _propagate_jtypes(self, jtype):
+        self._key_type._add_jtype(jtype.keyType())
+        self._value_type._add_jtype(jtype.valueType())
 
 class tstruct(HailType, Mapping):
     """Hail type for structured groups of heterogeneous fields.
@@ -718,7 +787,13 @@ class tstruct(HailType, Mapping):
         else:
             return None
 
-    def _typecheck(self, annotation):
+    def _traverse(self, obj, f):
+        if f(self, obj):
+            for k, v in obj.items():
+                t = self[k]
+                t._traverse(v, f)
+
+    def _typecheck_one_level(self, annotation):
         if annotation:
             if isinstance(annotation, Mapping):
                 s = set(self)
@@ -726,18 +801,19 @@ class tstruct(HailType, Mapping):
                     if f not in s:
                         raise TypeError("type '%s' expected fields '%s', but found fields '%s'" %
                                         (self, list(self), list(annotation)))
-                for f, t in self.items():
-                    t._typecheck(annotation.get(f))
             else:
-                raise TypeError("type 'struct' expected type Mapping (e.g. hail.genetics.Struct or dict), but found '%s'" %
+                raise TypeError("type 'struct' expected type Mapping (e.g. dict or hail.utils.Struct), but found '%s'" %
                                 type(annotation))
+
+    def _propagate_jtypes(self, jtype):
+        for (n, t) in self._field_types.items():
+            t._add_jtype(self._jtype.field(n).typ())
 
     @typecheck_method(item=oneof(int, str))
     def __getitem__(self, item):
-        if isinstance(item, str):
-            return self._field_types[item]
-        else:
-            self._field_types[self._fields[item]]
+        if not isinstance(item, str):
+            item = self._fields[item]
+        return self._field_types[item]
 
     def __iter__(self):
         return iter(self._field_types)
@@ -821,7 +897,12 @@ class ttuple(HailType):
         else:
             return None
 
-    def _typecheck(self, annotation):
+    def _traverse(self, obj, f):
+        if f(self, obj):
+            for t, elt in zip(self.types, obj):
+                t._traverse(elt, f)
+
+    def _typecheck_one_level(self, annotation):
         if annotation:
             if not isinstance(annotation, tuple):
                 raise TypeError("type 'tuple' expected Python tuple, but found '%s'" %
@@ -829,8 +910,6 @@ class ttuple(HailType):
             if len(annotation) != len(self.types):
                 raise TypeError("%s expected tuple of size '%i', but found '%s'" %
                                 (self, len(self.types), annotation))
-            for i, t in enumerate(self.types):
-                t._typecheck((annotation[i]))
 
     def __str__(self):
         return "tuple({})".format(", ".join([str(t) for t in self.types]))
@@ -860,6 +939,11 @@ class ttuple(HailType):
     def _convert_to_json(self, x):
         return [self.types[i]._convert_to_json_na(x[i]) for i in range(len(self.types))]
 
+    def _propagate_jtypes(self, jtype):
+        jtypes = jtype._types()
+        for i, t in enumerate(self._types):
+            t._add_jtype(jtypes.apply(i))
+
 class _tcall(HailType):
     """Hail type for a diploid genotype.
 
@@ -884,7 +968,7 @@ class _tcall(HailType):
         else:
             return None
 
-    def _typecheck(self, annotation):
+    def _typecheck_one_level(self, annotation):
         if annotation is not None and not isinstance(annotation, genetics.Call):
             raise TypeError("type 'call' expected Python hail.genetics.Call, but found %s'" %
                             type(annotation))
@@ -937,7 +1021,7 @@ class tlocus(HailType):
         else:
             return None
 
-    def _typecheck(self, annotation):
+    def _typecheck_one_level(self, annotation):
         if annotation is not None:
             if not isinstance(annotation, genetics.Locus):
                 raise TypeError("type '{}' expected Python hail.genetics.Locus, but found '{}'"
@@ -1008,6 +1092,9 @@ class tinterval(HailType):
         """
         return self._point_type
 
+    def _propagate_jtypes(self, jtype):
+        self._point_type._add_jtype(jtype.pointType())
+
     def _convert_to_py(self, annotation):
         if annotation is not None:
             return Interval._from_java(annotation, self._point_type)
@@ -1020,7 +1107,12 @@ class tinterval(HailType):
         else:
             return None
 
-    def _typecheck(self, annotation):
+    def _traverse(self, obj, f):
+        if f(self, obj):
+            self.point_type._traverse(obj.start, f)
+            self.point_type._traverse(obj.end, f)
+
+    def _typecheck_one_level(self, annotation):
         if annotation is not None:
             if not isinstance(annotation, Interval):
                 raise TypeError("type '{}' expected Python hail.utils.Interval, but found {}"
@@ -1138,29 +1230,35 @@ See Also
 
 hts_entry_schema = tstruct(GT=tcall, AD=tarray(tint32), DP=tint32, GQ=tint32, PL=tarray(tint32))
 
-_numeric_types = {tint32, tint64, tfloat32, tfloat64}
-_primitive_types = _numeric_types.union({tbool, tstr})
+_numeric_types = {_tbool, _tint32, _tint64, _tfloat32, _tfloat64}
+_primitive_types = _numeric_types.union({_tstr})
+_interned_types = _primitive_types.union({_tcall})
 
 
 @typecheck(t=HailType)
-def is_numeric(t):
-    return t in _numeric_types
+def is_numeric(t) -> bool:
+    return t.__class__ in _numeric_types
 
 
 @typecheck(t=HailType)
-def is_primitive(t):
-    return t in _primitive_types
+def is_primitive(t) -> bool:
+    return t.__class__ in _primitive_types
+
 
 @typecheck(t=HailType)
-def is_container(t):
+def is_container(t) -> bool:
     return (isinstance(t, tarray)
             or isinstance(t, tset)
-            or isinstance(t, tdict)
-            or isinstance(t, ttuple)
-            or isinstance(t, tstruct))
+            or isinstance(t, tdict))
 
 
-def types_match(left, right):
+@typecheck(t=HailType)
+def is_compound(t) -> bool:
+    return (is_container(t)
+            or isinstance(t, tstruct)
+            or isinstance(t, ttuple))
+
+def types_match(left, right) -> bool:
     return (len(left) == len(right)
             and all(map(lambda lr: lr[0].dtype == lr[1].dtype, zip(left, right))))
 

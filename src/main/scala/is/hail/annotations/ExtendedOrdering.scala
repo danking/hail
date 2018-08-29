@@ -99,13 +99,14 @@ object ExtendedOrdering {
     }
 
   def rowOrdering(fieldOrd: Array[ExtendedOrdering]): ExtendedOrdering =
-    new ExtendedOrdering {
-      def compareNonnull(x: T, y: T, missingGreatest: Boolean): Int = {
+    new ExtendedOrdering { outer =>
+      override def compareNonnull(x: T, y: T, missingGreatest: Boolean): Int = {
         val rx = x.asInstanceOf[Row]
         val ry = y.asInstanceOf[Row]
-        
+
+        val commonPrefix = math.min(fieldOrd.length, math.min(rx.length, ry.length))
         var i = 0
-        while (i < fieldOrd.length) {
+        while (i < commonPrefix) {
           val c = fieldOrd(i).compare(rx.get(i), ry.get(i), missingGreatest)
           if (c != 0)
             return c
@@ -115,14 +116,64 @@ object ExtendedOrdering {
         // equal
         0
       }
+
+      override lazy val intervalEndpointOrdering = new IntervalEndpointOrdering {
+        override def compareIntervalEndpoints(xp: Any, xs: Int, yp: Any, ys: Int, missingGreatest: Boolean): Int = {
+          val xpp = xp.asInstanceOf[Row]
+          val ypp = yp.asInstanceOf[Row]
+          val l = fieldOrd.length
+
+          val c = outer.compare(xpp, ypp, missingGreatest)
+          if (c != 0 || xpp == null || ypp == null || (l < xpp.length && l < ypp.length))
+            c
+          else {
+            val cl = xpp.length compare ypp.length
+            if (cl == 0) xs compare ys
+            else if (cl < 0) xs
+            else -ys
+          }
+        }
+
+        // Returns true if for any rows r1 and r2 with r1 < x and r2 > y,
+        // the length of the largest common prefix of r1 and r2 is less than
+        // or equal to 'allowedOverlap'
+        override def lteqWithOverlap(allowedOverlap: Int, missingGreatest: Boolean = true)(x: IntervalEndpoint, y: IntervalEndpoint): Boolean = {
+          require(allowedOverlap <= fieldOrd.length)
+          val xp = x
+          val yp = y
+          val xpp = xp.point.asInstanceOf[Row]
+          val ypp = yp.point.asInstanceOf[Row]
+          val l = fieldOrd.length
+
+          val prefix = Seq(l, xpp.length, ypp.length, allowedOverlap + 1).min
+          var i = 0
+          while (i < prefix) {
+            val c = fieldOrd(i).compare(xpp.get(i), ypp.get(i), missingGreatest)
+            if (c != 0)
+              return c < 0
+            i += 1
+          }
+          val cl = xpp.length compare ypp.length
+          if (allowedOverlap == l)
+            prefix == l ||
+              (cl < 0 && xp.sign < 0) ||
+              (cl > 0 && yp.sign > 0) ||
+              (cl == 0 && xp.sign <= yp.sign)
+          else
+            (xpp.length <= allowedOverlap + 1 || ypp.length <= allowedOverlap + 1) && (
+              (cl < 0 && xp.sign < 0) ||
+                (cl > 0 && yp.sign > 0) ||
+                (cl == 0 && xp.sign <= yp.sign))
+        }
+      }
     }
 }
 
 abstract class ExtendedOrdering extends Serializable {
   outer =>
-  
+
   type T = Any
-  
+
   def compareNonnull(x: T, y: T, missingGreatest: Boolean): Int
 
   def ltNonnull(x: T, y: T, missingGreatest: Boolean): Boolean = compareNonnull(x, y, missingGreatest) < 0
@@ -217,7 +268,7 @@ abstract class ExtendedOrdering extends Serializable {
         gteqNonnull(x, y, missingGreatest)
     }
   }
-  
+
   def equiv(x: T, y: T, missingGreatest: Boolean): Boolean = {
     if (y == null) {
       if (x == null)
@@ -324,6 +375,44 @@ abstract class ExtendedOrdering extends Serializable {
 
     override def min(x: T, y: T): T = outer.min(x, y, missingGreatest)
 
-    override def max(x: T, y: T): T = outer.max(x, y, missingGreatest)    
+    override def max(x: T, y: T): T = outer.max(x, y, missingGreatest)
+  }
+
+  lazy val intervalEndpointOrdering: IntervalEndpointOrdering =
+    new IntervalEndpointOrdering {
+      override def compareIntervalEndpoints(xp: Any, xs: Int, yp: Any, ys: Int, missingGreatest: Boolean): Int = {
+        val c = outer.compare(xp, yp, missingGreatest)
+        if (c != 0)
+          c
+        else
+          xs compare ys
+      }
+
+      override def lteqWithOverlap(allowedOverlap: Int, missingGreatest: Boolean = true)(x: IntervalEndpoint, y: IntervalEndpoint): Boolean = {
+        val xp = x.point
+        val xs = x.sign
+        val yp = y.point
+        val ys = y.sign
+
+        val c = outer.compare(xp, yp, missingGreatest)
+        if (c != 0)
+          c < 0
+        else
+          allowedOverlap == 1 || xs <= ys
+      }
+    }
+}
+
+abstract class IntervalEndpointOrdering extends ExtendedOrdering {
+  def compareIntervalEndpoints(xp: Any, xs: Int, yp: Any, ys: Int, missingGreatest: Boolean): Int
+
+  def lteqWithOverlap(allowedOverlap: Int, missingGreatest: Boolean = true)(x: IntervalEndpoint, y: IntervalEndpoint): Boolean
+
+  override def compareNonnull(x: Any, y: Any, missingGreatest: Boolean): Int = {
+    val xp = if (x.isInstanceOf[IntervalEndpoint]) x.asInstanceOf[IntervalEndpoint].point else x
+    val xs = if (x.isInstanceOf[IntervalEndpoint]) x.asInstanceOf[IntervalEndpoint].sign else 0
+    val yp = if (y.isInstanceOf[IntervalEndpoint]) y.asInstanceOf[IntervalEndpoint].point else y
+    val ys = if (y.isInstanceOf[IntervalEndpoint]) y.asInstanceOf[IntervalEndpoint].sign else 0
+    compareIntervalEndpoints(xp, xs, yp, ys, missingGreatest)
   }
 }

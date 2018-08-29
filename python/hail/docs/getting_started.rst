@@ -1,66 +1,123 @@
-.. _sec-getting_started:
+.. _sec-installation:
 
 ===============
-Getting Started
+Installing Hail
 ===============
+
+Requirements
+------------
 
 You'll need:
 
-- The `Java 8 JDK <http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html>`_.
-- `Spark 2.2.0 <https://www.apache.org/dyn/closer.lua/spark/spark-2.2.0/spark-2.2.0-bin-hadoop2.7.tgz>`_. Hail should work with other versions of Spark 2, see below.
-- Python 3.6 and Jupyter Notebooks. We recommend the free `Anaconda distribution <https://www.continuum.io/downloads>`_.
+- `Java 8 JDK <http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html>`_
+- `Spark 2.2.0 <https://www.apache.org/dyn/closer.lua/spark/spark-2.2.0/spark-2.2.0-bin-hadoop2.7.tgz>`_
 
------------------------------------------------------
+  - Hail will work with other bug fix versions of Spark 2.2.x, but it *will not* work with Spark 1.x.x, 2.0.x, or 2.1.x.
+
+- `Anaconda for Python 3 <https://www.continuum.io/downloads>`_
+
+Installation
+------------
+
 Running Hail locally with a pre-compiled distribution
------------------------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. include:: distLinks.rst
 
-Unzip the distribution after you download it. Next, edit and copy the below bash commands to set up the Hail
-environment variables. You may want to add these to the appropriate dot-file (we recommend ``~/.profile``)
-so that you don't need to rerun these commands in each new session.
+A pre-compiled distribution will be suitable for most users. If you'd like to use Hail with a different version of
+Spark, see `Building your own JAR`_.
+
+Unzip the distribution after you download it. Next, edit and copy the below bash
+commands to set up the Hail environment variables. You may want to add the
+``export`` lines to the appropriate dot-file (we recommend ``~/.profile``) so
+that you don't need to rerun these commands in each new session.
+
+Un-tar the Spark distribution.
+
+.. code-block:: text
+
+    tar xvf <path to spark.tgz>
 
 Here, fill in the path to the **un-tarred** Spark package.
 
 .. code-block:: text
 
-    export SPARK_HOME=???
+    export SPARK_HOME=<path to spark>
+
+Unzip the Hail distribution.
+
+.. code-block:: text
+
+    unzip <path to hail.zip>
 
 Here, fill in the path to the **unzipped** Hail distribution.
 
 .. code-block:: text
 
-    export HAIL_HOME=???
+    export HAIL_HOME=<path to hail>
     export PATH=$PATH:$HAIL_HOME/bin/
-    
-Once you've set up Hail, we recommend that you run the Python tutorials to get an overview of Hail
-functionality and learn about the powerful query language. To try Hail out, run the below commands
-to start a Jupyter Notebook server in the tutorials directory.
+
+To install Python dependencies, create a conda environment for Hail:
+
+.. code-block:: text
+
+    conda env create -n hail -f $HAIL_HOME/python/hail/environment.yml
+    source activate hail
+
+Once you've set up Hail, we recommend that you run the Python tutorials to get
+an overview of Hail functionality and learn about the powerful query language.
+To try Hail out, run the below commands to start a Jupyter Notebook server in
+the tutorials directory.
 
 .. code-block:: text
 
     cd $HAIL_HOME/tutorials
     jhail
 
-You can now click on the "hail-overview" notebook to get started!
+You can now click on the "01-genome-wide-association-study" notebook to get started!
 
 In the future, if you want to run:
 
  - Hail in Python use `hail`
- 
+
  - Hail in IPython use `ihail`
- 
+
  - Hail in a Jupyter Notebook use `jhail`
- 
+
 Hail will not import correctly from a normal Python interpreter, a normal IPython interpreter, nor a normal Jupyter Notebook.
 
-Running on a Spark cluster
-==========================
 
-Hail can run on any cluster that has Spark 2 installed. The Hail team publishes
-ready-to-use JARs for Google Cloud Dataproc, see
-:ref:`running-in-the-cloud`. For Cloudera specific instructions see
-:ref:`running-on-a-cloudera-cluster`.
+Building your own Jar
+~~~~~~~~~~~~~~~~~~~~~
+
+To use Hail with other Hail versions of Spark 2, you'll need to build your own JAR instead of using a pre-compiled
+distribution. To build against a different version, such as Spark 2.3.0, run the following command inside the directory
+where Hail is located:
+
+    .. code-block:: text
+
+      ./gradlew -Dspark.version=2.3.0 shadowJar
+
+The Spark version in this command should match whichever version of Spark you would like to build against.
+
+The ``SPARK_HOME`` environment variable should point to an installation of the desired version of Spark, such as *spark-2.3.0-bin-hadoop2.7*
+
+The version of the Py4J ZIP file in the hail alias must match the version in ``$SPARK_HOME/python/lib`` in your version of Spark.
+
+Running on a Spark cluster
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Hail can run on any Spark 2.2 cluster. For example,
+`Google <https://cloud.google.com/dataproc/>`_ and `Amazon
+<https://aws.amazon.com/emr/details/spark/>`_ offer optimized Spark performance
+and exceptional scalability to thousands of cores without the overhead
+of installing and managing an on-premesis cluster.
+
+On Google Cloud Dataproc, we provide pre-built JARs and a Python package
+`cloudtools <https://github.com/Nealelab/cloudtools>`_
+to simplify running Hail, whether through an interactive Jupyter notebook or by submitting Python scripts.
+
+For Cloudera-specific instructions, see :ref:`running-on-a-cloudera-cluster`.
 
 For all other Spark clusters, you will need to build Hail from the source code.
 
@@ -70,61 +127,82 @@ cluster::
 
     ./gradlew -Dspark.version=2.2.0 shadowJar archiveZip
 
-An IPython shell which can run Hail backed by the cluster can be started with
-the following command, it is important that the Spark located at ``SPARK_HOME``
-has the exact same version as provided to the previous command::
+Python and IPython need a few environment variables to correctly find Spark and
+the Hail jar. We recommend you set these environment variables in the relevant
+profile file for your shell (e.g. ``~/.bash_profile``).
 
-    SPARK_HOME=/path/to/spark/ \
-    HAIL_HOME=/path/to/hail/ \
-    PYTHONPATH="$PYTHONPATH:$HAIL_HOME/build/distributions/hail-python.zip:$SPARK_HOME/python:$SPARK_HOME/python/lib/py4j-*-src.zip" \
+.. code-block:: sh
+
+    export SPARK_HOME=/path/to/spark-2.2.0/
+    export HAIL_HOME=/path/to/hail/
+    export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$HAIL_HOME/build/distributions/hail-python.zip"
+    export PYTHONPATH="$PYTHONPATH:$SPARK_HOME/python"
+    export PYTHONPATH="$PYTHONPATH:$SPARK_HOME/python/lib/py4j-*-src.zip"
+    ## PYSPARK_SUBMIT_ARGS is used by ipython and jupyter
+    export PYSPARK_SUBMIT_ARGS="\
+      --jars $HAIL_HOME/build/libs/hail-all-spark.jar \
+      --conf spark.driver.extraClassPath=\"$HAIL_HOME/build/libs/hail-all-spark.jar\" \
+      --conf spark.executor.extraClassPath=./hail-all-spark.jar \
+      --conf spark.serializer=org.apache.spark.serializer.KryoSerializer \
+      --conf spark.kryo.registrator=is.hail.kryo.HailKryoRegistrator
+      pyspark-shell"
+
+If the previous environment variables are set correctly, an IPython shell which
+can run Hail backed by the cluster can be started with the following command::
+
     ipython
 
-Within the interactive shell, check that you can initialize Hail by running the
-following commands. Note that you must pass in the existing ``SparkContext``
-instance ``sc`` to the ``hail.init`` function.
-
-  .. code-block:: python
+When using ``ipython``, you can import hail and start interacting directly
 
     >>> import hail as hl
-    >>> hl.init(sc)
-    
-Files can be accessed from both Hadoop and Google Storage. If you're running on Google's Dataproc, you'll want to store your files in Google Storage. In most on premises clusters, you'll want to store your files in Hadoop.
+    >>> mt = hl.balding_nichols_model(3, 100, 100)
+    >>> mt.aggregate_entries(hl.agg.mean(mt.GT.n_alt_alleles()))
 
-To convert *sample.vcf* stored in Google Storage into Hail's **.vds** format, run:
+You can also interact with hail via a ``pyspark`` session, but you will need to
+pass the configuration from ``PYSPARK_SUBMIT_ARGS`` directly as well as adding
+extra configuration parameters specific to running Hail through ``pyspark``::
 
-  .. code-block:: python
+    pyspark \
+      --jars $HAIL_HOME/build/libs/hail-all-spark.jar \
+      --conf spark.driver.extraClassPath=$HAIL_HOME/build/libs/hail-all-spark.jar \
+      --conf spark.executor.extraClassPath=./hail-all-spark.jar \
+      --conf spark.serializer=org.apache.spark.serializer.KryoSerializer \
+      --conf spark.kryo.registrator=is.hail.kryo.HailKryoRegistrator
 
-    >>> hl.import_vcf('gs:///path/to/sample.vcf').write('gs:///output/path/sample.vds')
-    
-To convert *sample.vcf* stored in Hadoop into Hail's **.vds** format, run:
+Moreover, unlike in ``ipython``, ``pyspark`` provides a Spark Context via the
+global variable ``sc``. For Hail to interact properly with the Spark cluster,
+you must tell hail about this special Spark Context
 
-   .. code-block:: python
+    >>> import hail as hl
+    >>> hl.init(sc) # doctest: +SKIP
 
-    >>> hl.import_vcf('/path/to/sample.vcf').write('/output/path/sample.vds')
-
-It is also possible to run Hail non-interactively, by passing a Python script to
-``spark-submit``. In this case, it is not necessary to set any environment
-variables.
-
-For example,
-
-.. code-block:: text
-
-    spark-submit --jars build/libs/hail-all-spark.jar \
-                 --py-files build/distributions/hail-python.zip \
-                 hailscript.py
-
-runs the script `hailscript.py` (which reads and writes files from Hadoop):
+After this initialization step, you can interact as you would in ``ipython``
 
 .. code-block:: python
 
-    import hail as hl
-    hl.import_vcf('/path/to/sample.vcf').write('/output/path/sample.vds')
+    >>> mt = hl.balding_nichols_model(3, 100, 100)
+    >>> mt.aggregate_entries(hl.agg.mean(mt.GT.n_alt_alleles()))
+
+It is also possible to run Hail non-interactively, by passing a Python script to
+``spark-submit``. Again, you will need to explicitly pass several configuration
+parameters to ``spark-submit``
+
+.. code-block:: sh
+
+    spark-submit \
+      --jars "$HAIL_HOME/build/libs/hail-all-spark.jar" \
+      --py-files "$HAIL_HOME/build/distributions/hail-python.zip" \
+      --conf spark.driver.extraClassPath="$HAIL_HOME/build/libs/hail-all-spark.jar" \
+      --conf spark.executor.extraClassPath=./hail-all-spark.jar \
+      --conf spark.serializer=org.apache.spark.serializer.KryoSerializer \
+      --conf spark.kryo.registrator=is.hail.kryo.HailKryoRegistrator \
+      your-hail-python-script-here.py
 
 .. _running-on-a-cloudera-cluster:
 
-Running on a Cloudera Cluster
-=============================
+
+Running on a Cloudera cluster
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 `These instructions
 <https://www.cloudera.com/documentation/spark2/latest/topics/spark2_installing.html>`_
@@ -137,62 +215,29 @@ the same as above, except:
 
  - On a Cloudera cluster, when building a Hail JAR, you must specify a Cloudera
    version of Spark. The following example builds a Hail JAR for Cloudera's
-   2.0.2 version of Spark::
- 
-    ./gradlew shadowJar -Dspark.version=2.0.2.cloudera
+   2.2.0 version of Spark::
+
+    ./gradlew shadowJar -Dspark.version=2.2.0.cloudera
 
  - On a Cloudera cluster, ``SPARK_HOME`` should be set as:
    ``SPARK_HOME=/opt/cloudera/parcels/SPARK2/lib/spark2``,
 
- - On Cloudera, you can create an interactive Python shell using ``pyspark2``::
- 
-    pyspark2 --jars build/libs/hail-all-spark.jar \
-             --py-files build/distributions/hail-python.zip \
-             --conf spark.sql.files.openCostInBytes=1099511627776 \
-             --conf spark.sql.files.maxPartitionBytes=1099511627776 \
-             --conf spark.kryo.registrator=is.hail.kryo.HailKryoRegistrator \
-             --conf spark.hadoop.parquet.block.size=1099511627776
+ - On Cloudera, you can create an interactive Python shell using ``pyspark``::
 
- - Cloudera's version of ``spark-submit`` is called ``spark2-submit``.
+    pyspark --jars build/libs/hail-all-spark.jar \
+            --py-files build/distributions/hail-python.zip \
+            --conf spark.driver.extraClassPath="build/libs/hail-all-spark.jar" \
+            --conf spark.executor.extraClassPath=./hail-all-spark.jar \
+            --conf spark.serializer=org.apache.spark.serializer.KryoSerializer \
+            --conf spark.kryo.registrator=is.hail.kryo.HailKryoRegistrator \
 
-.. _running-in-the-cloud:
 
-Running in the cloud
-====================
+Common Installation Issues
+--------------------------
 
-`Google <https://cloud.google.com/dataproc/>`_ and `Amazon
-<https://aws.amazon.com/emr/details/spark/>`_ offer optimized Spark performance
-and exceptional scalability to tens of thousands of cores without the overhead
-of installing and managing an on-prem cluster.
 
-Hail publishes pre-built JARs for Google Cloud Platform's Dataproc Spark
-clusters. We recommend running Hail on GCP via an interactive Jupyter notebook,
-as described in `Liam's forum post
-<http://discuss.hail.is/t/using-hail-with-jupyter-notebooks-on-google-cloud/196>`__. If
-you prefer to submit your own JARs or python files rather than use a Jupyter
-notebook, see `Laurent's forum post
-<http://discuss.hail.is/t/using-hail-on-the-google-cloud-platform/80>`__.
-
-Building with other versions of Spark 2
-=======================================
-
-Hail should work with other versions of Spark 2.  To build against a
-different version, such as Spark 2.2.1, modify the above
-instructions as follows:
-
- - Set the Spark version in the gradle command
-
-   .. code-block:: text
-
-      ./gradlew -Dspark.version=2.2.1 shadowJar
-
- - ``SPARK_HOME`` should point to an installation of the desired version of Spark, such as *spark-2.2.1-bin-hadoop2.7*
-
- - The version of the Py4J ZIP file in the hail alias must match the version in ``$SPARK_HOME/python/lib`` in your version of Spark.
-
----------------
 BLAS and LAPACK
----------------
+~~~~~~~~~~~~~~~
 
 Hail uses BLAS and LAPACK optimized linear algebra libraries. These should load automatically on recent versions of Mac OS X and Google Dataproc. On Linux, these must be explicitly installed; on Ubuntu 14.04, run
 
@@ -208,3 +253,4 @@ If natives are not found, ``hail.log`` will contain the warnings
     Failed to load implementation from: com.github.fommil.netlib.NativeSystemBLAS
 
 See `netlib-java <http://github.com/fommil/netlib-java>`_ for more information.
+

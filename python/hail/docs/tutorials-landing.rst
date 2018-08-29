@@ -1,21 +1,20 @@
 .. _sec-tutorials2:
 
-================
+==============
 Hail Tutorials
-================
+==============
 
 To take Hail for a test drive, go through our tutorials. These can be viewed here in the documentation,
 but we recommend instead that you run them yourself with Jupyter.
 
-
-Hail Overview
-=============
-
-This notebook is designed to provide a broad overview of Hail’s functionality, with emphasis on the
-functionality to manipulate and query a genetic dataset. We walk through a genome-wide SNP association
-test, and demonstrate the need to control for confounding caused by population stratification.
-
 .. toctree::
-    :maxdepth: 2
+    :maxdepth: 1
 
-    Hail Overview <tutorials/hail-overview.ipynb>
+        GWAS Tutorial <tutorials/01-genome-wide-association-study.ipynb>
+        Expression Tutorial <tutorials/03-expressions.ipynb>
+        Table Tutorial <tutorials/05-tables.ipynb>
+        Aggregation Tutorial <tutorials/06-aggregation.ipynb>
+        Filtering and Annotation Tutorial <tutorials/07-filter-annotate.ipynb>
+        Table Joins Tutorial <tutorials/08-joins>
+        MatrixTable Tutorial <tutorials/09-matrixtable.ipynb>
+        Plotting Tutorial<tutorials/plotting.ipynb>

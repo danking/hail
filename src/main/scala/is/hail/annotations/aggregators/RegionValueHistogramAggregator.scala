@@ -11,8 +11,6 @@ object RegionValueHistogramAggregator {
 }
 
 class RegionValueHistogramAggregator(start: Double, end: Double, bins: Int) extends RegionValueAggregator {
-  import RegionValueHistogramAggregator._
-
   if (bins <= 0)
     fatal(s"""method `hist' expects `bins' argument to be > 0, but got $bins""")
 
@@ -25,15 +23,11 @@ class RegionValueHistogramAggregator(start: Double, end: Double, bins: Int) exte
 
   private val indices = Array.tabulate(bins + 1)(i => start + i * binSize)
 
-  private val combiner = new HistogramCombiner(indices)
+  private var combiner = new HistogramCombiner(indices)
 
-  def seqOp(x: Double, missing: Boolean) {
+  def seqOp(region: Region, x: Double, missing: Boolean) {
     if (!missing)
       combiner.merge(x)
-  }
-
-  def seqOp(region: Region, off: Long, missing: Boolean) {
-    seqOp(region.loadDouble(off), missing)
   }
 
   def combOp(agg2: RegionValueAggregator) {
@@ -48,10 +42,20 @@ class RegionValueHistogramAggregator(start: Double, end: Double, bins: Int) exte
     rvb.startArray(combiner.frequency.length)
     combiner.frequency.foreach(rvb.addLong _)
     rvb.endArray()
-    rvb.addLong(combiner.nLess)
-    rvb.addLong(combiner.nGreater)
+    rvb.addLong(combiner.nSmaller)
+    rvb.addLong(combiner.nLarger)
     rvb.endStruct()
   }
 
-  def copy() = new RegionValueHistogramAggregator(start, end, bins)
+  def newInstance() = new RegionValueHistogramAggregator(start, end, bins)
+
+  override def copy(): RegionValueHistogramAggregator = {
+    val rva = new RegionValueHistogramAggregator(start, end, bins)
+    rva.combiner = combiner.copy()
+    rva
+  }
+
+  def clear() {
+    combiner.clear()
+  }
 }

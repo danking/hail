@@ -131,15 +131,23 @@ object CalculateConcordance {
             rview.setGenotype(leftToRightBc.value(li))
           comb(li).merge(
             if (lrv != null) {
-              if (lview.hasGT)
-                Call.unphasedDiploidGtIndex(lview.getGT) + 2
+              if (lview.hasGT) {
+                val gt = Call.unphasedDiploidGtIndex(lview.getGT)
+                if (gt > 2)
+                  fatal(s"'concordance' requires biallelic genotype calls. Found ${ Call.toString(lview.getGT) }.")
+                gt + 2
+              }
               else
                 1
             } else
               0,
             if (rrv != null) {
-              if (rview.hasGT)
-                Call.unphasedDiploidGtIndex(rview.getGT) + 2
+              if (rview.hasGT) {
+                val gt = Call.unphasedDiploidGtIndex(rview.getGT)
+                if (gt > 2)
+                  fatal(s"'concordance' requires biallelic genotype calls. Found ${ Call.toString(rview.getGT) }.")
+                gt + 2
+              }
               else
                 1
             } else
@@ -155,7 +163,7 @@ object CalculateConcordance {
 
     val leftRowKeysF = left.rowKeysF
     val rightRowKeysF = right.rowKeysF
-    val variantRDD = join.mapPartitions { it =>
+    val variantCRDD = join.mapPartitions { it =>
       val comb = new ConcordanceCombiner
 
       val lur = new UnsafeRow(leftRowType)
@@ -220,9 +228,9 @@ object CalculateConcordance {
     val sampleRDD = left.hc.sc.parallelize(leftFiltered.stringSampleIds.zip(sampleResults)
       .map { case (id, comb) => Row(id, comb.nDiscordant, comb.toAnnotation) })
 
-    val sampleKT = Table(left.hc, sampleRDD, sampleSchema, left.colKey)
+    val sampleKT = Table(left.hc, sampleRDD, sampleSchema, Some(left.colKey))
 
-    val variantKT = Table(left.hc, variantRDD, variantSchema, left.rowKey)
+    val variantKT = Table(left.hc, variantCRDD, variantSchema, Some(left.rowKey), isSorted = false)
 
     (global.toAnnotation, sampleKT, variantKT)
   }

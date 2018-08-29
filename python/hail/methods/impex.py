@@ -5,32 +5,55 @@ from hail.utils.misc import plural
 from hail.matrixtable import MatrixTable
 from hail.table import Table
 from hail.expr.types import *
-from hail.expr.expressions import analyze, expr_any
+from hail.expr.expressions import *
 from hail.genetics.reference_genome import reference_genome_type
-from hail.methods.misc import require_biallelic, require_row_key_variant
+from hail.methods.misc import require_biallelic, require_row_key_variant, require_row_key_variant_w_struct_locus, require_col_key_str
+import hail as hl
+
+_cached_loadvcf = None
 
 
-@typecheck(table=Table,
-           address=str,
-           keyspace=str,
-           table_name=str,
-           block_size=int,
-           rate=int)
-def export_cassandra(table, address, keyspace, table_name, block_size=100, rate=1000):
-    """Export a :class:`.Table` to Cassandra.
+def locus_interval_expr(contig, start, end, includes_start, includes_end,
+                        reference_genome, skip_invalid_intervals):
+    if reference_genome:
+        if skip_invalid_intervals:
+            is_valid_locus_interval = (
+                (hl.is_valid_contig(contig, reference_genome) &
+                 (hl.is_valid_locus(contig, start, reference_genome) |
+                  (~hl.bool(includes_start) & (start == 0))) &
+                 (hl.is_valid_locus(contig, end, reference_genome) |
+                  (~hl.bool(includes_end) & hl.is_valid_locus(contig, end - 1, reference_genome)))))
 
-    Warning
-    -------
-    :func:`export_cassandra` is EXPERIMENTAL.
-    """
+            return hl.or_missing(is_valid_locus_interval,
+                                 hl.locus_interval(contig, start, end,
+                                                   includes_start, includes_end,
+                                                   reference_genome))
+        else:
+            return hl.locus_interval(contig, start, end, includes_start,
+                                     includes_end, reference_genome)
+    else:
+        return hl.interval(hl.struct(contig=contig, position=start),
+                           hl.struct(contig=contig, position=end),
+                           includes_start,
+                           includes_end)
 
-    table._jkt.exportCassandra(address, keyspace, table_name, block_size, rate)
-
+def expr_or_else(expr, default, f=lambda x: x):
+    if expr is not None:
+        return hl.or_else(f(expr), default)
+    else:
+        return to_expr(default)
 
 @typecheck(dataset=MatrixTable,
            output=str,
-           precision=int)
-def export_gen(dataset, output, precision=4):
+           precision=int,
+           gp=nullable(expr_array(expr_float64)),
+           id1=nullable(expr_str),
+           id2=nullable(expr_str),
+           missing=nullable(expr_numeric),
+           varid=nullable(expr_str),
+           rsid=nullable(expr_str))
+def export_gen(dataset, output, precision=4, gp=None, id1=None, id2=None,
+               missing=None, varid=None, rsid=None):
     """Export a :class:`.MatrixTable` as GEN and SAMPLE files.
 
     .. include:: ../_templates/req_tvariant.rst
@@ -51,61 +74,119 @@ def export_gen(dataset, output, precision=4):
     Writes out the dataset to a GEN and SAMPLE fileset in the
     `Oxford spec <http://www.stats.ox.ac.uk/%7Emarchini/software/gwas/file_format.html>`__.
 
-    This method requires a `GP` (genotype probabilities) entry field of type
-    ``array<float64>``. The values at indices 0, 1, and 2 are exported as the
-    probabilities of homozygous reference, heterozygous, and homozygous variant,
-    respectively. Missing `GP` values are exported as ``0 0 0``.
-
-    The first six columns of the GEN file are as follows:
-
-    - chromosome (`locus.contig`)
-    - variant ID (`varid` if defined, else Contig:Position:Ref:Alt)
-    - rsID (`rsid` if defined, else ``.``)
-    - position (`locus.position`)
-    - reference allele (`alleles[0]`)
-    - alternate allele (`alleles[1]`)
-
-    The SAMPLE file has three columns:
-
-    - ID_1 and ID_2 are identical and set to the sample ID (`s`).
-    - The third column (``missing``) is set to 0 for all samples.
-
     Parameters
     ----------
     dataset : :class:`.MatrixTable`
-        Dataset with entry field `GP` of type ``array<float64>``.
+        Dataset.
     output : :obj:`str`
         Filename root for output GEN and SAMPLE files.
     precision : :obj:`int`
         Number of digits to write after the decimal point.
+    gp : :class:`.ArrayExpression` of type :py:data:`.tfloat64`, optional
+        Expression for the genotype probabilities to output. If ``None``, the
+        entry field `GP` is used if defined and is of type :py:data:`.tarray`
+        with element type :py:data:`.tfloat64`. The array length must be 3.
+        The values at indices 0, 1, and 2 are exported as the probabilities of
+        homozygous reference, heterozygous, and homozygous variant,
+        respectively. The default and missing value is ``[0, 0, 0]``.
+    id1 : :class:`.StringExpression`, optional
+        Expression for the first column of the SAMPLE file. If ``None``, the
+        column key of the dataset is used and must be one field of type
+        :py:data:`.tstr`.
+    id2 : :class:`.StringExpression`, optional
+        Expression for the second column of the SAMPLE file. If ``None``, the
+        column key of the dataset is used and must be one field of type
+        :py:data:`.tstr`.
+    missing : :class:`.NumericExpression`, optional
+        Expression for the third column of the SAMPLE file, which is the sample
+        missing rate. Values must be between 0 and 1.
+    varid : :class:`.StringExpression`, optional
+        Expression for the variant ID (2nd column of the GEN file). If ``None``,
+        the row field `varid` is used if defined and is of type :py:data:`.tstr`.
+        The default and missing value is
+        ``hl.delimit([dataset.locus.contig, hl.str(dataset.locus.position), dataset.alleles[0], dataset.alleles[1]], ':')``
+    rsid : :class:`.StringExpression`, optional
+        Expression for the rsID (3rd column of the GEN file). If ``None``,
+        the row field `rsid` is used if defined and is of type :py:data:`.tstr`.
+        The default and missing value is ``"."``.
     """
 
-    dataset = require_biallelic(dataset, 'export_gen')
-    try:
-        gp = dataset['GP']
-        if gp.dtype != tarray(tfloat64) or gp._indices != dataset._entry_indices:
-            raise KeyError
-    except KeyError:
-        raise FatalError("export_gen: no entry field 'GP' of type 'array<float64>'")
+    require_biallelic(dataset, 'export_gen')
 
-    dataset = require_biallelic(dataset, 'export_plink')
+    if gp is None:
+        if 'GP' in dataset.entry and dataset.GP.dtype == tarray(tfloat64):
+            entry_exprs = {'GP': dataset.GP}
+        else:
+            entry_exprs = {}
+    else:
+        entry_exprs = {'GP': gp}
 
-    Env.hail().io.gen.ExportGen.apply(dataset._jvds, output, precision)
+    if id1 is None:
+        require_col_key_str(dataset, "export_gen")
+        id1 = dataset.col_key[0]
+
+    if id2 is None:
+        require_col_key_str(dataset, "export_gen")
+        id2 = dataset.col_key[0]
+
+    if missing is None:
+        missing = hl.float64(0.0)
+
+    if varid is None:
+        if 'varid' in dataset.row and dataset.varid.dtype == tstr:
+            varid = dataset.varid
+
+    if rsid is None:
+        if 'rsid' in dataset.row and dataset.rsid.dtype == tstr:
+            rsid = dataset.rsid
+
+    sample_exprs = {'id1': id1, 'id2': id2, 'missing': missing}
+
+    l = dataset.locus
+    a = dataset.alleles
+
+    gen_exprs = {'locus': l,
+                 'alleles': a,
+                 'varid': expr_or_else(varid, hl.delimit([l.contig, hl.str(l.position), a[0], a[1]], ':')),
+                 'rsid': expr_or_else(rsid, ".")}
+
+    for exprs, axis in [(sample_exprs, dataset._col_indices),
+                        (gen_exprs, dataset._row_indices),
+                        (entry_exprs, dataset._entry_indices)]:
+        for name, expr in exprs.items():
+            analyze('export_gen/{}'.format(name), expr, axis)
+
+    dataset = dataset._select_all(col_exprs=sample_exprs,
+                                  col_key=[],
+                                  row_exprs=gen_exprs,
+                                  row_key=[['locus'], ['alleles']],
+                                  entry_exprs=entry_exprs)
+
+    dataset._jvds.exportGen(output, precision)
 
 
 @typecheck(dataset=MatrixTable,
            output=str,
-           fam_args=expr_any)
-def export_plink(dataset, output, **fam_args):
+           call=nullable(expr_call),
+           fam_id=nullable(expr_str),
+           ind_id=nullable(expr_str),
+           pat_id=nullable(expr_str),
+           mat_id=nullable(expr_str),
+           is_female=nullable(expr_bool),
+           pheno=oneof(nullable(expr_bool), nullable(expr_numeric)),
+           varid=nullable(expr_str),
+           cm_position=nullable(expr_float64))
+def export_plink(dataset, output, call=None, fam_id=None, ind_id=None, pat_id=None,
+                 mat_id=None, is_female=None, pheno=None, varid=None,
+                 cm_position=None):
     """Export a :class:`.MatrixTable` as
     `PLINK2 <https://www.cog-genomics.org/plink2/formats>`__
     BED, BIM and FAM files.
 
-    .. include:: ../_templates/req_tvariant.rst
-
+    .. include:: ../_templates/req_tvariant_w_struct_locus.rst
     .. include:: ../_templates/req_tstring.rst
-
     .. include:: ../_templates/req_biallelic.rst
+    .. include:: ../_templates/req_unphased_diploid_gt.rst
 
     Examples
     --------
@@ -113,30 +194,10 @@ def export_plink(dataset, output, **fam_args):
     PLINK files with the FAM file individual ID set to the sample ID:
 
     >>> ds = hl.split_multi_hts(dataset)
-    >>> hl.export_plink(ds, 'output/example', id = ds.s)
+    >>> hl.export_plink(ds, 'output/example', ind_id = ds.s)
 
     Notes
     -----
-    `fam_args` may be used to set the fields in the output
-    `FAM file <https://www.cog-genomics.org/plink2/formats#fam>`__
-    via expressions with column and global fields in scope:
-
-    - ``fam_id``: :py:data:`.tstr` for the family ID
-    - ``id``: :py:data:`.tstr` for the individual (proband) ID
-    - ``mat_id``: :py:data:`.tstr` for the maternal ID
-    - ``pat_id``: :py:data:`.tstr` for the paternal ID
-    - ``is_female``: :py:data:`.tbool` for the proband sex
-    - ``is_case``: :py:data:`.tbool` or `quant_pheno`: :py:data:`.tfloat64` for the
-       phenotype
-
-    If no assignment is given, the corresponding PLINK missing value is written:
-    ``0`` for IDs and sex, ``NA`` for phenotype. Only one of ``is_case`` or
-    ``quant_pheno`` can be assigned. For Boolean expressions, true and false are
-    output as ``2`` and ``1``, respectively (i.e., female and case are ``2``).
-
-    The BIM file ID field has the form ``chr:pos:ref:alt`` with values given by
-    `v.contig`, `v.start`, `v.ref`, and `v.alt`.
-
     On an imported VCF, the example above will behave similarly to the PLINK
     conversion command
 
@@ -148,7 +209,6 @@ def export_plink(dataset, output, **fam_args):
 
     - Variants that result from splitting a multi-allelic variant may be
       re-ordered relative to the BIM and BED files.
-    - PLINK uses the rsID for the BIM file ID.
 
     Parameters
     ----------
@@ -156,44 +216,96 @@ def export_plink(dataset, output, **fam_args):
         Dataset.
     output : :obj:`str`
         Filename root for output BED, BIM, and FAM files.
-    fam_args : varargs of :class:`hail.expr.expressions.Expression`
-        Named expressions defining FAM field values.
+    call : :class:`.CallExpression`, optional
+        Expression for the genotype call to output. If ``None``, the entry field
+        `GT` is used if defined and is of type :py:data:`.tcall`.
+    fam_id : :class:`.StringExpression`, optional
+        Expression for the family ID. The default and missing values are
+        ``'0'``.
+    ind_id : :class:`.StringExpression`, optional
+        Expression for the individual (proband) ID. If ``None``, the column key
+        of the dataset is used and must be one field of type :py:data:`.tstr`.
+    pat_id : :class:`.StringExpression`, optional
+        Expression for the paternal ID. The default and missing values are
+        ``'0'``.
+    mat_id : :class:`.StringExpression`, optional
+        Expression for the maternal ID. The default and missing values are
+        ``'0'``.
+    is_female : :class:`.BooleanExpression`, optional
+        Expression for the proband sex. ``True`` is output as ``'2'`` and
+        ``False`` is output as ``'1'``. The default and missing values are
+        ``'0'``.
+    pheno : :class:`.BooleanExpression` or :class:`.NumericExpression`, optional
+        Expression for the phenotype. If `pheno` is a boolean expression,
+        ``True`` is output as ``'2'`` and ``False`` is output as ``'1'``. The
+        default and missing values are ``'NA'``.
+    varid : :class:`.StringExpression`, optional
+        Expression for the variant ID (2nd column of the BIM file). The default
+        value is ``hl.delimit([dataset.locus.contig, hl.str(dataset.locus.position), dataset.alleles[0], dataset.alleles[1]], ':')``
+    cm_position : :class:`.Float64Expression`, optional
+        Expression for the 3rd column of the BIM file (position in centimorgans).
+        The default value is ``0.0``. The missing value is ``0.0``.
     """
 
-    fam_dict = {'fam_id': tstr, 'id': tstr, 'mat_id': tstr, 'pat_id': tstr,
-                'is_female': tbool, 'is_case': tbool, 'quant_pheno': tfloat64}
+    require_biallelic(dataset, 'export_plink')
+    require_row_key_variant_w_struct_locus(dataset, 'export_plink')
 
-    exprs = []
-    named_exprs = {k: v for k, v in fam_args.items()}
-    if ('is_case' in named_exprs) and ('quant_pheno' in named_exprs):
-        raise ValueError("At most one of 'is_case' and 'quant_pheno' may be given as fam_args. Found both.")
-    for k, v in named_exprs.items():
-        if k not in fam_dict:
-            raise ValueError("fam_arg '{}' not recognized. Valid names: {}".format(k, ', '.join(fam_dict)))
-        elif (v.dtype != fam_dict[k]):
-            raise TypeError("fam_arg '{}' expression has type {}, expected type {}".format(k, v.dtype, fam_dict[k]))
+    if ind_id is None:
+        require_col_key_str(dataset, "export_plink")
+        ind_id = dataset.col_key[0]
 
-        analyze('export_plink/{}'.format(k), v, dataset._col_indices)
-        exprs.append('`{k}` = {v}'.format(k=k, v=v._ast.to_hql()))
-    base, _ = dataset._process_joins(*named_exprs.values())
-    base = require_biallelic(base, 'export_plink')
+    if call is None:
+        if 'GT' in dataset.entry and dataset.GT.dtype == tcall:
+            entry_exprs = {'GT': dataset.GT}
+        else:
+            entry_exprs = {}
+    else:
+        entry_exprs = {'GT': call}
 
-    Env.hail().io.plink.ExportPlink.apply(base._jvds, output, ','.join(exprs))
+    fam_exprs = {'fam_id': expr_or_else(fam_id, '0'),
+                 'ind_id': hl.or_else(ind_id, '0'),
+                 'pat_id': expr_or_else(pat_id, '0'),
+                 'mat_id': expr_or_else(mat_id, '0'),
+                 'is_female': expr_or_else(is_female, '0',
+                                           lambda x: hl.cond(x, '2', '1')),
+                 'pheno': expr_or_else(pheno, 'NA',
+                                       lambda x: hl.cond(x, '2', '1') if x.dtype == tbool else hl.str(x))}
 
+    l = dataset.locus
+    a = dataset.alleles
 
-@typecheck(table=Table,
-           zk_host=str,
-           collection=str,
-           block_size=int)
-def export_solr(table, zk_host, collection, block_size=100):
-    """Export a :class:`.Table` to Solr.
+    bim_exprs = {'locus': l,
+                 'alleles': a,
+                 'varid': expr_or_else(varid, hl.delimit([l.contig, hl.str(l.position), a[0], a[1]], ':')),
+                 'cm_position': expr_or_else(cm_position, 0.0)}
 
-    Warning
-    -------
-    :func:`export_solr` is EXPERIMENTAL.
-    """
+    for exprs, axis in [(fam_exprs, dataset._col_indices),
+                        (bim_exprs, dataset._row_indices),
+                        (entry_exprs, dataset._entry_indices)]:
+        for name, expr in exprs.items():
+            analyze('export_plink/{}'.format(name), expr, axis)
 
-    table._jkt.exportSolr(zk_host, collection, block_size)
+    dataset = dataset._select_all(col_exprs=fam_exprs,
+                                  col_key=[],
+                                  row_exprs=bim_exprs,
+                                  row_key=[['locus'], ['alleles']],
+                                  entry_exprs=entry_exprs)
+
+    # check FAM ids for white space
+    t_cols = dataset.cols()
+    errors = []
+    for name in ['ind_id', 'fam_id', 'pat_id', 'mat_id']:
+        ids = t_cols.filter(t_cols[name].matches(r"\s+"))[name].collect()
+
+        if ids:
+            errors.append(f"""expr '{name}' has spaces in the following values:\n""")
+            for row in ids:
+                errors.append(f"""  {row}\n""")
+
+    if errors:
+        raise TypeError("\n".join(errors))
+
+    dataset._jvds.exportPlink(output)
 
 
 @typecheck(dataset=MatrixTable,
@@ -214,7 +326,7 @@ def export_vcf(dataset, output, append_to_header=None, parallel=None, metadata=N
 
     Notes
     -----
-    :func:`export_vcf` writes the dataset to disk in VCF format as described in the
+    :func:`.export_vcf` writes the dataset to disk in VCF format as described in the
     `VCF 4.2 spec <https://samtools.github.io/hts-specs/VCFv4.2.pdf>`__.
 
     Use the ``.vcf.bgz`` extension rather than ``.vcf`` in the output file name
@@ -226,8 +338,8 @@ def export_vcf(dataset, output, append_to_header=None, parallel=None, metadata=N
         output (`parallel` set to ``'separate_header'`` or
         ``'header_per_shard'``) when exporting large VCFs.
 
-    Hail exports the fields of struct `info` as INFO fields,
-    the elements of ``set<str>`` `filters` as FILTERS, and the
+    Hail exports the fields of struct `info` as INFO fields, the elements of
+    ``set<str>`` `filters` as FILTERS, the value of str `rsid` as ID, and the
     value of float64 `qual` as QUAL. No other row fields are exported.
 
     The FORMAT field is generated from the entry schema, which
@@ -276,7 +388,7 @@ def export_vcf(dataset, output, append_to_header=None, parallel=None, metadata=N
     filtered dataset is exported to VCF without updating `info`, downstream
     tools which may produce erroneous results. The solution is to create new
     fields in `info` or overwrite existing fields. For example, in order to
-    produce an accurate `AC` field, one can run :func:`variant_qc` and copy
+    produce an accurate `AC` field, one can run :func:`.variant_qc` and copy
     the `variant_qc.AC` field to `info.AC` as shown below.
 
     >>> ds = dataset.filter_entries(dataset.GQ >= 20)
@@ -313,20 +425,25 @@ def export_vcf(dataset, output, append_to_header=None, parallel=None, metadata=N
 
 
 @typecheck(path=str,
-           reference_genome=nullable(reference_genome_type))
-def import_locus_intervals(path, reference_genome='default'):
-    """Import an interval list as a :class:`.Table`.
+           reference_genome=nullable(reference_genome_type),
+           skip_invalid_intervals=bool)
+def import_locus_intervals(path, reference_genome='default', skip_invalid_intervals=False) -> Table:
+    """Import a locus interval list as a :class:`.Table`.
 
     Examples
     --------
 
+    Add the row field `capture_region` indicating inclusion in
+    at least one locus interval from `capture_intervals.txt`:
+
     >>> intervals = hl.import_locus_intervals('data/capture_intervals.txt')
+    >>> result = dataset.annotate_rows(capture_region = hl.is_defined(intervals[dataset.locus]))
 
     Notes
     -----
 
-    Hail expects an interval file to contain either three or five fields per
-    line in the following formats:
+    Hail expects an interval file to contain either one, three or five fields
+    per line in the following formats:
 
     - ``contig:start-end``
     - ``contig  start  end`` (tab-separated)
@@ -347,51 +464,109 @@ def import_locus_intervals(path, reference_genome='default'):
      - **interval** (:class:`.tinterval`) - Row key. Same schema as above.
      - **target** (:py:data:`.tstr`)
 
-    Note
-    ----
+    If `reference_genome` is defined **AND** the file has one field, intervals
+    are parsed with :func:`.parse_locus_interval`. See the documentation for
+    valid inputs.
+
+    If `reference_genome` is **NOT** defined and the file has one field,
+    intervals are parsed with the regex ```"([^:]*):(\\d+)\\-(\\d+)"``
+    where contig, start, and end match each of the three capture groups.
     ``start`` and ``end`` match positions inclusively, e.g.
-    ``start <= position <= end``. :meth:`.Interval.parse`
-    is exclusive of the end position.
+    ``start <= position <= end``.
 
-    Refer to :class:`.ReferenceGenome` for contig ordering and behavior.
-
-    Warning
-    -------
-    The interval parser for these files does not support the full range of
-    formats supported by the python parser
-    :meth:`representation.Interval.parse`. 'k', 'm', 'start', and 'end' are all
-    invalid motifs in the ``contig:start-end`` format here.
+    For files with three or five fields, ``start`` and ``end`` match positions
+    inclusively, e.g. ``start <= position <= end``.
 
     Parameters
     ----------
     path : :obj:`str`
         Path to file.
-
     reference_genome : :obj:`str` or :class:`.ReferenceGenome`, optional
         Reference genome to use.
+    skip_invalid_intervals : :obj:`bool`
+        If ``True`` and `reference_genome` is not ``None``, skip lines with
+        intervals that are not consistent with the reference genome.
 
     Returns
     -------
     :class:`.Table`
         Interval-keyed table.
     """
-    rg = reference_genome._jrep if reference_genome else None
 
-    t = Env.hail().table.Table.importIntervalList(Env.hc()._jhc, path, joption(rg))
-    return Table(t)
+    t = import_table(path, comment="@", impute=False, no_header=True,
+                     types={'f0': tstr, 'f1': tint32, 'f2': tint32,
+                            'f3': tstr, 'f4': tstr})
+
+    if t.row.dtype == tstruct(f0=tstr):
+        if reference_genome:
+            t = t.select(interval=hl.parse_locus_interval(t['f0'],
+                                                          reference_genome))
+        else:
+            interval_regex = r"([^:]*):(\d+)\-(\d+)"
+
+            def checked_match_interval_expr(match):
+                return hl.or_missing(hl.len(match) == 3,
+                                     locus_interval_expr(match[0],
+                                                         hl.int32(match[1]),
+                                                         hl.int32(match[2]),
+                                                         True,
+                                                         True,
+                                                         reference_genome,
+                                                         skip_invalid_intervals))
+
+            expr = (
+                hl.bind(t['f0'].first_match_in(interval_regex),
+                        lambda match: hl.cond(hl.bool(skip_invalid_intervals),
+                                              checked_match_interval_expr(match),
+                                              locus_interval_expr(match[0],
+                                                                  hl.int32(match[1]),
+                                                                  hl.int32(match[2]),
+                                                                  True,
+                                                                  True,
+                                                                  reference_genome,
+                                                                  skip_invalid_intervals))))
+
+            t = t.select(interval=expr)
+
+    elif t.row.dtype == tstruct(f0=tstr, f1=tint32, f2=tint32):
+        t = t.select(interval=locus_interval_expr(t['f0'],
+                                                  t['f1'],
+                                                  t['f2'],
+                                                  True,
+                                                  True,
+                                                  reference_genome,
+                                                  skip_invalid_intervals))
+
+    elif t.row.dtype == tstruct(f0=tstr, f1=tint32, f2=tint32, f3=tstr, f4=tstr):
+        t = t.select(interval=locus_interval_expr(t['f0'],
+                                                  t['f1'],
+                                                  t['f2'],
+                                                  True,
+                                                  True,
+                                                  reference_genome,
+                                                  skip_invalid_intervals),
+                     target=t['f4'])
+
+    else:
+        raise FatalError("""invalid interval format.  Acceptable formats:
+              'chr:start-end'
+              'chr  start  end' (tab-separated)
+              'chr  start  end  strand  target' (tab-separated, strand is '+' or '-')""")
+
+    if skip_invalid_intervals and reference_genome:
+        t = t.filter(hl.is_defined(t.interval))
+
+    return t.key_by('interval')
 
 
 @typecheck(path=str,
-           reference_genome=nullable(reference_genome_type))
-def import_bed(path, reference_genome='default'):
-    """Import a UCSC .bed file as a :class:`.Table`.
+           reference_genome=nullable(reference_genome_type),
+           skip_invalid_intervals=bool)
+def import_bed(path, reference_genome='default', skip_invalid_intervals=False) -> Table:
+    """Import a UCSC BED file as a :class:`.Table`.
 
     Examples
     --------
-
-    >>> bed = hl.import_bed('data/file1.bed')
-
-    >>> bed = hl.import_bed('data/file2.bed')
 
     The file formats are
 
@@ -409,6 +584,17 @@ def import_bed(path, reference_genome='default'):
         20    17000000   18000000  cnv2
         ...
 
+    Add the row field `cnv_region` indicating inclusion in
+    at least one interval of the three-column BED file:
+
+    >>> bed = hl.import_bed('data/file1.bed')
+    >>> result = dataset.annotate_rows(cnv_region = hl.is_defined(bed[dataset.locus]))
+
+    Add a row field `cnv_id` with the value given by the
+    fourth column of a BED file:
+
+    >>> bed = hl.import_bed('data/file2.bed')
+    >>> result = dataset.annotate_rows(cnv_id = bed[dataset.locus].target)
 
     Notes
     -----
@@ -424,7 +610,7 @@ def import_bed(path, reference_genome='default'):
           type :py:data:`.tstr` and `position` with type :py:data:`.tint32`.
 
     If the .bed file has four or more columns, then Hail will store the fourth
-    column as a field in the table:
+    column as a row field in the table:
 
         - *interval* (:class:`.tinterval`) - Row key. Genomic interval. Same schema as above.
         - *target* (:py:data:`.tstr`) - Fourth column of .bed file.
@@ -435,47 +621,68 @@ def import_bed(path, reference_genome='default'):
 
     Warning
     -------
-        UCSC BED files are 0-indexed and end-exclusive. The line "5  100  105"
-        will contain locus ``5:105`` but not ``5:100``. Details
-        `here <http://genome.ucsc.edu/blog/the-ucsc-genome-browser-coordinate-counting-systems/>`__.
+    UCSC BED files are 0-indexed and end-exclusive. The line "5  100  105"
+    will contain locus ``5:105`` but not ``5:100``. Details
+    `here <http://genome.ucsc.edu/blog/the-ucsc-genome-browser-coordinate-counting-systems/>`__.
 
     Parameters
     ----------
     path : :obj:`str`
         Path to .bed file.
-
     reference_genome : :obj:`str` or :class:`.ReferenceGenome`, optional
         Reference genome to use.
+    skip_invalid_intervals : :obj:`bool`
+        If ``True`` and `reference_genome` is not ``None``, skip lines with
+        intervals that are not consistent with the reference genome.
 
     Returns
     -------
     :class:`.Table`
         Interval-keyed table.
     """
-    # FIXME: once interval join support is added, add the following examples:
-    # Add the variant annotation ``va.cnvRegion: Boolean`` indicating inclusion in
-    # at least one interval of the three-column BED file `file1.bed`:
 
-    # >>> bed = hl.import_bed('data/file1.bed')
-    # >>> vds_result = vds.annotate_rows(cnvRegion = bed[vds.locus])
+    # UCSC BED spec defined here: https://genome.ucsc.edu/FAQ/FAQformat.html#format1
 
-    # Add a variant annotation **va.cnvRegion** (*String*) with value given by the
-    # fourth column of ``file2.bed``:
+    t = import_table(path, no_header=True, delimiter="\s+", impute=False,
+                     skip_blank_lines=True, types={'f0': tstr, 'f1': tint32,
+                                                   'f2': tint32, 'f3': tstr,
+                                                   'f4': tstr},
+                     comment=["""^browser.*""", """^track.*""",
+                              r"""^\w+=("[\w\d ]+"|\d+).*"""])
 
-    # >>> bed = hl.import_bed('data/file2.bed')
-    # >>> vds_result = vds.annotate_rows(cnvID = bed[vds.locus])
+    if t.row.dtype == tstruct(f0=tstr, f1=tint32, f2=tint32):
+        t = t.select(interval=locus_interval_expr(t['f0'],
+                                                  t['f1'] + 1,
+                                                  t['f2'],
+                                                  True,
+                                                  True,
+                                                  reference_genome,
+                                                  skip_invalid_intervals))
 
-    rg = reference_genome._jrep if reference_genome else None
+    elif len(t.row) >= 4 and tstruct(**dict([(n, typ) for n, typ in t.row.dtype._field_types.items()][:4])) == tstruct(f0=tstr, f1=tint32, f2=tint32, f3=tstr):
+        t = t.select(interval=locus_interval_expr(t['f0'],
+                                                  t['f1'] + 1,
+                                                  t['f2'],
+                                                  True,
+                                                  True,
+                                                  reference_genome,
+                                                  skip_invalid_intervals),
+                     target=t['f3'])
 
-    jt = Env.hail().table.Table.importBED(Env.hc()._jhc, path, joption(rg))
-    return Table(jt)
+    else:
+        raise FatalError("too few fields for BED file: expected 3 or more, but found {}".format(len(t.row)))
+
+    if skip_invalid_intervals and reference_genome:
+        t = t.filter(hl.is_defined(t.interval))
+
+    return t.key_by('interval')
 
 
 @typecheck(path=str,
            quant_pheno=bool,
            delimiter=str,
            missing=str)
-def import_fam(path, quant_pheno=False, delimiter=r'\\s+', missing='NA'):
+def import_fam(path, quant_pheno=False, delimiter=r'\\s+', missing='NA') -> Table:
     """Import a PLINK FAM file into a :class:`.Table`.
 
     Examples
@@ -496,7 +703,7 @@ def import_fam(path, quant_pheno=False, delimiter=r'\\s+', missing='NA'):
 
     In Hail, unlike PLINK, the user must *explicitly* distinguish between
     case-control and quantitative phenotypes. Importing a quantitative
-    phenotype without ``quant_pheno=True`` will return an error
+    phenotype with ``quant_pheno=False`` will return an error
     (unless all values happen to be `0`, `1`, `2`, or `-9`):
 
     The resulting :class:`.Table` will have fields, types, and values that are interpreted as missing.
@@ -513,6 +720,12 @@ def import_fam(path, quant_pheno=False, delimiter=r'\\s+', missing='NA'):
        non-numeric or the ``missing`` argument, if given.
      - *quant_pheno* (:py:data:`.tfloat64`) -- Quantitative phenotype (missing = "NA" or
        the ``missing`` argument, if given.
+
+    Warning
+    -------
+    Hail will interpret the value "-9" as a valid quantitative phenotype, which
+    differs from default PLINK behavior. Use ``missing='-9'`` to interpret this
+    value as missing.
 
     Parameters
     ----------
@@ -537,7 +750,7 @@ def import_fam(path, quant_pheno=False, delimiter=r'\\s+', missing='NA'):
 
 
 @typecheck(regex=str,
-           path=oneof(str, listof(str)),
+           path=oneof(str, sequenceof(str)),
            max_count=int)
 def grep(regex, path, max_count=100):
     """Searches given paths for all lines containing regex matches.
@@ -575,16 +788,26 @@ def grep(regex, path, max_count=100):
     Env.hc()._jhc.grep(regex, jindexed_seq_args(path), max_count)
 
 
-@typecheck(path=oneof(str, listof(str)),
+@typecheck(path=oneof(str, sequenceof(str)),
            sample_file=nullable(str),
-           entry_fields=listof(str),
-           min_partitions=nullable(int),
+           entry_fields=sequenceof(enumeration('GT', 'GP', 'dosage')),
+           n_partitions=nullable(int),
+           block_size=nullable(int),
            reference_genome=nullable(reference_genome_type),
            contig_recoding=nullable(dictof(str, str)),
-           tolerance=numeric)
-def import_bgen(path, entry_fields, sample_file=None,
-                min_partitions=None, reference_genome='default',
-                contig_recoding=None, tolerance=0.2):
+           skip_invalid_loci=bool,
+           _row_fields=sequenceof(enumeration('varid', 'rsid', 'file_row_idx')),
+           _variants_per_file=dictof(str, sequenceof(int)))
+def import_bgen(path,
+                entry_fields,
+                sample_file=None,
+                n_partitions=None,
+                block_size=None,
+                reference_genome='default',
+                contig_recoding=None,
+                skip_invalid_loci=False,
+                _row_fields=['varid', 'rsid'],
+                _variants_per_file={}) -> MatrixTable:
     """Import BGEN file(s) as a :class:`.MatrixTable`.
 
     Examples
@@ -609,15 +832,20 @@ def import_bgen(path, entry_fields, sample_file=None,
     Notes
     -----
 
-    Hail supports importing data from v1.1 and v1.2 of the
-    `BGEN file format <http://www.well.ox.ac.uk/~gav/bgen_format/bgen_format.html>`__.
-    For v1.2, genotypes must be **unphased** and **diploid**, and genotype
-    probability blocks must be compressed with zlib or uncompressed. If
-    `entry_fields` includes ``'dosage'``, all variants must be bi-allelic.
+    Hail supports importing data from v1.2 of the `BGEN file format
+    <http://www.well.ox.ac.uk/~gav/bgen_format/bgen_format.html>`__.
+    Genotypes must be **unphased** and **diploid**, genotype
+    probabilities must be stored with 8 bits, and genotype probability
+    blocks must be compressed with zlib or uncompressed. All variants
+    must be bi-allelic.
 
     Each BGEN file must have a corresponding index file, which can be generated
     with :func:`.index_bgen`. To load multiple files at the same time,
     use :ref:`Hadoop Glob Patterns <sec-hadoop-glob>`.
+
+    If n_partitions and block_size are both specified, block_size is
+    used.  If neither are specified, the default is a 128MB block
+    size.
 
     **Column Fields**
 
@@ -628,15 +856,20 @@ def import_bgen(path, entry_fields, sample_file=None,
 
     **Row Fields**
 
+    Between two and four row fields are created. The `locus` and `alleles` are
+    always included. `_row_fields` determines if `varid` and `rsid` are also
+    included. For best performance, only include fields necessary for your
+    analysis. NOTE: the `_row_fields` parameter is considered an experimental
+    feature and may be removed without warning.
+
     - `locus` (:class:`.tlocus` or :class:`.tstruct`) -- Row key. The chromosome
       and position. If `reference_genome` is defined, the type will be
       :class:`.tlocus` parameterized by `reference_genome`. Otherwise, the type
       will be a :class:`.tstruct` with two fields: `contig` with type
       :py:data:`.tstr` and `position` with type :py:data:`.tint32`.
-    - `alleles` (:class:`.tarray` of :py:data:`.tstr`) -- Row key. An array
-      containing the alleles of the variant. The reference allele (A allele in
-      the v1.1 spec and first allele in the v1.2 spec) is the first element in
-      the array.
+    - `alleles` (:class:`.tarray` of :py:data:`.tstr`) -- Row key. An
+      array containing the alleles of the variant. The reference
+      allele is the first element in the array.
     - `varid` (:py:data:`.tstr`) -- The variant identifier. The third field in
       each variant identifying block.
     - `rsid` (:py:data:`.tstr`) -- The rsID for the variant. The fifth field in
@@ -644,11 +877,12 @@ def import_bgen(path, entry_fields, sample_file=None,
 
     **Entry Fields**
 
-    Up to three entry fields are created, as determined by `entry_fields` which
-    must be non-empty. For best performance, include precisely those fields
-    required for your analysis. For BGEN v1.1 files, all entry fields are set
-    to missing if the sum of the genotype probabilities is a distance greater
-    than `tolerance` from 1.0.
+    Up to three entry fields are created, as determined by
+    `entry_fields`.  For best performance, include precisely those
+    fields required for your analysis. It is also possible to pass an
+    empty tuple or list for `entry_fields`, which can greatly
+    accelerate processing speed if your workflow does not use the
+    genotype data.
 
     - `GT` (:py:data:`.tcall`) -- The hard call corresponding to the genotype with
       the greatest probability.
@@ -656,10 +890,6 @@ def import_bgen(path, entry_fields, sample_file=None,
       as defined by the BGEN file spec. For bi-allelic variants, the array has
       three elements giving the probabilities of homozygous reference,
       heterozygous, and homozygous alternate genotype, in that order.
-      For v1.2 files, no modifications are made to these genotype
-      probabilities. For v1.1 files, the probabilities are normalized to
-      sum to 1.0. For example, ``[0.98, 0.0, 0.0]`` is normalized to
-      ``[1.0, 0.0, 0.0]``.
     - `dosage` (:py:data:`.tfloat64`) -- The expected value of the number of
       alternate alleles, given by the probability of heterozygous genotype plus
       twice the probability of homozygous alternate genotype. All variants must
@@ -675,54 +905,62 @@ def import_bgen(path, entry_fields, sample_file=None,
     sample_file : :obj:`str`, optional
         Sample file to read the sample ids from. If specified, the number of
         samples in the file must match the number in the BGEN file(s).
-    min_partitions : :obj:`int`, optional
+    n_partitions : :obj:`int`, optional
         Number of partitions.
+    block_size : :obj:`int`, optional
+        Block size, in MB.
     reference_genome : :obj:`str` or :class:`.ReferenceGenome`, optional
         Reference genome to use.
     contig_recoding : :obj:`dict` of :obj:`str` to :obj:`str`, optional
         Dict of old contig name to new contig name. The new contig name must be
         in the reference genome given by `reference_genome`.
-    tolerance : :obj:`float`
-        If the sum of the probabilities for an entry differ from 1.0 by more
-        than the tolerance, set the entry to missing. Only applicable to v1.1.
+    skip_invalid_loci : :obj:`bool`
+        If ``True``, skip loci that are not consistent with `reference_genome`.
+    _row_fields : :obj:`list` of :obj:`str`
+        List of non-key row fields to create.
+        Options: ``'varid'``, ``'rsid'``
 
     Returns
     -------
     :class:`.MatrixTable`
+
     """
 
-    rg = reference_genome._jrep if reference_genome else None
+    if n_partitions is None and block_size is None:
+        block_size = 128
 
-    if not entry_fields:
-        raise FatalError("import_bgen: entry_fields must be non-empty."
-                         "\n    Options: 'GT', 'GP', 'dosage'.")
+    rg = reference_genome.name if reference_genome else None
 
     entry_set = set(entry_fields)
-    bad_entry_fields = list(entry_set - {'GT', 'GP', 'dosage'})
-
-    if bad_entry_fields:
-        word = plural('value', len(bad_entry_fields))
-        raise FatalError("import_bgen: found invalid {} {} in entry_fields."
-                         "\n    Options: 'GT', 'GP', 'dosage'.".format(word, bad_entry_fields))
+    row_set = set(_row_fields)
 
     if contig_recoding:
         contig_recoding = tdict(tstr, tstr)._convert_to_j(contig_recoding)
 
     jmt = Env.hc()._jhc.importBgens(jindexed_seq_args(path), joption(sample_file),
                                     'GT' in entry_set, 'GP' in entry_set, 'dosage' in entry_set,
-                                    joption(min_partitions), joption(rg), joption(contig_recoding), tolerance)
+                                    'varid' in row_set, 'rsid' in row_set, 'file_row_idx' in row_set,
+                                    joption(n_partitions), joption(block_size), joption(rg), contig_recoding,
+                                    skip_invalid_loci, tdict(tstr, tarray(tint32))._convert_to_j(_variants_per_file))
     return MatrixTable(jmt)
 
 
-@typecheck(path=oneof(str, listof(str)),
+@typecheck(path=oneof(str, sequenceof(str)),
            sample_file=nullable(str),
            tolerance=numeric,
            min_partitions=nullable(int),
            chromosome=nullable(str),
            reference_genome=nullable(reference_genome_type),
-           contig_recoding=nullable(dictof(str, str)))
-def import_gen(path, sample_file=None, tolerance=0.2, min_partitions=None, chromosome=None,
-               reference_genome='default', contig_recoding=None):
+           contig_recoding=nullable(dictof(str, str)),
+           skip_invalid_loci=bool)
+def import_gen(path,
+               sample_file=None,
+               tolerance=0.2,
+               min_partitions=None,
+               chromosome=None,
+               reference_genome='default',
+               contig_recoding=None,
+               skip_invalid_loci=False) -> MatrixTable:
     """
     Import GEN file(s) as a :class:`.MatrixTable`.
 
@@ -798,6 +1036,8 @@ def import_gen(path, sample_file=None, tolerance=0.2, min_partitions=None, chrom
     contig_recoding : :obj:`dict` of :obj:`str` to :obj:`str`, optional
         Dict of old contig name to new contig name. The new contig name must be
         in the reference genome given by `reference_genome`.
+    skip_invalid_loci : :obj:`bool`
+        If ``True``, skip loci that are not consistent with `reference_genome`.
 
     Returns
     -------
@@ -810,22 +1050,35 @@ def import_gen(path, sample_file=None, tolerance=0.2, min_partitions=None, chrom
         contig_recoding = tdict(tstr, tstr)._convert_to_j(contig_recoding)
 
     jmt = Env.hc()._jhc.importGens(jindexed_seq_args(path), sample_file, joption(chromosome), joption(min_partitions),
-                                   tolerance, joption(rg), joption(contig_recoding))
+                                   tolerance, joption(rg), joption(contig_recoding),
+                                   skip_invalid_loci)
     return MatrixTable(jmt)
 
 
-@typecheck(paths=oneof(str, listof(str)),
-           key=oneof(str, listof(str)),
+@typecheck(paths=oneof(str, sequenceof(str)),
+           key=table_key_type,
            min_partitions=nullable(int),
            impute=bool,
            no_header=bool,
-           comment=nullable(str),
+           comment=oneof(str, sequenceof(str)),
            delimiter=str,
            missing=str,
            types=dictof(str, hail_type),
-           quote=nullable(char))
-def import_table(paths, key=[], min_partitions=None, impute=False, no_header=False,
-                 comment=None, delimiter="\t", missing="NA", types={}, quote=None):
+           quote=nullable(char),
+           skip_blank_lines=bool,
+           force_bgz=bool)
+def import_table(paths,
+                 key=None,
+                 min_partitions=None,
+                 impute=False,
+                 no_header=False,
+                 comment=(),
+                 delimiter="\t",
+                 missing="NA",
+                 types={},
+                 quote=None,
+                 skip_blank_lines=False,
+                 force_bgz=False) -> Table:
     """Import delimited text file (text table) as :class:`.Table`.
 
     The resulting :class:`.Table` will have no key fields. Use
@@ -923,14 +1176,21 @@ def import_table(paths, key=[], min_partitions=None, impute=False, no_header=Fal
         Use ``delimiter='\\s+'`` to specify whitespace delimited files.
 
     If set, the `comment` parameter causes Hail to skip any line that starts
-    with the given string. For example, passing ``comment='#'`` will skip any
-    line beginning in a pound sign.
+    with the given string(s). For example, passing ``comment='#'`` will skip any
+    line beginning in a pound sign. If the string given is a single character,
+    Hail will skip any line beginning with the character. Otherwise if the
+    length of the string is greater than 1, Hail will interpret the string as a
+    regex and will filter out lines matching the regex. For example, passing
+    ``comment=['#', '^track.*']`` will filter out lines beginning in a pound sign
+    and any lines that match the regex ``'^track.*'``.
 
     The `missing` parameter defines the representation of missing data in the table.
 
     .. note::
 
-        The `comment` and `missing` parameters are **NOT** regexes.
+        The `missing` parameter is **NOT** a regex. The `comment` parameter is
+        treated as a regex **ONLY** if the length of the string is greater than
+        1 (not a single character).
 
     The `no_header` parameter indicates that the file has no header line. If
     this option is passed, then the field names will be `f0`, `f1`,
@@ -948,51 +1208,70 @@ def import_table(paths, key=[], min_partitions=None, impute=False, no_header=Fal
     Parameters
     ----------
 
-    paths: :obj:`str` or :obj:`list` of :obj:`str`
+    paths : :obj:`str` or :obj:`list` of :obj:`str`
         Files to import.
-    key: :obj:`str` or :obj:`list` of :obj:`str`
+    key : :obj:`str` or :obj:`list` of :obj:`str`
         Key fields(s).
-    min_partitions: :obj:`int` or :obj:`None`
+    min_partitions : :obj:`int` or :obj:`None`
         Minimum number of partitions.
-    no_header: :obj:`bool`
+    no_header : :obj:`bool`
         If ``True```, assume the file has no header and name the N fields `f0`,
         `f1`, ... `fN` (0-indexed).
-    impute: :obj:`bool`
+    impute : :obj:`bool`
         If ``True``, Impute field types from the file.
-    comment: :obj:`str` or :obj:`None`
-        Skip lines beginning with the given string.
-    delimiter: :obj:`str`
+    comment : :obj:`str` or :obj:`list` of :obj:`str`
+        Skip lines beginning with the given string if the string is a single
+        character. Otherwise, skip lines that match the regex specified.
+    delimiter : :obj:`str`
         Field delimiter regex.
-    missing: :obj:`str`
+    missing : :obj:`str`
         Identifier to be treated as missing.
-    types: :obj:`dict` mapping :obj:`str` to :class:`.HailType`
+    types : :obj:`dict` mapping :obj:`str` to :class:`.HailType`
         Dictionary defining field types.
-    quote: :obj:`str` or :obj:`None`
+    quote : :obj:`str` or :obj:`None`
         Quote character.
+    skip_blank_lines : :obj:`bool`
+        If ``True``, ignore empty lines. Otherwise, throw an error if an empty
+        line is found.
+    force_bgz : :obj:`bool`
+        If ``True``, load files as blocked gzip files, assuming
+        that they were actually compressed using the BGZ codec. This option is
+        useful when the file extension is not ``'.bgz'``, but the file is
+        blocked gzip, so that the file can be read in parallel and not on a
+        single node.
 
     Returns
     -------
     :class:`.Table`
     """
-    key = wrap_to_list(key)
     paths = wrap_to_list(paths)
     jtypes = {k: v._jtype for k, v in types.items()}
+    comment = wrap_to_list(comment)
 
-    jt = Env.hc()._jhc.importTable(paths, key, min_partitions, jtypes, comment, delimiter, missing,
-                                   no_header, impute, quote)
+    jt = Env.hc()._jhc.importTable(paths, key, min_partitions, jtypes, comment,
+                                   delimiter, missing, no_header, impute, quote,
+                                   skip_blank_lines, force_bgz)
     return Table(jt)
 
 
-@typecheck(paths=oneof(str, listof(str)),
+@typecheck(paths=oneof(str, sequenceof(str)),
            row_fields=dictof(str, hail_type),
-           row_key=oneof(str, listof(str)),
+           row_key=oneof(str, sequenceof(str)),
            entry_type=enumeration(tint32, tint64, tfloat32, tfloat64, tstr),
            missing=str,
            min_partitions=nullable(int),
            no_header=bool,
-           force_bgz=bool)
-def import_matrix_table(paths, row_fields={}, row_key=[], entry_type=tint32, missing="NA", min_partitions=None,
-                        no_header=False, force_bgz=False):
+           force_bgz=bool,
+           sep=str)
+def import_matrix_table(paths,
+                        row_fields={},
+                        row_key=[],
+                        entry_type=tint32,
+                        missing="NA",
+                        min_partitions=None,
+                        no_header=False,
+                        force_bgz=False,
+                        sep='\t') -> MatrixTable:
     """
     Import tab-delimited file(s) as a :class:`.MatrixTable`.
 
@@ -1150,8 +1429,11 @@ def import_matrix_table(paths, row_fields={}, row_key=[], entry_type=tint32, mis
         raise FatalError("""import_matrix_table expects entry types to be one of: 
         'int32', 'int64', 'float32', 'float64', 'str': found '{}'""".format(entry_type))
 
+    if len(sep) != 1:
+        raise FatalError('sep must be a single character')
+
     jmt = Env.hc()._jhc.importMatrix(paths, jrow_fields, row_key, entry_type._jtype, missing, joption(min_partitions),
-                                     no_header, force_bgz)
+                                     no_header, force_bgz, sep)
     return MatrixTable(jmt)
 
 
@@ -1164,7 +1446,8 @@ def import_matrix_table(paths, row_fields={}, row_key=[], entry_type=tint32, mis
            quant_pheno=bool,
            a2_reference=bool,
            reference_genome=nullable(reference_genome_type),
-           contig_recoding=nullable(dictof(str, str)))
+           contig_recoding=nullable(dictof(str, str)),
+           skip_invalid_loci=bool)
 def import_plink(bed, bim, fam,
                  min_partitions=None,
                  delimiter='\\\\s+',
@@ -1175,7 +1458,8 @@ def import_plink(bed, bim, fam,
                  contig_recoding={'23': 'X',
                                   '24': 'Y',
                                   '25': 'X',
-                                  '26': 'MT'}):
+                                  '26': 'MT'},
+                 skip_invalid_loci=False) -> MatrixTable:
     """Import a PLINK dataset (BED, BIM, FAM) as a :class:`.MatrixTable`.
 
     Examples
@@ -1191,8 +1475,6 @@ def import_plink(bed, bim, fam,
     Only binary SNP-major mode files can be read into Hail. To convert your
     file from individual-major mode to SNP-major mode, use PLINK to read in
     your fileset and use the ``--make-bed`` option.
-
-    Hail ignores the centimorgan position (Column 3 in BIM file).
 
     Hail uses the individual ID (column 2 in FAM file) as the sample id (`s`).
     The individual IDs must be unique.
@@ -1211,6 +1493,8 @@ def import_plink(bed, bim, fam,
           array containing the alleles of the variant. The reference allele (A2
           if `a2_reference` is ``True``) is the first element in the array.
         * `rsid` (:py:data:`.tstr`) -- Column 2 in the BIM file.
+        * `cm_position` (:py:data:`.tfloat64`) -- Column 3 in the BIM file,
+          the position in centimorgans.
 
     * Column fields:
 
@@ -1236,6 +1520,12 @@ def import_plink(bed, bim, fam,
 
         * `GT` (:py:data:`.tcall`) -- Genotype call (diploid, unphased).
 
+    Warning
+    -------
+    Hail will interpret the value "-9" as a valid quantitative phenotype, which
+    differs from default PLINK behavior. Use ``missing='-9'`` to interpret this
+    value as missing.
+
     Parameters
     ----------
     bed : :obj:`str`
@@ -1259,10 +1549,10 @@ def import_plink(bed, bim, fam,
         FAM file field delimiter regex.
 
     quant_pheno : :obj:`bool`
-        If true, FAM phenotype is interpreted as quantitative.
+        If ``True``, FAM phenotype is interpreted as quantitative.
 
     a2_reference : :obj:`bool`
-        If True, A2 is treated as the reference allele. If False, A1 is treated
+        If ``True``, A2 is treated as the reference allele. If False, A1 is treated
         as the reference allele.
 
     reference_genome : :obj:`str` or :class:`.ReferenceGenome`, optional
@@ -1271,6 +1561,9 @@ def import_plink(bed, bim, fam,
     contig_recoding : :obj:`dict` of :obj:`str` to :obj:`str`, optional
         Dict of old contig name to new contig name. The new contig name must be
         in the reference genome given by ``reference_genome``.
+
+    skip_invalid_loci : :obj:`bool`
+        If ``True``, skip loci that are not consistent with `reference_genome`.
 
     Returns
     -------
@@ -1286,15 +1579,16 @@ def import_plink(bed, bim, fam,
     jmt = Env.hc()._jhc.importPlink(bed, bim, fam, joption(min_partitions),
                                     delimiter, missing, quant_pheno,
                                     a2_reference, joption(rg),
-                                    joption(contig_recoding))
+                                    joption(contig_recoding),
+                                    skip_invalid_loci)
 
     return MatrixTable(jmt)
 
 
-@typecheck(path=oneof(str, listof(str)),
+@typecheck(path=oneof(str, sequenceof(str)),
            _drop_cols=bool,
            _drop_rows=bool)
-def read_matrix_table(path, _drop_cols=False, _drop_rows=False):
+def read_matrix_table(path, _drop_cols=False, _drop_rows=False) -> MatrixTable:
     """Read in a :class:`.MatrixTable` written with written with :meth:`.MatrixTable.write`
 
     Parameters
@@ -1367,17 +1661,28 @@ def get_vcf_metadata(path):
     return typ._convert_to_py(Env.hc()._jhc.parseVCFMetadata(path))
 
 
-@typecheck(path=oneof(str, listof(str)),
+@typecheck(path=oneof(str, sequenceof(str)),
            force=bool,
            force_bgz=bool,
            header_file=nullable(str),
            min_partitions=nullable(int),
            drop_samples=bool,
-           call_fields=oneof(str, listof(str)),
+           call_fields=oneof(str, sequenceof(str)),
            reference_genome=nullable(reference_genome_type),
-           contig_recoding=nullable(dictof(str, str)))
-def import_vcf(path, force=False, force_bgz=False, header_file=None, min_partitions=None,
-               drop_samples=False, call_fields=[], reference_genome='default', contig_recoding=None):
+           contig_recoding=nullable(dictof(str, str)),
+           array_elements_required=bool,
+           skip_invalid_loci=bool)
+def import_vcf(path,
+               force=False,
+               force_bgz=False,
+               header_file=None,
+               min_partitions=None,
+               drop_samples=False,
+               call_fields=[],
+               reference_genome='default',
+               contig_recoding=None,
+               array_elements_required=True,
+               skip_invalid_loci=False) -> MatrixTable:
     """Import VCF file(s) as a :class:`.MatrixTable`.
 
     Examples
@@ -1484,25 +1789,44 @@ def import_vcf(path, force=False, force_bgz=False, header_file=None, min_partiti
         Mapping from contig name in VCF to contig name in loaded dataset.
         All contigs must be present in the `reference_genome`, so this is
         useful for mapping differently-formatted data onto known references.
+    array_elements_required : :obj:`bool`
+        If ``True``, all elements in an array field must be present. Set this
+        parameter to ``False`` for Hail to allow array fields with missing
+        values such as ``1,.,5``. In this case, the second element will be
+        missing. However, in the case of a single missing element ``.``, the
+        entire field will be missing and **not** an array with one missing 
+        element.
+    skip_invalid_loci : :obj:`bool`
+        If ``True``, skip loci that are not consistent with `reference_genome`.
 
     Returns
     -------
     :class:`.MatrixTable`
     """
 
-    rg = reference_genome._jrep if reference_genome else None
+    rg = reference_genome.name if reference_genome else None
 
-    if contig_recoding:
-        contig_recoding = tdict(tstr, tstr)._convert_to_j(contig_recoding)
+    global _cached_loadvcf
+    if _cached_loadvcf is None:
+        _cached_loadvcf = Env.hail().io.vcf.LoadVCF
 
-    jmt = Env.hc()._jhc.importVCFs(jindexed_seq_args(path), force, force_bgz, joption(header_file),
-                                   joption(min_partitions), drop_samples, jset_args(call_fields),
-                                   joption(rg), joption(contig_recoding))
-
+    jmt = _cached_loadvcf.pyApply(
+        wrap_to_list(path),
+        wrap_to_list(call_fields),
+        header_file,
+        joption(min_partitions),
+        drop_samples,
+        rg,
+        contig_recoding,
+        array_elements_required,
+        skip_invalid_loci,
+        force_bgz,
+        force
+    )
     return MatrixTable(jmt)
 
 
-@typecheck(path=oneof(str, listof(str)))
+@typecheck(path=oneof(str, sequenceof(str)))
 def index_bgen(path):
     """Index BGEN files as required by :func:`.import_bgen`.
 
@@ -1530,7 +1854,7 @@ def index_bgen(path):
 
 
 @typecheck(path=str)
-def read_table(path):
+def read_table(path) -> Table:
     """Read in a :class:`.Table` written with :meth:`.Table.write`.
 
     Parameters
@@ -1543,3 +1867,19 @@ def read_table(path):
     :class:`.Table`
     """
     return Table(Env.hc()._jhc.readTable(path))
+
+@typecheck(t=Table,
+           host=str,
+           port=int,
+           index=str,
+           index_type=str,
+           block_size=int,
+           config=nullable(dictof(str, str)),
+           verbose=bool)
+def export_elasticsearch(t, host, port, index, index_type, block_size, config=None, verbose=True):
+    """Export a :class:`.Table` to Elasticsearch.
+
+    .. warning::
+        :func:`.export_elasticsearch` is EXPERIMENTAL.
+    """
+    Env.hail().io.ElasticsearchConnector.export(t._jt, host, port, index, index_type, block_size, config, verbose)

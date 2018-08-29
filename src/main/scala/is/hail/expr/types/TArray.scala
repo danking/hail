@@ -2,6 +2,7 @@ package is.hail.expr.types
 
 import is.hail.annotations.{UnsafeUtils, _}
 import is.hail.check.Gen
+import is.hail.expr.ir.EmitMethodBuilder
 import is.hail.utils._
 import org.json4s.jackson.JsonMethods
 
@@ -57,26 +58,10 @@ final case class TArray(elementType: Type, override val required: Boolean = fals
   val ordering: ExtendedOrdering =
     ExtendedOrdering.iterableOrdering(elementType.ordering)
 
-  override def desc: String =
-    """
-    An ``Array`` is a collection of items that all have the same data type (ex: Int, String) and are indexed. Arrays can be constructed by specifying ``[item1, item2, ...]`` and they are 0-indexed.
-
-    An example of constructing an array and accessing an element is:
-
-    .. code-block:: text
-        :emphasize-lines: 2
-
-        let a = [1, 10, 3, 7] in a[1]
-        result: 10
-
-    They can also be nested such as Array[Array[Int]]:
-
-    .. code-block:: text
-        :emphasize-lines: 2
-
-        let a = [[1, 2, 3], [4, 5], [], [6, 7]] in a[1]
-        result: [4, 5]
-    """
+  def codeOrdering(mb: EmitMethodBuilder, other: Type): CodeOrdering = {
+    assert(this isOfType other)
+    CodeOrdering.iterableOrdering(this, other.asInstanceOf[TArray], mb)
+  }
 
   override def scalaClassTag: ClassTag[IndexedSeq[AnyRef]] = classTag[IndexedSeq[AnyRef]]
 }
