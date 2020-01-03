@@ -1,1 +1,8 @@
 rootProject.name='hail'
+
+buildCache {
+    remote(HttpBuildCache) {
+        url = 'http://localhost:5000/'
+        push = true
+    }
+}
