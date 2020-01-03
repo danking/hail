@@ -49,7 +49,7 @@ spec:
           ports:
            - name: port
              containerPort: 5071
-        - name: gradle_build_cache_nginx
+        - name: gradle-build-cache-nginx
           image: {{ gradle_build_cache_nginx_image.image }}
           resources:
             requests:
