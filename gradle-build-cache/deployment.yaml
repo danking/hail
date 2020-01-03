@@ -50,7 +50,7 @@ spec:
            - name: port
              containerPort: 5071
         - name: gradle_build_cache_nginx
-          image: {{ gradle_build_cache_nginx_image.name }}
+          image: {{ gradle_build_cache_nginx_image.image }}
           resources:
             requests:
               memory: "100Mi"
