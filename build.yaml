@@ -1305,6 +1305,8 @@ steps:
    dockerFile: gradle-build-cache/Dockerfile.nginx
    contextPath: gradle-build-cache
    publishAs: gradle_build_cache_nginx_image
+   dependsOn:
+     - service_base_image
  - kind: deploy
    name: deploy_gradle_build_cache
    namespace:
