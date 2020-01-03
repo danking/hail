@@ -50,13 +50,13 @@ ifdef HAIL_COMPILE_NATIVES
 $(SHADOW_JAR): native-lib-prebuilt
 endif
 $(SHADOW_JAR): $(SCALA_BUILD_INFO) $(JAR_SOURCES)
-	./gradlew shadowJar $(GRADLE_ARGS)
+	./gradlew --build-cache shadowJar $(GRADLE_ARGS)
 
 ifdef HAIL_COMPILE_NATIVES
 $(SHADOW_TEST_JAR): native-lib-prebuilt
 endif
 $(SHADOW_TEST_JAR): $(SCALA_BUILD_INFO) $(JAR_SOURCES) $(JAR_TEST_SOURCES)
-	./gradlew shadowTestJar $(GRADLE_ARGS)
+	./gradlew --build-cache shadowTestJar $(GRADLE_ARGS)
 
 jars: $(SHADOW_JAR) $(SHADOW_TEST_JAR)
 
