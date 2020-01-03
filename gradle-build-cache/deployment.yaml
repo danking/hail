@@ -30,7 +30,7 @@ spec:
            optional: false
            secretName: deploy-config
       containers:
-        - name: gradle-build-cache
+        - name: cache
           image: gradle/build-cache-node:9.0
           resources:
             requests:
@@ -49,7 +49,7 @@ spec:
           ports:
            - name: port
              containerPort: 5071
-        - name: gradle-build-cache-nginx
+        - name: nginx
           image: {{ gradle_build_cache_nginx_image.image }}
           resources:
             requests:
