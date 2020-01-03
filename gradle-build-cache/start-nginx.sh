@@ -4,3 +4,5 @@ base_path=$(python3 -c 'from hailtop.config import get_deploy_config; print(get_
 
 sed -e "s,@base_path@,${base_path:-/},g" \
     < /nginx.conf.in > /etc/nginx/conf.d/gradle-build-cache.conf
+
+nginx -g "daemon off;"
