@@ -11,4 +11,4 @@ RUN ln -sf /dev/stderr /var/log/nginx/error.log
 ADD nginx.conf.in /
 ADD start-nginx.sh /
 
-CMD ["/start-nginx.sh"]
+CMD ["/bin/bash", "start-nginx.sh"]
