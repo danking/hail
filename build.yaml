@@ -590,8 +590,8 @@ steps:
    image:
      valueFrom: hail_run_image.image
    resources:
-     memory: "7.5G"
-     cpu: "2"
+     memory: "15G"
+     cpu: "4"
    script: |
      set -ex
      cd /io
@@ -602,7 +602,7 @@ steps:
      export HAIL_DOCTEST_DATA_DIR=./data
      export PYSPARK_SUBMIT_ARGS="--conf spark.driver.extraClassPath=./hail.jar --conf spark.executor.extraClassPath=./hail.jar pyspark-shell"
      export PYTHONPATH=${PYTHONPATH:+${PYTHONPATH}:}./hail.zip
-     python3 -m pytest --instafail test --durations=50
+     python3 -m pytest -n 2 auto --instafail test --durations=50
    inputs:
      - from: /hail.jar
        to: /io/hail.jar
@@ -647,7 +647,7 @@ steps:
        < python/hail/docs/change_log.md \
        | pandoc -o python/hail/docs/change_log.rst
      make -C www
-     make -C python/hail/docs BUILDDIR=_build clean html
+     make -C python/hail/docs BUILDDIR=_build SPHINXOPTS='-j 4' clean html
      mkdir -p www/docs
      rm -f www/*.md
      mv python/hail/docs/_build/html www/docs/0.2
