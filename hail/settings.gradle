@@ -2,7 +2,7 @@ rootProject.name='hail'
 
 buildCache {
     remote(HttpBuildCache) {
-        url = 'http://internal.hail/dking/gradle-build-cache/'
+        url = 'http://internal.hail/dking/gradle-build-cache/cache'
         push = true
     }
 }
