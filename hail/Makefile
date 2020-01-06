@@ -65,7 +65,7 @@ ifdef HAIL_COMPILE_NATIVES
 jvm-test: native-lib-prebuilt
 endif
 jvm-test: $(SCALA_BUILD_INFO) $(JAR_SOURCES) $(JAR_TEST_SOURCES)
-	+./pgradletest $(GRADLE_ARGS) $(GRADLE_TEST_ARGS)
+	+./pgradle test $(GRADLE_ARGS) $(GRADLE_TEST_ARGS)
 
 src/main/resources/build-info.properties: env/REVISION env/SHORT_REVISION env/BRANCH env/URL
 src/main/resources/build-info.properties: env/SPARK_VERSION env/HAIL_PIP_VERSION

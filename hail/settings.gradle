@@ -1,8 +1,16 @@
 rootProject.name='hail'
 
+if (System.getenv().containsKey("HAIL_CI")) {
+  cacheUrl = 'http://hail/cache/'
+  cachePush = true
+} else {
+  cacheUrl = 'http://gradle-build-cache.hail.is/cache/'
+  cachePush = false
+}
+
 buildCache {
     remote(HttpBuildCache) {
-        url = 'http://internal.hail/dking/gradle-build-cache/cache/'
-        push = true
+        url = cacheUrl
+        push = cachePush
     }
 }
