@@ -74,7 +74,7 @@ src/main/resources/build-info.properties: Makefile
 	echo 'user=$(USER)' >> $@
 	echo 'revision=$(REVISION)' >> $@
 	echo 'branch=$(BRANCH)' >> $@
-	echo 'date=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)' >> $@
+	# echo 'date=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)' >> $@
 	echo 'url=$(URL)' >> $@
 	echo 'sparkVersion=$(SPARK_VERSION)' >> $@
 	echo 'hailPipVersion=$(HAIL_PIP_VERSION)' >> $@
