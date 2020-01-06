@@ -44,19 +44,19 @@ WHEEL := build/deploy/dist/hail-$(HAIL_PIP_VERSION)-py3-none-any.whl
 .PHONY: shadowJar
 shadowJar: $(SHADOW_JAR)
 
-GRADLE_ARGS += -Dspark.version=$(SPARK_VERSION) -Dpy4j.version$(PY4J_VERSION)
+GRADLE_ARGS += -Dspark.version=$(SPARK_VERSION) -Dpy4j.version$(PY4J_VERSION) --build-cache -Dorg.gradle.caching.debug=true
 
 ifdef HAIL_COMPILE_NATIVES
 $(SHADOW_JAR): native-lib-prebuilt
 endif
 $(SHADOW_JAR): $(SCALA_BUILD_INFO) $(JAR_SOURCES)
-	./gradlew --build-cache shadowJar $(GRADLE_ARGS)
+	./gradlew shadowJar $(GRADLE_ARGS)
 
 ifdef HAIL_COMPILE_NATIVES
 $(SHADOW_TEST_JAR): native-lib-prebuilt
 endif
 $(SHADOW_TEST_JAR): $(SCALA_BUILD_INFO) $(JAR_SOURCES) $(JAR_TEST_SOURCES)
-	./gradlew --build-cache shadowTestJar $(GRADLE_ARGS)
+	./gradlew shadowTestJar $(GRADLE_ARGS)
 
 jars: $(SHADOW_JAR) $(SHADOW_TEST_JAR)
 
@@ -65,7 +65,7 @@ ifdef HAIL_COMPILE_NATIVES
 jvm-test: native-lib-prebuilt
 endif
 jvm-test: $(SCALA_BUILD_INFO) $(JAR_SOURCES) $(JAR_TEST_SOURCES)
-	+./pgradle test $(GRADLE_ARGS) $(GRADLE_TEST_ARGS)
+	+./pgradletest $(GRADLE_ARGS) $(GRADLE_TEST_ARGS)
 
 src/main/resources/build-info.properties: env/REVISION env/SHORT_REVISION env/BRANCH env/URL
 src/main/resources/build-info.properties: env/SPARK_VERSION env/HAIL_PIP_VERSION
