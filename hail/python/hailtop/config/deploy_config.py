@@ -94,7 +94,7 @@ class DeployConfig:
         async def get_healthcheck(request):  # pylint: disable=unused-argument,unused-variable
             return web.Response()
 
-        root_app = web.Application()
+        root_app = web.Application(client_max_size=app.client_max_size)
         root_app.add_routes(root_routes)
         root_app.add_subapp(base_path, app)
 

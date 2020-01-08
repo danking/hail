@@ -439,10 +439,12 @@ class BatchBuilder:
 
         b.append(ord(']'))
 
-        await self._client._post(
+        result = await self._client._post(
             f'/api/v1alpha/batches/{batch_id}/jobs/create',
             data=aiohttp.BytesPayload(
                 b, content_type='application/json', encoding='utf-8'))
+        if 400 <= result.status:
+            raise ValueError('wtf ' + await result.text())
 
     async def submit(self):
         if self._submitted:
@@ -506,8 +508,7 @@ class BatchClient:
         self.url = deploy_config.base_url('batch')
 
         if session is None:
-            session = aiohttp.ClientSession(raise_for_status=True,
-                                            timeout=aiohttp.ClientTimeout(total=60))
+            session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60))
         self._session = session
 
         userinfo = await async_get_userinfo(deploy_config)
