@@ -42,16 +42,15 @@ BEGIN
     COMMIT;
     SELECT 0 as rc;
   ELSEIF cur_batch_closed = 0 THEN
-    SELECT SUM(n_jobs) INTO staging_n_jobs,
-           SUM(n_ready_jobs) INTO staging_n_ready_jobs,
-           SUM(ready_cores_mcpu) INTO staging_ready_cores_mcpu
+    SELECT SUM(n_jobs), SUM(n_ready_jobs), SUM(ready_cores_mcpu)
+    INTO staging_n_jobs, staging_n_ready_jobs, staging_ready_cores_mcpu
     FROM batch_staging
     WHERE batch_id = in_batch_id;
 
     IF staging_n_jobs = expected_n_jobs THEN
       UPDATE batches SET closed = 1 WHERE id = in_batch_id;
       UPDATE user_resources
-      SET n_ready_jobs = n_ready_jobs + staging_n_ready_jobs
+      SET n_ready_jobs = n_ready_jobs + staging_n_ready_jobs,
           ready_cores_mcpu = ready_cores_mcpu + staging_ready_cores_mcpu
       WHERE user = in_user;
       UPDATE ready_cores
