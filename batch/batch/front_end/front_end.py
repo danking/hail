@@ -567,7 +567,7 @@ INSERT INTO `batch_attributes` (batch_id, `key`, `value`)
 VALUES (%s, %s, %s)
 ''',
                 [(id, k, v) for k, v in attributes.items()])
-        await tx.execute_many('CALL insert_batch_staging_tokens(%s)', id)
+        await tx.execute_many('CALL insert_batch_staging_tokens(%s)', (id,))
 
     return web.json_response({'id': id})
 
