@@ -31,7 +31,9 @@ CREATE PROCEDURE close_batch(
 BEGIN
   DECLARE cur_batch_closed BOOLEAN;
   DECLARE expected_n_jobs INT;
-  DECLARE actual_n_jobs INT;
+  DECLARE staging_n_jobs INT;
+  DECLARE actual_n_ready_jobs INT;
+  DECLARE actual_ready_cores_mcpu INT;
 
   START TRANSACTION;
 
