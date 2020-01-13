@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS `batch_staging` (
   FOREIGN KEY (`batch_id`) REFERENCES batches(id) ON DELETE CASCADE
 ) ENGINE = InnoDB;
 
+DELIMITER $$
+
 DROP PROCEDURE IF EXISTS insert_batch_staging_tokens;
 CREATE PROCEDURE insert_batch_staging_tokens(
   IN in_batch_id INT
