@@ -783,6 +783,8 @@ steps:
       script: /io/sql/insert_globals.py
     - name: create-billing-projects
       script: /io/sql/create-billing-projects.sql
+    - name: tokenized-insert
+      script: /io/sql/tokenized-insert.sql
    inputs:
     - from: /repo/batch/sql
       to: /io/

@@ -8,6 +8,7 @@ from aiohttp import web
 import aiohttp_session
 import cerberus
 import prometheus_client as pc
+import random
 from prometheus_async.aio import time as prom_async_time
 from prometheus_async.aio.web import server_stats
 import google.oauth2.service_account
@@ -483,6 +484,7 @@ WHERE user = %s AND id = %s AND NOT deleted;
                         job_attributes_args.append(
                             (batch_id, job_id, k, v))
 
+        rand_token = random.randint(0, 31)
         async with timer.step('insert jobs'):
             async with db.start() as tx:
                 await tx.execute_many('''
@@ -502,13 +504,13 @@ VALUES (%s, %s, %s, %s);
                                       job_attributes_args)
 
                 await tx.execute_update('''
-UPDATE user_resources
-SET n_ready_jobs = n_ready_jobs + %s, ready_cores_mcpu = ready_cores_mcpu + %s
-WHERE user = %s;
-
-UPDATE ready_cores SET ready_cores_mcpu = ready_cores_mcpu + %s;
+UPDATE batch_staging
+SET n_jobs = n_jobs + %s,
+    n_ready_jobs = n_ready_jobs + %s,
+    ready_cores_mcpu = ready_cores_mcpu + %s
+WHERE batch_id = %s AND token = %s;
 ''',
-                                        (n_ready, sum_ready_cores_mcpu, user, sum_ready_cores_mcpu))
+                                        (len(jobs_args), n_ready, sum_ready_cores_mcpu, batch_id, rand_token))
 
         return web.Response()
 
@@ -565,6 +567,7 @@ INSERT INTO `batch_attributes` (batch_id, `key`, `value`)
 VALUES (%s, %s, %s)
 ''',
                 [(id, k, v) for k, v in attributes.items()])
+        await tx.execute_many('CALL insert_batch_staging_tokens(%s)', id)
 
     return web.json_response({'id': id})
 
@@ -651,14 +654,14 @@ WHERE user = %s AND id = %s AND NOT deleted;
     try:
         now = time_msecs()
         await check_call_procedure(
-            db, 'CALL close_batch(%s, %s);', (batch_id, now))
+            db, 'CALL close_batch(%s, %s, %s);', (batch_id, now, user))
     except CallError as e:
         # 2: wrong number of jobs
         if e.rv['rc'] == 2:
             expected_n_jobs = e.rv['expected_n_jobs']
-            actual_n_jobs = e.rv['actual_n_jobs']
+            n_jobs = e.rv['n_jobs']
             raise web.HTTPBadRequest(
-                reason=f'wrong number of jobs: expected {expected_n_jobs}, actual {actual_n_jobs}')
+                reason=f'wrong number of jobs: expected {expected_n_jobs}, actual {n_jobs}')
         raise
 
     async with aiohttp.ClientSession(
