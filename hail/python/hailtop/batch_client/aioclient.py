@@ -474,8 +474,6 @@ class BatchBuilder:
 
         b.append(ord(']'))
 
-        print('http call!')
-
         await self._client._post(
             f'/api/v1alpha/batches/{batch_id}/jobs/create',
             data=aiohttp.BytesPayload(

@@ -484,7 +484,7 @@ WHERE user = %s AND id = %s AND NOT deleted;
                         job_attributes_args.append(
                             (batch_id, job_id, k, v))
 
-        rand_token = random.randint(0, 31)
+        rand_token = random.randint(0, 63)
         async with timer.step('insert jobs'):
             async with db.start() as tx:
                 await tx.execute_many('''

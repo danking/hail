@@ -16,7 +16,7 @@ CREATE PROCEDURE insert_batch_staging_tokens(
 )
 BEGIN
     DECLARE i int DEFAULT 0;
-    WHILE i < 32 DO
+    WHILE i < 64 DO
         INSERT IGNORE INTO batch_staging (batch_id, token) VALUES (in_batch_id, i);
         SET i = i + 1;
     END WHILE;
