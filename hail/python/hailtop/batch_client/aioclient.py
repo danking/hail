@@ -14,6 +14,41 @@ from hailtop.utils import bounded_gather, request_retry_transient_errors
 from .globals import tasks, complete_states
 
 log = logging.getLogger('batch_client.aioclient')
+from hailtop.utils import time_msecs
+
+
+class LoggingTimerStep:
+    def __init__(self, timer, name):
+        self.timer = timer
+        self.name = name
+        self.start_time = None
+
+    async def __aenter__(self):
+        self.start_time = time_msecs()
+
+    async def __aexit__(self, exc_type, exc, tb):
+        finish_time = time_msecs()
+        self.timer.timing[self.name] = finish_time - self.start_time
+
+
+class LoggingTimer:
+    def __init__(self, description):
+        self.description = description
+        self.timing = {}
+        self.start_time = None
+
+    def step(self, name):
+        return LoggingTimerStep(self, name)
+
+    async def __aenter__(self):
+        self.start_time = time_msecs()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        finish_time = time_msecs()
+        self.timing['total'] = finish_time - self.start_time
+
+        print(f'{self.description} timing {self.timing}')
 
 
 class Job:
@@ -439,6 +474,8 @@ class BatchBuilder:
 
         b.append(ord(']'))
 
+        print('http call!')
+
         await self._client._post(
             f'/api/v1alpha/batches/{batch_id}/jobs/create',
             data=aiohttp.BytesPayload(
@@ -462,36 +499,42 @@ class BatchBuilder:
 
         byte_job_specs = [json.dumps(job_spec).encode('utf-8') for job_spec in self._job_specs]
 
-        groups = []
-        group = []
-        group_size = 0
-        for spec in byte_job_specs:
-            n = len(spec)
-            if group_size + n < 8000000 and len(group) < 1000:
-                group.append(spec)
-                group_size += n
-            else:
-                groups.append(group)
-                group = [spec]
-                group_size = n
-        if group:
-            groups.append(group)
+        async with LoggingTimer(f'submit {b["id"]}') as timer:
+            async with timer.step('make groups'):
+                groups = []
+                group = []
+                group_size = 0
+                for spec in byte_job_specs:
+                    n = len(spec)
+                    if group_size + n < 8000000 and len(group) < 1000:
+                        group.append(spec)
+                        group_size += n
+                    else:
+                        groups.append(group)
+                        group = [spec]
+                        group_size = n
+                if group:
+                    groups.append(group)
 
-        await bounded_gather(*[functools.partial(self._submit_jobs, batch.id, group)
-                               for group in groups],
-                             parallelism=50)
+            print(len(groups))
 
-        await self._client._patch(f'/api/v1alpha/batches/{batch.id}/close')
-        log.info(f'closed batch {b["id"]}')
+            async with timer.step('bounded gather'):
+                await bounded_gather(*[functools.partial(self._submit_jobs, batch.id, group)
+                                       for group in groups],
+                                     parallelism=50)
 
-        for j in self._jobs:
-            j._job = j._job._submit(batch)
+            async with timer.step('close'):
+                await self._client._patch(f'/api/v1alpha/batches/{batch.id}/close')
+                log.info(f'closed batch {b["id"]}')
 
-        self._job_specs = []
-        self._jobs = []
-        self._job_idx = 0
+                for j in self._jobs:
+                    j._job = j._job._submit(batch)
 
-        return batch
+                self._job_specs = []
+                self._jobs = []
+                self._job_idx = 0
+
+                return batch
 
 
 @asyncinit

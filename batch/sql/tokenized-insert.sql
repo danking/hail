@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS `batch_staging` (
   `token` INT NOT NULL DEFAULT 0,
   `n_jobs` INT NOT NULL DEFAULT 0
   `n_ready_jobs` INT NOT NULL DEFAULT 0,
-  `ready_cores_mcpu` INT NOT NULL DEFAULT 0,
+  `ready_cores_mcpu` INT NOT NULL DEFAULT 0
   PRIMARY KEY (`batch_id`, `token`),
   FOREIGN KEY (`batch_id`) REFERENCES batches(id) ON DELETE CASCADE
 ) ENGINE = InnoDB;

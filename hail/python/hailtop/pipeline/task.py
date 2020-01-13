@@ -290,13 +290,13 @@ class Task:
             self._mentioned.add(r)
             return f"${{{r_uid}}}"
 
-        from .pipeline import Pipeline  # pylint: disable=cyclic-import
+        # from .pipeline import Pipeline  # pylint: disable=cyclic-import
 
-        subst_command = re.sub(f"({ResourceFile._regex_pattern})|({ResourceGroup._regex_pattern})"
-                               f"|({Task._regex_pattern})|({Pipeline._regex_pattern})",
-                               handler,
-                               command)
-        self._command.append(subst_command)
+        # subst_command = re.sub(f"({ResourceFile._regex_pattern})|({ResourceGroup._regex_pattern})"
+        #                        f"|({Task._regex_pattern})|({Pipeline._regex_pattern})",
+        #                        handler,
+        #                        command)
+        self._command.append(command)
         return self
 
     def storage(self, storage):
