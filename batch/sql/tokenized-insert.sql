@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS `batch_staging` (
   `batch_id` BIGINT NOT NULL,
   `token` INT NOT NULL DEFAULT 0,
-  `n_jobs` INT NOT NULL DEFAULT 0
+  `n_jobs` INT NOT NULL DEFAULT 0,
   `n_ready_jobs` INT NOT NULL DEFAULT 0,
   `ready_cores_mcpu` INT NOT NULL DEFAULT 0
   PRIMARY KEY (`batch_id`, `token`),
