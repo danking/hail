@@ -412,6 +412,8 @@ final case class BlockMatrixMultiWrite(blockMatrices: IndexedSeq[BlockMatrixIR],
 
 final case class CollectDistributedArray(contexts: IR, globals: IR, cname: String, gname: String, body: IR) extends IR
 
+final case class CastBlockMatrixToCDA(child: BlockMatrixIR) extends IR
+
 final case class ReadPartition(path: IR, spec: AbstractTypedCodecSpec, rowType: TStruct) extends IR
 
 class PrimitiveIR(val self: IR) extends AnyVal {

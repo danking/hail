@@ -1761,6 +1761,11 @@ private class Emit(
         }
         EmitTriplet(ndt.setup, ndt.m, result)
 
+      case CollectDistributedArray(contexts, globals, cname, gname, CastBlockMatrixToCDA(child)) =>
+        val bm = child.execute(ctx)
+        // unclear how to serialize the child ...
+        // could just write the serialized bytes into the bytecode as an array
+        ???
 
       case x@CollectDistributedArray(contexts, globals, cname, gname, body) =>
         val ctxType = coerce[PArray](contexts.pType).elementType

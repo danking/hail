@@ -1,9 +1,12 @@
 package is.hail.expr.ir
 
+import breeze.linalg.{DenseMatrix => BDM}
 import is.hail.HailContext
 import is.hail.expr.types.BlockMatrixType
-import is.hail.expr.types.virtual.{TArray, TFloat64}
+import is.hail.expr.types.physical.{ PArray, PFloat64, PInt32, PStruct }
+import is.hail.expr.types.virtual.{ TArray, TFloat64 }
 import is.hail.linalg.BlockMatrix
+import is.hail.rvd.RVD
 import is.hail.utils._
 import breeze.linalg
 import breeze.linalg.DenseMatrix
@@ -72,6 +75,53 @@ abstract sealed class BlockMatrixIR extends BaseIR {
   def copy(newChildren: IndexedSeq[BaseIR]): BlockMatrixIR
 
   def blockCostIsLinear: Boolean
+}
+
+case class CastCDAToBlockMatrix (
+  cda: CollectDistributedArray,
+  typ: BlockMatrixType
+) extends BlockMatrixIR {
+  lazy val children = Array(cda)
+  assert(typ.shape.length == 2)
+  assert(typ.elementType == TFloat64(required=true))
+
+  def copy(newChildren: IndexedSeq[BaseIR]): CastCDAToBlockMatrix = {
+    val IndexedSeq(newCda) = newChildren
+    CastCDAToBlockMatrix(newCda.asInstanceOf[CollectDistributedArray], typ)
+  }
+
+  def cdaToRVD(cda: CollectDistributedArray): RVD = ??? // a lot to do, but, I think, rote, will presuambly use emit
+
+  def parrayOfDoubleToScalaArrayOfDouble(off: Long, p: PArray): Array[Double] = ???
+
+  override protected[ir] def execute(ctx: ExecuteContext): BlockMatrix = {
+    new BlockMatrix(cdaToRVD(cda).mapPartitions { it =>
+      val rv = it.next
+      val etyp = cda.pType.asInstanceOf[PArray].elementType.asInstanceOf[PStruct]
+      val ti = etyp.field("i")
+      assert(ti.typ.isOfType(PInt32()))
+      val tj = etyp.field("j")
+      assert(tj.typ.isOfType(PInt32()))
+      val tm = etyp.field("m")
+      assert(tm.typ.isOfType(PArray(PFloat64())))
+
+      assert(etyp.isFieldDefined(rv.offset, ti.index))
+      val i = Region.loadInt(etyp.loadField(rv.offset, ti.index))
+      assert(etyp.isFieldDefined(rv.offset, tj.index))
+      val j = Region.loadInt(etyp.loadField(rv.offset, tj.index))
+      assert(etyp.isFieldDefined(rv.offset, tm.index))
+      val doubles = parrayOfDoubleToScalaArrayOfDouble(etyp.loadField(rv.offset, tm.index),
+        tm.typ.asInstanceOf[PArray])
+
+      val b = new BDM(typ.blockSize, typ.blockSize, doubles)
+
+      assert(!it.hasNext)
+
+      Iterator.single(((i, j), b))
+    }, typ.blockSize, typ.shape(0), typ.shape(1))
+  }
+
+  val blockCostIsLinear: Boolean = true
 }
 
 case class BlockMatrixRead(reader: BlockMatrixReader) extends BlockMatrixIR {
