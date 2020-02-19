@@ -5,5 +5,5 @@ RUN apt-get update && \
     liblz4-dev \
     maven
 
-COPY build.gradle gradlew .
+COPY build.gradle gradlew ./
 RUN ./gradlew downloadDependencies # cache gradle & hail dependencies
