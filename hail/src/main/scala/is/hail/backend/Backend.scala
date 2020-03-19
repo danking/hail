@@ -1,5 +1,6 @@
 package is.hail.backend
 
+import is.hail.{ HailLSM }
 import is.hail.annotations.UnsafeRow
 import is.hail.expr.ir.IRParser
 import is.hail.expr.types.encoded.EType
@@ -127,6 +128,48 @@ abstract class Backend {
       JsonMethods.compact(JSONAnnotationImpex.exportAnnotation(
         UnsafeRow.read(pt, r, off), pt.virtualType))
     }
+  }
+
+  def region() = Region()
+
+  def toRegionValue(region: Region, ir: IR, pTypeString: String): Long = {
+    val pType = IRParser.parsePType(pTypeString)
+    val ctx = new ExecuteContext(region, new ExecutionTimer())
+    _execute(ctx, ir, true)._1 match {
+      case Left(_) => throw new RuntimeException("expression returned void")
+      case Right((t, off)) =>
+        assert(t.size == 1)
+        val elementType = t.fields(0).typ
+        assert(t.isFieldDefined(off, 0))
+        pType.copyFromType(ctx.r, elementType, t.loadField(off, 0), false)
+    }
+  }
+
+  def regionValueToJSON(pTypeString: String, off: Long): String = {
+    val pType = IRParser.parsePType(pTypeString)
+    JsonMethods.compact(JSONAnnotationImpex.exportAnnotation(
+      UnsafeRow.read(pType, null, off), pType.virtualType))
+  }
+
+  def lsm (
+    path: String,
+    key: String,
+    keyBufferSpec: String,
+    value: String,
+    valueBufferSpec: String,
+    region: Region
+  ): HailLSM = {
+    val kbs = BufferSpec.parseOrDefault(keyBufferSpec)
+    val vbs = BufferSpec.parseOrDefault(valueBufferSpec)
+    val kt = IRParser.parsePType(key)
+    val vt = IRParser.parsePType(value)
+    new HailLSM(
+      path,
+      kt,
+      TypedCodecSpec(EType.defaultFromPType(kt), kt.virtualType, kbs),
+      vt,
+      TypedCodecSpec(EType.defaultFromPType(vt), vt.virtualType, vbs),
+      region)
   }
 
   def asSpark(): SparkBackend = fatal("SparkBackend needed for this operation.")
