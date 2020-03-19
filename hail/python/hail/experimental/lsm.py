@@ -6,6 +6,36 @@ def region():
 
 
 class LSM:
+    """A Log-Structured Merge Tree whose keys and values are Hail values.
+
+    Examples
+    --------
+
+    Create an LSM tree mapping pairs of ints to pairs of ints:
+
+    >>> import hail as hl
+    ... import hail.experimental.lsm as hlsm
+    ... lsm = hlsm.LSM("/tmp/dk2", hl.ttuple(hl.tint, hl.tint), "+PCTuple[0:PInt32,1:PInt32]", hl.ttuple(hl.tint, hl.tint), "+PCTuple[0:PInt32,1:PInt32]")
+
+    Put some values in the LSM tree:
+
+    >>> lsm.put(hl.literal((1,1)), hl.literal((3, 9)))
+    ... lsm.put(hl.literal((1,10)), hl.literal((30, 90)))
+    ... lsm.put(hl.literal((3,10)), hl.literal((42,42)))
+
+    Get some values from the LSM tree:
+
+    >>> lsm.get(hl.literal((1,1)))
+    (3, 9)
+    >>> lsm.get(hl.literal((1,10)))
+    (30, 90)
+    >>> lsm.get(hl.literal((3,10)))
+    (42, 42)
+
+    Get a list of all the pairs in the LSM tree:
+    >>> list(lsm)
+    [((1, 1), (3, 9)), ((1, 10), (30, 90)), ((3, 10), (42, 42))]
+    """
     def __init__(self,
                  path,
                  key_type,
