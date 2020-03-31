@@ -1,4 +1,1 @@
-/repos
-*~
-*.pyc
-**/__pycache__
+../.dockerignore

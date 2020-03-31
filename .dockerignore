@@ -2,6 +2,7 @@
 *~
 .*.crc
 *.pyc
+**/__pycache__
 hail/.gradle/
 hail/.idea/
 hail/.pytest_cache/
