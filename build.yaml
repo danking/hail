@@ -1478,3 +1478,27 @@ steps:
     - test_batch
     - test_ci
     - test_pipeline
+ - kind: runImage
+   name: deploy_to_pypi
+   image:
+     valueFrom: ci_utils_image.image
+   script: |
+     set -ex
+     cd /io
+     tar xvf wheel-container.tar
+     twine --config-file=/pypi-credentials/pypirc upload hail-*-py3-none-any.whl
+   inputs:
+     - from: /wheel-container.tar
+       to: /io/wheel-container.tar
+   secrets:
+    - name: pypi-credentials-test
+      namespace:
+        valueFrom: default_ns.name
+      mountPath: /pypi-credentials
+   scopes:
+    - dev
+    - test
+   dependsOn:
+    - default_ns
+    - ci_utils_image
+    - build_hail
