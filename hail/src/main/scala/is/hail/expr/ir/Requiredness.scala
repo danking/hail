@@ -156,6 +156,14 @@ class Requiredness(val usesAndDefs: UsesAndDefs, ctx: ExecuteContext) {
 
   def addBindingRelations(node: BaseIR): Unit = {
     val refMap = usesAndDefs.uses(node).toArray.groupBy(_.t.name).mapValues(_.asInstanceOf[Array[RefEquality[BaseIR]]])
+    def addDeflessBinding(name: String, d: IR, req: BaseTypeWithRequiredness): Unit = {
+      if (refMap.contains(name)) {
+        val uses = refMap(name)
+        uses.foreach { u => defs.bind(u, Array(req)) }
+        dependents.getOrElseUpdate(d, mutable.Set[RefEquality[BaseIR]]()) ++= uses
+      }
+    }
+
     def addElementBinding(name: String, d: IR, makeOptional: Boolean = false): Unit = {
       if (refMap.contains(name)) {
         val uses = refMap(name)
@@ -273,7 +281,6 @@ class Requiredness(val usesAndDefs: UsesAndDefs, ctx: ExecuteContext) {
       case CollectDistributedArray(ctxs, globs, c, g, body) =>
         addElementBinding(c, ctxs)
         addBinding(g, globs)
-
       case TableAggregate(c, q) =>
         addTableBinding(c)
       case TableFilter(child, pred) =>
@@ -286,6 +293,8 @@ class Requiredness(val usesAndDefs: UsesAndDefs, ctx: ExecuteContext) {
         addTableBinding(child)
       case TableAggregateByKey(child, expr) =>
         addTableBinding(child)
+      case x@ShuffleWith(keyFields, rowType, rowEType, keyEType, name, writer, readers) =>
+        addDeflessBinding(name, x, BaseTypeWithRequiredness(x.shuffleType))
       case _ => fatal(Pretty(node))
     }
   }
@@ -689,7 +698,6 @@ class Requiredness(val usesAndDefs: UsesAndDefs, ctx: ExecuteContext) {
           wrapped.setSignature(newAggSig)
         else
           coerce[RIterable](requiredness).elementType.unionFrom(lookup(result))
-
       case TableAggregate(c, q) => requiredness.unionFrom(lookup(q))
       case TableGetGlobals(c) => requiredness.unionFrom(lookup(c).globalType)
       case TableCollect(c) =>
@@ -705,6 +713,20 @@ class Requiredness(val usesAndDefs: UsesAndDefs, ctx: ExecuteContext) {
       case TableCollect(c) =>
         coerce[RIterable](coerce[RStruct](requiredness).field("rows")).elementType.unionFrom(lookup(c).rowType)
         coerce[RStruct](requiredness).field("global").unionFrom(lookup(c).globalType)
+      case ShuffleWith(keyFields, rowType, rowEType, keyEType, name, writer, readers) =>
+        requiredness.union(lookup(writer).required)
+        requiredness.unionFrom(lookup(readers))
+      case ShuffleWrite(id, rows) =>
+        requiredness.union(lookup(id).required)
+        requiredness.union(lookup(rows).required)
+      case ShufflePartitionBounds(id, nPartitions) =>
+        requiredness.union(lookup(id).required)
+        requiredness.union(lookup(nPartitions).required)
+        coerce[RIterable](requiredness).elementType.fromPType(coerce[TShuffle](id.typ).keyDecodedPType)
+      case ShuffleRead(id, keyRange) =>
+        requiredness.union(lookup(id).required)
+        requiredness.union(lookup(keyRange).required)
+        coerce[RIterable](requiredness).elementType.fromPType(coerce[TShuffle](id.typ).rowDecodedPType)
     }
     val aggScopeChanged = (node.isInstanceOf[RunAgg] || node.isInstanceOf[RunAggScan]) && (lookupAggState(node).probeChangedAndReset())
     requiredness.probeChangedAndReset() | aggScopeChanged
