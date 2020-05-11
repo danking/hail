@@ -16,7 +16,7 @@ push: build
 
 deploy: push
 	python3 ../ci/jinja2_render.py '{"code":{"sha":"$(shell git rev-parse --short=12 HEAD)"},"deploy":true,"site_image":{"image":"$(IMAGE)"}}' deployment.yaml deployment.yaml.out
-	kubectl -n default apply -f deployment.yaml.out
+	kubectl -n dking apply -f deployment.yaml.out
 
 clean:
 	rm -rf deployment.yaml
