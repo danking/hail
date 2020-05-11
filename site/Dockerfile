@@ -22,4 +22,6 @@ ADD poll-0.1.sh /poll-0.1.sh
 ADD poll-0.2.sh /poll-0.2.sh
 ADD site.sh /site.sh
 
+COPY new/ /var/www/html/
+
 CMD ["/bin/bash", "/site.sh"]

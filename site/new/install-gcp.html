@@ -1,0 +1,68 @@
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://fonts.googleapis.com/css2?family=Jost&display=swap"
+          rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Mono:wght@400;500&family=Nova+Mono&family=Share+Tech+Mono&display=swap"
+          rel="stylesheet">
+    <link rel="stylesheet"
+          href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/10.0.2/styles/a11y-light.min.css">
+    <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/10.0.2/highlight.min.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
+    <link href="/style.css" rel="stylesheet">
+  </head>
+  <body>
+    <div class="title"><a href="/"><h1>Hail</h1></a></div>
+
+    <div class="background"><div class="content">
+        <h2>Install on Google Dataproc</h2>
+
+        <p>
+           First, install Hail on your <a href="install-mac-os-x.html">Mac OS
+           X</a> or <a href="install-linux.html">Linux</a> laptop or
+           desktop. The Hail pip package includes a tool
+           called <code class="inline-code">hailctl</code> which can start and
+           stop Dataproc clusters.
+        </p>
+        <p>
+          Start a dataproc cluster named "my-first-cluster". Cluster names
+          may only contain a mix lowercase letters and dashes. Starting a
+          cluster can take as long as two minutes.
+        <p>
+<pre><code class="language-bash">hailctl dataproc start my-first-cluster</code></pre>
+        <p>
+          Create a file called "hail-script.py" and place the following analysis
+          of a randomly generated dataset with five-hundred samples and
+          half-a-million variants.
+        </p>
+<pre><code class="language-python">import hail as hl
+mt = hl.balding_nichols_model(n_populations=3,
+                              n_samples=500,
+                              n_variants=500_000,
+                              n_partitions=32)
+mt = mt.annotate_cols(drinks_coffee = hl.rand_bool(0.33))
+gwas = hl.linear_regression_rows(y=mt.drinks_coffee,
+                                 x=mt.GT.n_alt_alleles(),
+                                 covariates=[1.0])
+gwas.order_by(gwas.p_value).show(25)
+</code></pre>
+        <p>
+          Submit the analysis to the cluster and wait for the results. You
+          should not have to wait more than a minute.
+        </p>
+<pre><code class="language-bash">hailctl dataproc submit my-first-cluster hail-script.py</code></pre>
+        <p>
+          When the script is done running you'll see 25 rows of variant
+          association results.
+        </p>
+        <p>
+          You can also start a Jupyter Notebook running on the cluster:
+        </p>
+<pre><code class="language-bash">hailctl dataproc connect my-first-cluster notebook</code></pre>
+        <p>
+          When you are finished with the cluster stop it:
+        </p>
+<pre><code class="language-bash">hailctl dataproc stop my-first-cluster</code></pre>
+    </div></div>
+  </body>
+</html>

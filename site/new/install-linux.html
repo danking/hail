@@ -1,0 +1,45 @@
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://fonts.googleapis.com/css2?family=Jost&display=swap"
+          rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Mono:wght@400;500&family=Nova+Mono&family=Share+Tech+Mono&display=swap"
+          rel="stylesheet">
+    <link rel="stylesheet"
+          href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/10.0.2/styles/a11y-light.min.css">
+    <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/10.0.2/highlight.min.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
+    <link href="/style.css" rel="stylesheet">
+  </head>
+  <body>
+    <div class="title"><a href="/"><h1>Hail</h1></a></div>
+
+    <div class="background"><div class="content">
+        <h2>Install on Linux</h2>
+        <ol>
+          <li>Install Java 8.</li>
+          <li>Install a recent version of the C and C++ standard libraries. GCC
+            5.0, LLVM version 3.4, or any later versions include sufficiently
+            recent versions.</li>
+          <li>Install Python 3.6 or 3.7 and pip.</li>
+          <li>Install LZ4.</li>
+          <li>Install BLAS and LAPACK.</li>
+          <li>Install <code class="inline-code">hail</code> using pip.</li>
+        </ol>
+        <hr>
+        <p>
+          On a Debian-like system, the following should suffice:
+        </p>
+<pre><code class="language-bash">apt-get install openjdk-8-jre-headless \
+                g++ \
+                python3 python3-pip \
+                liblz4 \
+                libopenblas liblapack3
+pip install hail</code></pre>
+        <hr>
+        <p>
+          Now let's take Hail for a spin: <a href="/try.html">run your first Hail query!</a>
+        </p>
+    </div></div>
+  </body>
+</html>

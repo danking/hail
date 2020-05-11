@@ -1,0 +1,58 @@
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://fonts.googleapis.com/css2?family=Jost&display=swap"
+          rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Mono:wght@400;500&family=Nova+Mono&family=Share+Tech+Mono&display=swap"
+          rel="stylesheet">
+    <link rel="stylesheet"
+          href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/10.0.2/styles/a11y-light.min.css">
+    <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/10.0.2/highlight.min.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
+    <link href="/style.css" rel="stylesheet">
+  </head>
+  <body>
+    <div class="title"><a href="/"><h1>Hail</h1></a></div>
+
+    <div class="background"><div class="content">
+        <h3>Introduction for Engineers</h3>
+
+        <p>
+          Hail is an elastic system and language, exposed as a Python library, for the
+          interactive analysis of genetics-datasets of arbitrary size. The Hail system and
+          language are each comprised of a local and distributed component. The
+          distributed language expresses relational and linear algebraic operations on
+          one- and two-dimensional external memory arrays.  The distributed system
+          schedules directed acylic graphs of jobs on an elastic cluster. The distributed
+          system includes an elastic service which stores, partitions, and orders
+          intermediate data. The local language describes operations on a rich set of
+          internal-memory data-types. The local system implements the aforementioned
+          operations on Hail objects that are represented using a custom memory
+          format.
+        </p>
+        <p>
+          The Hail distributed system schedules two types of jobs on an elastic,
+          multi-tenant cluster of virtual machines. The first type of job, called a Query
+          job, is a Hail local expression. As described below, a Hail distributed
+          expression is implemented as a directed acyclic graph of Query jobs, each job
+          operating on a partition of the data. The second type of job, called a Batch
+          job, is a docker image. Tasks may depend on an arbitrary number of other jobs
+          within their "batch", which is our term for a collection of interdependent
+          jobs.
+        </p>
+        <p>
+          The Hail distributed language ...
+        </p>
+        <p>
+          The Hail local language ...
+        </p>
+        <p>
+          The Hail local system ...
+        </p>
+        <ul class="button-list">
+          <li><a href="install.html">Install</a></li>
+          <li><a href="get-help.html">Get Help</a></li>
+        </ul>
+    </div></div>
+  </body>
+</html>

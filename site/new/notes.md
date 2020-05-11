@@ -1,0 +1,3 @@
+- background change when content changes
+- get help page more details on each of the four links
+- header title should always be Hail
