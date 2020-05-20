@@ -926,7 +926,8 @@ python3 create_database.py {shq(json.dumps(create_database_config))}
                 'namespace': BATCH_PODS_NAMESPACE,
                 'name': 'ci-agent'
             },
-            output_files=[(x[1], x[0]) for x in password_files_input])
+            output_files=[(x[1], x[0]) for x in password_files_input],
+            parents=self.deps_parents())
 
         self.create_database_job = batch.create_job(
             CI_UTILS_IMAGE,
@@ -942,7 +943,7 @@ python3 create_database.py {shq(json.dumps(create_database_config))}
                 'name': 'ci-agent'
             },
             input_files=input_files,
-            parents=self.deps_parents() + [self.create_password_job])
+            parents=[self.create_password_job])
 
     def cleanup(self, batch, scope, parents):
         if scope in ['deploy', 'dev'] or self.cant_create_database:
