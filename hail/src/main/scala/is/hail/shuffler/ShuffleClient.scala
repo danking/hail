@@ -37,18 +37,17 @@ object ShuffleClient {
     }
   }
 
-  def socket(): Socket = {
-    var host = System.getenv("SHUFFLER_SSL_CLIENT_HOST")
-    if (host == null) {
-      host = "localhost"
-    }
-    var portStr = System.getenv("SHUFFLER_SSL_CLIENT_PORT")
-    if (portStr == null) {
-      portStr = "8080"
-    }
-    val port = java.lang.Integer.valueOf(portStr)
-    socket(host, port)
+  val isLocalTest = System.getenv("SHUFFLER_SSL_CLIENT_HOST") == null
+  val host = {
+    val hostStr = System.getenv("SHUFFLER_SSL_CLIENT_HOST")
+    if (hostStr == null) "localhost" else hostStr
   }
+  val port = {
+    val portStr = System.getenv("SHUFFLER_SSL_CLIENT_PORT")
+    if (portStr == null) 8080 else java.lang.Integer.valueOf(portStr)
+  }
+
+  def socket(): Socket = socket(host, port)
 
   def socket(host: String, port: Int): Socket = {
     val s = sslContext.getSocketFactory().createSocket(host, port)
@@ -103,8 +102,8 @@ object ShuffleClient {
 class ShuffleClient (
   shuffleType: TShuffle,
   ssl: SSLContext,
-  host: String,
-  port: Int
+  host: String = ShuffleClient.host,
+  port: Int = ShuffleClient.port
 ) extends AutoCloseable {
   private[this] val log = Logger.getLogger(getClass.getName())
   private[this] var uuid: Array[Byte] = null

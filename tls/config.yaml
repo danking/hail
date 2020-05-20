@@ -53,3 +53,9 @@ principals:
 - name: query
   domain: query
   kind: json
+- name: shuffler
+  domain: shuffler
+  kind: json
+- name: shuffler-tests
+  domain: shuffler-tests
+  kind: json
