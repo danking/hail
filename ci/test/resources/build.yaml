@@ -82,6 +82,27 @@ steps:
    dependsOn:
     - default_ns
     - copy_files
+ - kind: createDatabase
+   name: hello_database2
+   databaseName: hello
+   migrations:
+    - name: create-tables
+      script: /io/sql/create-hello-tables.sql
+    - name: insert
+      script: /io/sql/insert.py
+   inputs:
+    - from: /repo/ci/test/resources/sql
+      to: /io/
+   namespace:
+     valueFrom: default_ns.name
+   shutdowns:
+    - kind: Deployment
+      namespace:
+        valueFrom: default_ns.name
+      name: hello
+   dependsOn:
+    - default_ns
+    - copy_files
  - kind: runImage
    name: test_hello_database
    image:

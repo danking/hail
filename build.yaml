@@ -248,28 +248,6 @@ steps:
     - default_ns
     - copy_files
     - delete_auth_tables
- - kind: createDatabase
-   name: auth_database2
-   databaseName: auth
-   migrations:
-    - name: initial
-      script: /io/sql/initial.sql
-    - name: copy-paste-tokens
-      script: /io/sql/copy-paste-tokens.sql
-   inputs:
-    - from: /repo/auth/sql
-      to: /io/
-   namespace:
-     valueFrom: default_ns.name
-   shutdowns:
-    - kind: Deployment
-      namespace:
-        valueFrom: default_ns.name
-      name: auth
-   dependsOn:
-    - default_ns
-    - copy_files
-    - delete_auth_tables
  - kind: runImage
    name: create_deploy_config
    image:
