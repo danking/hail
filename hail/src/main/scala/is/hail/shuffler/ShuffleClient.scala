@@ -42,7 +42,7 @@ object ShuffleClient {
     val hostStr = System.getenv("SHUFFLER_SSL_CLIENT_HOST")
     if (hostStr == null) "localhost" else hostStr
   }
-  val port = {
+  val port: Int = {
     val portStr = System.getenv("SHUFFLER_SSL_CLIENT_PORT")
     if (portStr == null) 8080 else java.lang.Integer.valueOf(portStr)
   }
