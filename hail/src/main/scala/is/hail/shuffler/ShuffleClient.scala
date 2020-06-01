@@ -16,8 +16,8 @@ object ShuffleClient {
   private[this] val log = Logger.getLogger(getClass.getName())
 
   lazy val sslContext = {
-    val keyStore = System.getenv("SHUFFLER_SSL_CLIENT_KEY_STORE")
-    val trustStore = System.getenv("SHUFFLER_SSL_CLIENT_TRUST_STORE")
+    val keyStore = System.getenv("SHUFFLER_CLIENT_KEY_STORE")
+    val trustStore = System.getenv("SHUFFLER_CLIENT_TRUST_STORE")
     if (keyStore == null && trustStore != null ||
       trustStore == null && keyStore != null) {
       fatal("you must specify both or neither of the hail context flags: " +
@@ -33,13 +33,13 @@ object ShuffleClient {
         "JKS"
       )
     } else {
-      is.hail.shuffler.sslContext(keyStore, "", "PKCS12", trustStore, "", "PKCS12")
+      is.hail.shuffler.sslContext(keyStore, "dummypw", "PKCS12", trustStore, "dummypw", "JKS")
     }
   }
 
-  val isLocalTest = System.getenv("SHUFFLER_SSL_CLIENT_HOST") == null
+  val isLocalTest = System.getenv("SHUFFLER_CLIENT_HOST") == null
   val host = {
-    val hostStr = System.getenv("SHUFFLER_SSL_CLIENT_HOST")
+    val hostStr = System.getenv("SHUFFLER_CLIENT_HOST")
     if (hostStr == null) "localhost" else hostStr
   }
   val port: Int = {
@@ -101,7 +101,7 @@ object ShuffleClient {
 
 class ShuffleClient (
   shuffleType: TShuffle,
-  ssl: SSLContext,
+  ssl: SSLContext = ShuffleClient.sslContext,
   host: String = ShuffleClient.host,
   port: Int = ShuffleClient.port
 ) extends AutoCloseable {

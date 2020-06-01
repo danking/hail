@@ -49,15 +49,7 @@ class ShuffleSuite extends HailSuite {
       val rowEType = EType.defaultFromPType(rowPType).asInstanceOf[EBaseStruct]
       val keyEType = EType.defaultFromPType(keyPType).asInstanceOf[EBaseStruct]
       val shuffleType = TShuffle(keyFields, rowType, rowEType, keyEType)
-      using(new ShuffleClient(
-        shuffleType,
-        sslContext(
-          "src/test/resources/non-secret-key-and-trust-stores/client-keystore.p12",
-          "hailhail",
-          "PKCS12",
-          "src/test/resources/non-secret-key-and-trust-stores/client-truststore.p12",
-          "hailhail",
-          "JKS"))) { c =>
+      using(new ShuffleClient(shuffleType)) { c =>
         val rowDecodedPType = c.codecs.rowDecodedPType
 
         val values = new ArrayBuilder[Long]()
