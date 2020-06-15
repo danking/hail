@@ -6,17 +6,19 @@ import time
 import copy
 from shlex import quote as shq
 import webbrowser
-from typing import Optional
+from typing import Optional, Dict
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from .batch import Batch
+    from .batch import Batch  # type: ignore
+    from .job import Job  # type: ignore
 
-from hailtop.config import get_deploy_config, get_user_config
-from hailtop.auth import get_userinfo
-from hailtop.batch_client.client import BatchClient
+from hailtop.config import get_deploy_config, get_user_config  # type: ignore
+from hailtop.auth import get_userinfo  # type: ignore
+from hailtop.batch_client.client import BatchClient  # type: ignore
+import hailtop.batch_client.client as bc  # type: ignore
 
-from .resource import InputResourceFile, JobResourceFile
+from .resource import InputResourceFile, JobResourceFile  # type: ignore
 
 
 class Backend:
@@ -80,7 +82,7 @@ class LocalBackend(Backend):
 
         self._extra_docker_run_flags = flags
 
-    def _run(self, batch: 'Batch', dry_run: bool, verbose: bool, delete_scratch_on_exit: bool):  # pylint: disable=R0915
+    def _run(self, batch: 'Batch', dry_run: bool, verbose: bool, delete_scratch_on_exit: bool, **backend_kwargs):  # pylint: disable=R0915
         """
         Execute a batch.
 
@@ -101,7 +103,7 @@ class LocalBackend(Backend):
         """
         tmpdir = self._get_scratch_dir()
 
-        script = ['#!/bin/bash',
+        lines = ['#!/bin/bash',
                   'set -e' + 'x' if verbose else '',
                   '\n',
                   '# change cd to tmp directory',
@@ -149,16 +151,16 @@ class LocalBackend(Backend):
 
         write_inputs = [x for r in batch._input_resources for x in copy_external_output(r)]
         if write_inputs:
-            script += ["# Write input resources to output destinations"]
-            script += write_inputs
-            script += ['\n']
+            lines += ["# Write input resources to output destinations"]
+            lines += write_inputs
+            lines += ['\n']
 
         for job in batch._jobs:
             os.makedirs(tmpdir + job._uid + '/', exist_ok=True)
 
-            script.append(f"# {job._uid} {job.name if job.name else ''}")
+            lines.append(f"# {job._uid} {job.name if job.name else ''}")
 
-            script += [x for r in job._inputs for x in copy_input(job, r)]
+            lines += [x for r in job._inputs for x in copy_input(job, r)]
 
             resource_defs = [r._declare(tmpdir) for r in job._mentioned]
 
@@ -168,23 +170,23 @@ class LocalBackend(Backend):
                 memory = f'-m {job._memory}' if job._memory else ''
                 cpu = f'--cpus={job._cpu}' if job._cpu else ''
 
-                script += [f"docker run "
-                           f"{self._extra_docker_run_flags} "
-                           f"-v {tmpdir}:{tmpdir} "
-                           f"-w {tmpdir} "
-                           f"{memory} "
-                           f"{cpu} "
-                           f"{job._image} /bin/bash "
-                           f"-c {shq(defs + cmd)}",
-                           '\n']
+                lines += [f"docker run "
+                          f"{self._extra_docker_run_flags} "
+                          f"-v {tmpdir}:{tmpdir} "
+                          f"-w {tmpdir} "
+                          f"{memory} "
+                          f"{cpu} "
+                          f"{job._image} /bin/bash "
+                          f"-c {shq(defs + cmd)}",
+                          '\n']
             else:
-                script += resource_defs
-                script += job._command
+                lines += resource_defs
+                lines += job._command
 
-            script += [x for r in job._external_outputs for x in copy_external_output(r)]
-            script += ['\n']
+            lines += [x for r in job._external_outputs for x in copy_external_output(r)]
+            lines += ['\n']
 
-        script = "\n".join(script)
+        script = "\n".join(lines)
         if dry_run:
             print(script)
         else:
@@ -283,7 +285,8 @@ class ServiceBackend(Backend):
              wait: bool = True,
              open: bool = False,
              disable_progress_bar: bool = False,
-             callback: Optional[str] = None):  # pylint: disable-msg=too-many-statements
+             callback: Optional[str] = None,
+             **backend_kwargs):  # pylint: disable-msg=too-many-statements
         """Execute a batch.
 
         Warning
@@ -329,7 +332,7 @@ class ServiceBackend(Backend):
         n_jobs_submitted = 0
         used_remote_tmpdir = False
 
-        job_to_client_job_mapping = {}
+        job_to_client_job_mapping: Dict[Job, bc.Job] = {}
         jobs_to_command = {}
         commands = []
 
