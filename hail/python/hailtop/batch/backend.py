@@ -101,6 +101,9 @@ class LocalBackend(Backend):
         delete_scratch_on_exit: :obj:`bool`
             If `True`, delete temporary directories with intermediate files.
         """
+        if backend_kwargs:
+            raise ValueError(f'LocalBackend does not support any of these keywords: {backend_kwargs}')
+
         tmpdir = self._get_scratch_dir()
 
         lines = ['#!/bin/bash',
@@ -314,6 +317,9 @@ class ServiceBackend(Backend):
             If not `None`, a URL that will receive at most one POST request
             after the entire batch completes.
         """
+        if backend_kwargs:
+            raise ValueError(f'LocalBackend does not support any of these keywords: {backend_kwargs}')
+
         build_dag_start = time.time()
 
         subdir_name = 'batch-{}'.format(uuid.uuid4().hex[:12])
