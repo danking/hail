@@ -1,8 +1,14 @@
 import abc
 
+from __future__ import annotations
 from shlex import quote as shq
+from typing import Optional
 
 from .utils import BatchException
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .job import Job
 
 
 class Resource:
@@ -13,14 +19,14 @@ class Resource:
     _uid: str
 
     @abc.abstractmethod
-    def _get_path(self, directory) -> str:
+    def _get_path(self, directory: str) -> str:
         pass
 
     @abc.abstractmethod
-    def _add_output_path(self, path):
+    def _add_output_path(self, path: str) -> None:
         pass
 
-    def _declare(self, directory):
+    def _declare(self, directory: str) -> str:
         return f"{self._uid}={shq(self._get_path(directory))}"  # pylint: disable=no-member
 
 
@@ -45,7 +51,7 @@ class ResourceFile(Resource, str):
         r._uid = uid
         return r
 
-    def __init__(self, value):
+    def __init__(self, value: Optional[str]):
         super(ResourceFile, self).__init__()
         assert value is None or isinstance(value, str)
         self._value = value
@@ -54,30 +60,30 @@ class ResourceFile(Resource, str):
         self._resource_group = None
         self._has_extension = False
 
-    def _get_path(self, directory):
+    def _get_path(self, directory: str):
         raise NotImplementedError
 
-    def _add_source(self, source):
+    def _add_source(self, source: 'Job') -> ResourceFile:
         from .job import Job  # pylint: disable=cyclic-import
         assert isinstance(source, Job)
         self._source = source
         return self
 
-    def _add_output_path(self, path):
+    def _add_output_path(self, path: str) -> None:
         self._output_paths.add(path)
         if self._source is not None:
             self._source._external_outputs.add(self)
 
-    def _add_resource_group(self, rg):
+    def _add_resource_group(self, rg: ResourceGroup) -> None:
         self._resource_group = rg
 
-    def _has_resource_group(self):
+    def _has_resource_group(self) -> bool:
         return self._resource_group is not None
 
-    def _get_resource_group(self):
+    def _get_resource_group(self) -> Optional[ResourceGroup]:
         return self._resource_group
 
-    def add_extension(self, extension):
+    def add_extension(self, extension: str) -> ResourceFile:
         """
         Specify the file extension to use.
 
@@ -138,11 +144,11 @@ class InputResourceFile(ResourceFile):
         self._input_path = None
         super().__init__(value)
 
-    def _add_input_path(self, path):
+    def _add_input_path(self, path: str) -> InputResourceFile:
         self._input_path = path
         return self
 
-    def _get_path(self, directory):
+    def _get_path(self, directory: str) -> str:
         assert self._value is not None
         return shq(directory + '/inputs/' + self._value)
 
@@ -167,7 +173,7 @@ class JobResourceFile(ResourceFile):
     to be saved.
     """
 
-    def _get_path(self, directory):
+    def _get_path(self, directory: str) -> str:
         assert self._source is not None
         assert self._value is not None
         return shq(directory + '/' + self._source._uid + '/' + self._value)
@@ -228,7 +234,7 @@ class ResourceGroup(Resource):
         cls._counter += 1
         return uid
 
-    def __init__(self, source, root, **values):
+    def __init__(self, source: Optional[Job], root: str, **values: ResourceFile):
         self._source = source
         self._resources = {}  # dict of name to resource uid
         self._root = root
@@ -239,31 +245,31 @@ class ResourceGroup(Resource):
             self._resources[name] = resource_file
             resource_file._add_resource_group(self)
 
-    def _get_path(self, directory):
+    def _get_path(self, directory: str) -> str:
         subdir = self._source._uid if self._source else 'inputs'
         return directory + '/' + subdir + '/' + self._root
 
-    def _add_output_path(self, path):
+    def _add_output_path(self, path: str) -> None:
         for name, rf in self._resources.items():
             rf._add_output_path(path + '.' + name)
 
-    def _get_resource(self, item):
+    def _get_resource(self, item: str) -> ResourceFile:
         if item not in self._resources:
             raise BatchException(f"'{item}' not found in the resource group.\n"
                                  f"Hint: you must declare each attribute when constructing the resource group.")
         return self._resources[item]
 
-    def __getitem__(self, item):
+    def __getitem__(self, item: str) -> ResourceFile:
         return self._get_resource(item)
 
-    def __getattr__(self, item):
+    def __getattr__(self, item: str) -> ResourceFile:
         return self._get_resource(item)
 
-    def __add__(self, other):
+    def __add__(self, other: str):
         assert isinstance(other, str)
         return str(self._uid) + other
 
-    def __radd__(self, other):
+    def __radd__(self, other: str):
         assert isinstance(other, str)
         return other + str(self._uid)
 

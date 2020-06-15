@@ -1,8 +1,14 @@
 import re
+from typing import Union, Optional, Dict
+from __future__ import annotations
 
 from .backend import ServiceBackend
-from .resource import ResourceFile, ResourceGroup
+from .resource import ResourceFile, ResourceGroup, JobResourceFile, Resource
 from .utils import BatchException
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .batch import Batch
 
 
 def _add_resource_to_set(resource_set, resource, include_rg=True):
@@ -61,7 +67,9 @@ class Job:
         cls._counter += 1
         return uid
 
-    def __init__(self, batch, name=None, attributes=None):
+    def __init__(self, batch: 'Batch',
+                 name: Optional[str] = None,
+                 attributes: Optional[Dict[str, str]] = None):
         self._batch = batch
         self.name = name
         self.attributes = attributes
@@ -84,7 +92,7 @@ class Job:
         self._valid = set()  # resources declared in the appropriate place
         self._dependencies = set()
 
-    def _get_resource(self, item):
+    def _get_resource(self, item: str) -> JobResourceFile:
         if item not in self._resources:
             r = self._batch._new_job_resource_file(self)
             self._resources[item] = r
@@ -92,19 +100,19 @@ class Job:
 
         return self._resources[item]
 
-    def __getitem__(self, item):
+    def __getitem__(self, item: str) -> JobResourceFile:
         return self._get_resource(item)
 
-    def __getattr__(self, item):
+    def __getattr__(self, item: str) -> JobResourceFile:
         return self._get_resource(item)
 
-    def _add_internal_outputs(self, resource):
+    def _add_internal_outputs(self, resource: Resource) -> None:
         _add_resource_to_set(self._internal_outputs, resource, include_rg=False)
 
-    def _add_inputs(self, resource):
+    def _add_inputs(self, resource: Resource) -> None:
         _add_resource_to_set(self._inputs, resource, include_rg=False)
 
-    def declare_resource_group(self, **mappings):
+    def declare_resource_group(self, **mappings: str) -> Job:
         """
         Declare a resource group for a job.
 
@@ -153,7 +161,7 @@ class Job:
             _add_resource_to_set(self._valid, rg)
         return self
 
-    def depends_on(self, *jobs):
+    def depends_on(self, *jobs: Job) -> Job:
         """
         Explicitly set dependencies on other jobs.
 
@@ -201,7 +209,7 @@ class Job:
             self._dependencies.add(j)
         return self
 
-    def command(self, command):
+    def command(self, command: str) -> Job:
         """
         Set the job's command to execute.
 
@@ -312,7 +320,7 @@ class Job:
         self._command.append(subst_command)
         return self
 
-    def storage(self, storage):
+    def storage(self, storage: Union[str, int]) -> Job:
         """
         Set the job's storage size.
 
@@ -349,7 +357,7 @@ class Job:
         self._storage = str(storage)
         return self
 
-    def memory(self, memory):
+    def memory(self, memory: Union[str, int]) -> Job:
         """
         Set the job's memory requirements.
 
@@ -386,7 +394,7 @@ class Job:
         self._memory = str(memory)
         return self
 
-    def cpu(self, cores):
+    def cpu(self, cores: Union[str, int, float]) -> Job:
         """
         Set the job's CPU requirements.
 
@@ -422,7 +430,7 @@ class Job:
         self._cpu = str(cores)
         return self
 
-    def image(self, image):
+    def image(self, image: str) -> Job:
         """
         Set the job's docker image.
 
@@ -451,7 +459,7 @@ class Job:
         self._image = image
         return self
 
-    def always_run(self, always_run=True):
+    def always_run(self, always_run: bool = True) -> Job:
         """
         Set the job to always run, even if dependencies fail.
 
@@ -488,7 +496,7 @@ class Job:
         self._always_run = always_run
         return self
 
-    def timeout(self, timeout):
+    def timeout(self, timeout: Union[float, int]) -> Job:
         """
         Set the maximum amount of time this job can run for.
 

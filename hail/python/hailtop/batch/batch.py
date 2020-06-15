@@ -2,7 +2,7 @@ import os
 
 import re
 import uuid
-from typing import Optional, Dict, Union
+from typing import Optional, Dict, Union, List, Any
 
 from .backend import Backend, LocalBackend
 from .job import Job
@@ -112,7 +112,9 @@ class Batch:
         else:
             self._backend = LocalBackend()
 
-    def new_job(self, name=None, attributes=None):
+    def new_job(self,
+                name: Optional[str] = None,
+                attributes: Optional[Dict[str, str]] = None) -> Job:
         """
         Initialize a new job object with default memory, docker image,
         and CPU settings (defined in :class:`.Batch`) upon batch creation.
@@ -200,7 +202,7 @@ class Batch:
         self._resource_map.update({rg._uid: rg})
         return rg
 
-    def read_input(self, path, extension=None):
+    def read_input(self, path: str, extension: Optional[str] = None) -> InputResourceFile:
         """
         Create a new input resource file object representing a single file.
 
@@ -232,7 +234,7 @@ class Batch:
             irf.add_extension(extension)
         return irf
 
-    def read_input_group(self, **kwargs):
+    def read_input_group(self, **kwargs: str) -> ResourceGroup:
         """
         Create a new resource group representing a mapping of identifier to
         input resource files.
@@ -287,7 +289,7 @@ class Batch:
 
         Returns
         -------
-        :class:`.InputResourceFile`
+        :class:`.ResourceGroup`
         """
 
         root = self._tmp_file()
@@ -296,7 +298,7 @@ class Batch:
         self._resource_map.update({rg._uid: rg})
         return rg
 
-    def write_output(self, resource, dest):  # pylint: disable=R0201
+    def write_output(self, resource: Resource, dest: str) -> None:  # pylint: disable=R0201
         """
         Write resource file or resource file group to an output destination.
 
@@ -342,7 +344,7 @@ class Batch:
 
         resource._add_output_path(dest)
 
-    def select_jobs(self, pattern):
+    def select_jobs(self, pattern: str) -> List[Job]:
         """
         Select all jobs in the batch whose name matches `pattern`.
 
@@ -368,7 +370,11 @@ class Batch:
 
         return [job for job in self._jobs if job.name is not None and re.match(pattern, job.name) is not None]
 
-    def run(self, dry_run=False, verbose=False, delete_scratch_on_exit=True, **backend_kwargs):
+    def run(self,
+            dry_run: bool = False,
+            verbose: bool = False,
+            delete_scratch_on_exit: bool = True,
+            **backend_kwargs: Any) -> None:
         """
         Execute a batch.
 

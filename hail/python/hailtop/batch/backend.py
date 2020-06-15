@@ -6,6 +6,12 @@ import time
 import copy
 from shlex import quote as shq
 import webbrowser
+from typing import Optional
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .batch import Batch
+
 from hailtop.config import get_deploy_config, get_user_config
 from hailtop.auth import get_userinfo
 from hailtop.batch_client.client import BatchClient
@@ -54,7 +60,10 @@ class LocalBackend(Backend):
         variable `HAIL_BATCH_EXTRA_DOCKER_RUN_FLAGS`.
     """
 
-    def __init__(self, tmp_dir='/tmp/', gsa_key_file=None, extra_docker_run_flags=None):
+    def __init__(self,
+                 tmp_dir: str = '/tmp/',
+                 gsa_key_file: Optional[str] = None,
+                 extra_docker_run_flags: Optional[str] = None):
         self._tmp_dir = tmp_dir
 
         flags = ''
@@ -71,7 +80,7 @@ class LocalBackend(Backend):
 
         self._extra_docker_run_flags = flags
 
-    def _run(self, batch, dry_run, verbose, delete_scratch_on_exit):  # pylint: disable=R0915
+    def _run(self, batch: 'Batch', dry_run: bool, verbose: bool, delete_scratch_on_exit: bool):  # pylint: disable=R0915
         """
         Execute a batch.
 
@@ -267,14 +276,14 @@ class ServiceBackend(Backend):
         self._batch_client.close()
 
     def _run(self,
-             batch,
-             dry_run,
-             verbose,
-             delete_scratch_on_exit,
-             wait=True,
-             open=False,
-             disable_progress_bar=False,
-             callback=None):  # pylint: disable-msg=too-many-statements
+             batch: 'Batch',
+             dry_run: bool,
+             verbose: bool,
+             delete_scratch_on_exit: bool,
+             wait: bool = True,
+             open: bool = False,
+             disable_progress_bar: bool = False,
+             callback: Optional[str] = None):  # pylint: disable-msg=too-many-statements
         """Execute a batch.
 
         Warning
