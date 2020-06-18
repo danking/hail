@@ -323,9 +323,11 @@ class Viz {
     geometry.computeBoundingSphere();
     geometry.setDrawRange(0, 0);
     const material = new THREE.LineBasicMaterial({
-      vertexColors: THREE.VertexColors
+      vertexColors: THREE.VertexColors,
+      opacity: 0.5,
+      transparent: true
     });
-    material.linewidth = 0.25;
+    material.linewidth = 1.0;
 
     this.linesMesh = new THREE.LineSegments(geometry, material);
     this.linesMesh.renderOrder = 2;
