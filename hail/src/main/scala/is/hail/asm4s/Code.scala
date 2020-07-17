@@ -323,11 +323,11 @@ object Code {
 
   def lineNumber(line: Int): (Code[Unit], Code[Unit]) = {
     val L = CodeLabel()
-    (L, new LineNumberCode(lir.lineNumber(line, L.L)))
+    (L, void(lir.lineNumber(line, L.L)))
   }
 
   def lineNumber(line: Int, L: CodeLabel): Code[Unit] =
-    new LineNumberCode(lir.lineNumber(line, L.L))
+    void(lir.lineNumber(line, L.L))
 
   def _fatal[U](msg: Code[String])(implicit uti: TypeInfo[U]): Code[U] =
     Code._throw[is.hail.utils.HailException, U](Code.newInstance[is.hail.utils.HailException, String, Option[String], Throwable](
@@ -474,17 +474,6 @@ trait Code[+T] {
     else
       v.ti
   }
-}
-
-class LineNumberCode(x: lir.LineNumberX) extends Code[Unit] {
-  private[this] val L = new lir.Block()
-  L.append(x)
-  def start = L
-  def end = L
-  def v = null
-  def check() { }
-  def clear() { }
-  override def ti = UnitInfo
 }
 
 class VCode[+T](
