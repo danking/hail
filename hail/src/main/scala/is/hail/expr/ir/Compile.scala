@@ -46,6 +46,8 @@ object Compile {
     InferPType(ir)
     val returnType = ir.pType
 
+    log.info(s"Hail IR:\n${Pretty(ir, setLineNumbers = true)}")
+
     val fb = EmitFunctionBuilder[F](ctx, "Compiled",
       CodeParamType(typeInfo[Region]) +: params.map { case (_, pt) =>
         EmitParamType(pt)
@@ -108,6 +110,9 @@ object CompileWithAggregators {
     InferPType(ir, Env.empty[PType])
 
     val returnType = ir.pType
+
+    log.info(s"Hail IR:\n${Pretty(ir, setLineNumbers = true)}")
+
     val fb = EmitFunctionBuilder[F](ctx, "CompiledWithAggs",
       CodeParamType(typeInfo[Region]) +: params.map { case (_, pt) =>
         EmitParamType(pt)

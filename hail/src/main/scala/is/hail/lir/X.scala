@@ -125,8 +125,8 @@ class Classx[C](val name: String, val superName: String) {
 
     // println(Pretty(this))
     Emit(this,
-      print
-      // Some(new PrintWriter(System.out))
+      // print
+      Some(new PrintWriter(System.out))
     )
   }
 }
@@ -230,6 +230,8 @@ class Method private[lir] (
               case x: SwitchX =>
                 s.push(x.Ldefault)
                 x.Lcases.foreach(s.push)
+              case x: LineNumberX =>
+                s.push(x.L)
               case _ =>
             }
             x = x.next
@@ -708,6 +710,8 @@ class ThrowX() extends ControlX {
 
   def setTarget(i: Int, b: Block): Unit = throw new IndexOutOfBoundsException()
 }
+
+class LineNumberX(val line: Int, val L: Block) extends StmtX
 
 class StmtOpX(val op: Int) extends StmtX
 

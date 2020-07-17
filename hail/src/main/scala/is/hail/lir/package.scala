@@ -121,6 +121,8 @@ package object lir {
     x
   }
 
+  def lineNumber(line: Int, startsAt: Block): LineNumberX = new LineNumberX(line, startsAt)
+
   def stmtOp(op: Int, c1: ValueX, c2: ValueX, c3: ValueX): StmtX = stmtOp(op, FastIndexedSeq(c1, c2, c3))
 
   def load(l: Local): ValueX = new LoadX(l)

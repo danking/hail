@@ -167,6 +167,8 @@ object Emit {
           mn.instructions.add(new InsnNode(x.op))
         case x: ThrowX =>
           mn.instructions.add(new InsnNode(ATHROW))
+        case x: LineNumberX =>
+          mn.instructions.add(new LineNumberNode(x.line, labelNodes(x.L)))
       }
     }
 
@@ -193,6 +195,7 @@ object Emit {
   def apply(c: Classx[_], print: Option[PrintWriter]): Array[Byte] = {
     val cn = new ClassNode()
 
+    cn.sourceFile = "hidan"
     cn.version = V1_8
     cn.access = ACC_PUBLIC
 

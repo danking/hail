@@ -20,4 +20,6 @@ abstract class BaseIR {
     else
       copy(newChildren)
   }
+
+  var line: java.lang.Integer = null
 }

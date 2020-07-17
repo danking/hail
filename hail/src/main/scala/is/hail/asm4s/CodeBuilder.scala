@@ -152,6 +152,10 @@ trait CodeBuilderLike {
   def _throw[T <: java.lang.Throwable](cerr: Code[T]): Unit = {
     append(Code._throw[T, Unit](cerr))
   }
+
+  def lineNumber(line: Int, startsAt: CodeLabel): Unit = {
+    append(Code.lineNumber(line, startsAt))
+  }
 }
 
 class CodeBuilder(val mb: MethodBuilder[_], var code: Code[Unit]) extends CodeBuilderLike {

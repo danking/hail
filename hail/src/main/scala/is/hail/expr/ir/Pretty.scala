@@ -33,8 +33,48 @@ object Pretty {
 
   val MAX_VALUES_TO_LOG: Int = 25
 
-  def apply(ir: BaseIR, elideLiterals: Boolean = true, maxLen: Int = -1): String = {
-    val sb = new StringBuilder
+  class LineTrackingStringBuilder(
+    setLineNumbers: Boolean
+  ) {
+    private[this] val sb = new StringBuilder
+    if (setLineNumbers) {
+      sb.append("0: ")
+    }
+    private[this] var _line = 0
+    def size(): Int = sb.size
+    def line(): Int = _line
+    def +=(i: Int): Unit = sb.append(i)
+    def append(i: Int): Unit = sb.append(i)
+    def +=(s: String): Unit = append(s)
+    def append(s: String): Unit = {
+      if (setLineNumbers) {
+        s.split('\n').foreachBetween(
+          { x => sb.append(x) }
+        )({ _line += 1; sb.append(_line); sb.append(": ") })
+        if (s.length() > 0 && s.charAt(s.length() - 1) == '\n') {
+          _line += 1
+          sb.append('\n')
+          sb.append(_line)
+          sb.append(": ")
+        }
+      } else {
+        sb.append(s)
+      }
+    }
+    def +=(c: Char): Unit = append(c)
+    def append(c: Char): Unit = {
+      sb.append(c)
+      if (setLineNumbers && c == '\n') {
+        _line += 1
+        sb.append(_line)
+        sb.append(": ")
+      }
+    }
+    def result(): String = sb.result()
+  }
+
+  def apply(ir: BaseIR, elideLiterals: Boolean = true, maxLen: Int = -1, setLineNumbers: Boolean = false): String = {
+    val sb = new LineTrackingStringBuilder(setLineNumbers)
 
     def prettyIntOpt(x: Option[Int]): String = x.map(_.toString).getOrElse("None")
 
@@ -109,6 +149,9 @@ object Pretty {
     }
 
     def pretty(ir: BaseIR, depth: Int) {
+      if (setLineNumbers) {
+        ir.line = sb.line()
+      }
       if (maxLen > 0 && sb.size > maxLen)
         return
 

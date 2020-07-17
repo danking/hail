@@ -509,9 +509,11 @@ class Emit[C](
     def emitI(ir: IR, region: Value[Region] = region, env: E = env, container: Option[AggContainer] = container, loopEnv: Option[Env[LoopRef]] = loopEnv): IEmitCode =
       this.emitI(ir, cb, region, env, container, loopEnv)
 
+    val L = CodeLabel()
+    cb.define(L)
+
     (ir: @unchecked) match {
       case Void() =>
-        Code._empty
 
       case Begin(xs) =>
         cb += wrapToVoid(xs)
@@ -669,6 +671,9 @@ class Emit[C](
           }
         )
     }
+    // if (ir.line != null) {
+    //   cb.lineNumber(ir.line, L)
+    // }
   }
 
   private[ir] def emitI(ir: IR, cb: EmitCodeBuilder, env: E, container: Option[AggContainer]): IEmitCode =
@@ -706,6 +711,9 @@ class Emit[C](
 
     def presentC(c: Code[_]): IEmitCode = presentPC(PCode(pt, c))
 
+    val L = CodeLabel()
+    cb.define(L)
+
     (ir: @unchecked) match {
       case I32(x) =>
         presentC(const(x))
@@ -730,13 +738,17 @@ class Emit[C](
       case Consume(value) =>
         emitI(value).map(cb){pc =>
           cb.memoizeField(pc, "consumed_field")
+          cb.lineNumber(ir.line, L)
           // Ignore pc, just return a 1
           PCode(ir.pType, 1L)
         }
       case Cast(v, typ) =>
         val iec = emitI(v)
         val cast = Casts.get(v.typ, typ)
-        iec.map(cb)(pc => PCode(pt, cast(pc.code)))
+        iec.map(cb) { pc =>
+          cb.lineNumber(ir.line, L)
+          PCode(pt, cast(pc.code))
+        }
       case CastRename(v, _typ) =>
         emitI(v)
 
@@ -744,7 +756,15 @@ class Emit[C](
         IEmitCode(cb, const(true), pt.defaultValue)
       case IsNA(v) =>
         val m = cb.newLocal[Boolean]("isna")
-        emitI(v).consume(cb, cb.assign(m, const(true)), { _ => cb.assign(m, const(false)) })
+        emitI(v).consume(cb,
+          {
+            cb.assign(m, const(true))
+            cb.lineNumber(ir.line, L)
+          },
+          { _ =>
+            cb.assign(m, const(false))
+            cb.lineNumber(ir.line, L)
+          })
         presentC(m)
 
       case x@ArrayRef(a, i, s) =>
@@ -778,24 +798,28 @@ class Emit[C](
                   .concat(", length=")
                   .concat(av.loadLength().toS)))
             })
+            cb.lineNumber(ir.line, L)
             av.loadElement(cb, iv)
           }
         }
 
       case ArrayLen(a) =>
         emitI(a).map(cb) { (ac) =>
+          cb.lineNumber(ir.line, L)
           PCode(PInt32Required, ac.asIndexable.loadLength())
         }
 
       case GetField(o, name) =>
         emitI(o).flatMap(cb) { oc =>
           val ov = oc.asBaseStruct.memoize(cb, "get_tup_elem_o")
+          cb.lineNumber(ir.line, L)
           ov.loadField(cb, name)
         }
 
       case GetTupleElement(o, i) =>
         emitI(o).flatMap(cb) { oc =>
           val ov = oc.asBaseStruct.memoize(cb, "get_tup_elem_o")
+          cb.lineNumber(ir.line, L)
           ov.loadField(cb, oc.pt.asInstanceOf[PTuple].fieldIndex(i))
         }
 
@@ -831,6 +855,7 @@ class Emit[C](
                 })
             }
 
+            cb.lineNumber(ir.line, L)
             PCode(pt, xP.construct(shapeBuilder, xP.makeRowMajorStridesBuilder(shapeCodeSeq, mb), requiredData, mb))
           }
         }
@@ -849,6 +874,7 @@ class Emit[C](
             cb.append(ndValue.outOfBounds(idxValues, mb)
                     .orEmpty(Code._fatal[Unit]("Index out of bounds")))
 
+            cb.lineNumber(ir.line, L)
             PCode(ndPType.elementType, ndValue.apply(idxValues, mb))
           }
         }
@@ -861,6 +887,7 @@ class Emit[C](
         codeRes.map(cb) { pc =>
           val res = cb.memoizeField(pc, "agg_res")
           newContainer.cleanup()
+          cb.lineNumber(ir.line, L)
           res
         }
 
@@ -879,6 +906,7 @@ class Emit[C](
 
         sc.store(cb)
 
+        cb.lineNumber(ir.line, L)
         presentC(srvb.offset)
 
       case x@ApplySeeded(fn, args, seed, rt) =>
@@ -886,10 +914,12 @@ class Emit[C](
         val impl = x.implementation
         val unified = impl.unify(Array.empty[Type], args.map(_.typ), rt)
         assert(unified)
+        cb.lineNumber(ir.line, L)
         impl.applySeededI(seed, cb, EmitRegion(mb, region), pt, codeArgs: _*)
 
       case AggStateValue(i, _) =>
         val AggContainer(_, sc, _) = container.get
+        cb.lineNumber(ir.line, L)
         presentC(sc.states(i).serializeToRegion(cb, coerce[PBinary](pt), region))
 
       case x@ShuffleWith(
@@ -1052,7 +1082,7 @@ class Emit[C](
     if (pt == PVoid)
       return new EmitCode(emitVoid(ir), const(false), PCode._empty)
 
-    (ir: @unchecked) match {
+    val ret: EmitCode = (ir: @unchecked) match {
       case Coalesce(values) =>
         val mout = mb.newLocal[Boolean]()
         val out = mb.newPLocal(pt)
@@ -2302,6 +2332,14 @@ class Emit[C](
           emitI(ir, cb)
         }
     }
+
+    val L = CodeLabel()
+
+    EmitCode(
+      Code(L, ret.setup),
+      ret.m,
+      PCode(ret.pv.pt, ret.pv.code // Code(Code.lineNumber(ir.line, L), ret.pv.code)
+      ))
   }
 
   private def capturedReferences(ir: IR): (IR, (Emit.E, DependentEmitFunctionBuilder[_]) => Emit.E) = {
