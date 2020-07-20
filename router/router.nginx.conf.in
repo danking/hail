@@ -31,7 +31,7 @@ server {
 
     location / {
     # NOTE: http vs https
-        proxy_pass https://benchmark/;
+        proxy_pass http://benchmark/;
         include /etc/nginx/proxy.conf;
     }
 
