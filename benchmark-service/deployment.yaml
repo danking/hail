@@ -4,7 +4,7 @@ kind: Deployment
 metadata:
   name: benchmark
   labels:
-    app: web
+    app: benchmark
 spec:
   replicas: 1
   selector:
@@ -17,6 +17,6 @@ spec:
     spec:
       containers:
         - name: benchmark
-          image: {{ benchmark_image.image }}
+          image: "{{ benchmark_image.image }}"
           ports:
             - containerPort: 5000
