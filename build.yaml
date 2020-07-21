@@ -1047,6 +1047,8 @@ steps:
     - benchmark_image
     - deploy_router
     - create_certs
+    - deploy_auth
+    - create_accounts
  - kind: runImage
    name: create_dummy_oauth2_client_secret
    image:
