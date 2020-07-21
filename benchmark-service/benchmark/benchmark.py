@@ -41,6 +41,8 @@ async def index(request: web.Request) -> Dict[str, Any]:
 
 def init_app() -> web.Application:
     app = web.Application()
+    admin = web.Application()
+    app.add_subapp('/dabuhijl/benchmark/', admin)
     app.add_routes(router)
     aiohttp_jinja2.setup(
         app, loader=jinja2.ChoiceLoader([
