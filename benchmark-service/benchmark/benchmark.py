@@ -43,12 +43,12 @@ def init_app() -> web.Application:
     app = web.Application()
     admin = web.Application()
     app.add_routes(router)
-    app.add_subapp('/dabuhijl/benchmark/', admin)
+    app.add_subapp('/dabuhijl/benchmark/', app)
     aiohttp_jinja2.setup(
         app, loader=jinja2.ChoiceLoader([
             jinja2.PackageLoader('benchmark')
         ]))
-    return app
+    return admin
 
 
 web.run_app(init_app(), port=5000)
