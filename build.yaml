@@ -1037,18 +1037,6 @@ steps:
     - scorecard_image
     - deploy_router
     - create_certs
- - kind: deploy
-   name: deploy_benchmark
-   namespace:
-     valueFrom: default_ns.name
-   config: benchmark-service/deployment.yaml
-   dependsOn:
-    - default_ns
-    - benchmark_image
-    - deploy_router
-    - create_certs
-    - deploy_auth
-    - create_accounts
  - kind: runImage
    name: create_dummy_oauth2_client_secret
    image:
@@ -1081,6 +1069,18 @@ steps:
     - auth_image
     - create_dummy_oauth2_client_secret
     - create_certs
+ - kind: deploy
+   name: deploy_benchmark
+   namespace:
+     valueFrom: default_ns.name
+   config: benchmark-service/deployment.yaml
+   dependsOn:
+    - default_ns
+    - benchmark_image
+    - deploy_router
+    - create_certs
+    - deploy_auth
+    - create_accounts
  - kind: runImage
    name: test_auth_copy_paste_login
    image:
