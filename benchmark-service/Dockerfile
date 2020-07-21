@@ -1,4 +1,4 @@
-FROM python:3.7-slim-stretch
+FROM {{ service_base_image.image }}
 
 RUN pip3 install aiohttp aiohttp_jinja2
 

@@ -6,6 +6,7 @@ import aiohttp_jinja2
 import jinja2
 from aiohttp import web
 import logging
+from gear import web_authenticated_developers_only,rest_authenticated_developers_only
 
 
 router = web.RouteTableDef()
@@ -30,6 +31,7 @@ async def greet_user(request: web.Request) -> web.Response:
 
 
 @router.get('/')
+@web_authenticated_developers_only(redirect=False)
 async def index(request: web.Request) -> Dict[str, Any]:
     context = {
         'current_date': 'July 10, 2020'
@@ -39,6 +41,7 @@ async def index(request: web.Request) -> Dict[str, Any]:
     return response
 
 
+@web_authenticated_developers_only(redirect=False)
 def init_app() -> web.Application:
     app = web.Application()
     admin = web.Application()

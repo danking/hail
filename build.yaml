@@ -444,6 +444,8 @@ steps:
    dockerFile: benchmark-service/Dockerfile
    contextPath: .
    publishAs: benchmark
+   dependsOn:
+     - service_base_image
  - kind: buildImage
    name: auth_image
    dockerFile: auth/Dockerfile
