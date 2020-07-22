@@ -8,8 +8,7 @@ import aiohttp_jinja2
 import jinja2
 from aiohttp import web
 import logging
-from gear import web_authenticated_developers_only, rest_authenticated_developers_only
-from gear.gear import setup_aiohttp_session
+from gear import setup_aiohttp_session, web_authenticated_developers_only, rest_authenticated_developers_only
 
 router = web.RouteTableDef()
 logging.basicConfig(level=logging.DEBUG)
