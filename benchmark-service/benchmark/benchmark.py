@@ -9,7 +9,7 @@ import jinja2
 from aiohttp import web
 import logging
 from gear import web_authenticated_developers_only, rest_authenticated_developers_only
-
+from gear.gear import setup_aiohttp_session
 
 router = web.RouteTableDef()
 logging.basicConfig(level=logging.DEBUG)
@@ -46,6 +46,7 @@ async def index(request: web.Request) -> Dict[str, Any]:
 
 def init_app() -> web.Application:
     app = web.Application()
+    setup_aiohttp_session(app)
     admin = web.Application()
     app.add_routes(router)
     admin.add_subapp('/dabuhijl/benchmark/', app)
