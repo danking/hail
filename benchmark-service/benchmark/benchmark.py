@@ -6,7 +6,7 @@ import aiohttp_jinja2
 import jinja2
 from aiohttp import web
 import logging
-from gear import web_authenticated_developers_only,rest_authenticated_developers_only
+from gear import web_authenticated_developers_only, rest_authenticated_developers_only
 
 
 router = web.RouteTableDef()
@@ -41,7 +41,7 @@ async def index(request: web.Request) -> Dict[str, Any]:
     return response
 
 
-@web_authenticated_developers_only(redirect=False)
+
 def init_app() -> web.Application:
     app = web.Application()
     admin = web.Application()
