@@ -18,6 +18,9 @@ spec:
       containers:
         - name: benchmark
           image: "{{ benchmark_image.image }}"
+          env:
+          - name: HAIL_DOMAIN
+            value: "{{ global.domain }}"
           ports:
             - containerPort: 5000
           volumeMounts:

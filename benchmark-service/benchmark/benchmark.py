@@ -42,7 +42,6 @@ async def index(request: web.Request) -> Dict[str, Any]:
     return response
 
 
-
 def init_app() -> web.Application:
     app = web.Application()
     setup_aiohttp_session(app)
