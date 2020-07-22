@@ -24,3 +24,7 @@ spec:
             - name: session-secret-key
               mountPath: /session-secret-key
               readOnly: true
+      volumes:
+        - name: session-secret-key
+          secret:
+            secretName: session-secret-key
