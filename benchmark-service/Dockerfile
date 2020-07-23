@@ -1,7 +1,5 @@
 FROM {{ service_base_image.image }}
 
-RUN pip3 install aiohttp aiohttp_jinja2
-
 COPY benchmark-service/benchmark /benchmark-service/benchmark/
 
 COPY benchmark-service/setup.py benchmark-service/MANIFEST.in  /benchmark-service/

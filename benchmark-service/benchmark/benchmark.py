@@ -8,10 +8,13 @@ import aiohttp_jinja2
 import jinja2
 from aiohttp import web
 import logging
-from gear import setup_aiohttp_session, web_authenticated_developers_only, rest_authenticated_developers_only
+from gear import setup_aiohttp_session, web_authenticated_developers_only, rest_authenticated_developers_only, AccessLogger
+from hailtop.config import get_deploy_config
+from hailtop.tls import get_server_ssl_context
 
 router = web.RouteTableDef()
 logging.basicConfig(level=logging.DEBUG)
+deploy_config = get_deploy_config()
 
 
 @router.get('/healthcheck')
@@ -55,4 +58,8 @@ def init_app() -> web.Application:
     return admin
 
 
-web.run_app(init_app(), port=5000)
+web.run_app(deploy_config.prefix_application(init_app(), 'benchmark'),
+            host='0.0.0.0',
+            port=5000,
+            access_log_class=AccessLogger,
+            ssl_context=get_server_ssl_context())
