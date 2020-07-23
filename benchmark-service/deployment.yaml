@@ -21,6 +21,8 @@ spec:
           env:
           - name: HAIL_DOMAIN
             value: "{{ global.domain }}"
+          - name: HAIL_DEPLOY_CONFIG_FILE
+            value: /deploy-config/deploy-config.json
           ports:
             - containerPort: 5000
           volumeMounts:
@@ -36,6 +38,5 @@ spec:
             secretName: session-secret-key
         - name: deploy-config
           secret:
-            optional: false
             secretName: deploy-config
 
