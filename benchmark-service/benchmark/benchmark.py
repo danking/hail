@@ -15,10 +15,10 @@ from web_common import setup_aiohttp_jinja2, setup_common_static_routes
 
 
 router = web.RouteTableDef()
-#logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG)
 deploy_config = get_deploy_config()
-configure_logging()
-log = logging.getLogger('benchmark')
+# configure_logging()
+# log = logging.getLogger('benchmark')
 
 
 @router.get('/healthcheck')
