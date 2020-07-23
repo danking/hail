@@ -35,7 +35,7 @@ async def greet_user(request: web.Request) -> web.Response:
 
 
 @router.get('/')
-# @web_authenticated_developers_only(redirect=False)
+@web_authenticated_developers_only(redirect=False)
 async def index(request: web.Request, userdata) -> Dict[str, Any]:
     context = {
         'current_date': 'July 10, 2020'
