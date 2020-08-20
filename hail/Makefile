@@ -169,6 +169,7 @@ copy-py-files: $(PYTHON_VERSION_INFO) $(SHADOW_JAR) $(INIT_SCRIPTS) $(PY_FILES) 
 	cp ../README.md build/deploy/
 	rsync -rv \
 	    --exclude '__pycache__/' \
+	    --exclude '.mypy_cache/' \
 	    --exclude 'benchmark_hail/' \
 	    --exclude 'docs/' \
 	    --exclude 'dist/' \

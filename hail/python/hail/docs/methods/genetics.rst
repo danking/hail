@@ -23,7 +23,6 @@ Genetics
     mendel_errors
     de_novo
     nirvana
-    pc_relate
     sample_qc
     skat
     lambda_gc
@@ -50,7 +49,6 @@ Genetics
 .. autofunction:: mendel_errors
 .. autofunction:: de_novo
 .. autofunction:: nirvana
-.. autofunction:: pc_relate
 .. autofunction:: sample_qc
 .. autofunction:: skat
 .. autofunction:: lambda_gc

@@ -9,6 +9,7 @@ Methods
     impex
     stats
     genetics
+    relatedness
     misc
 
 .. rubric:: Import / Export
@@ -67,7 +68,6 @@ Methods
     mendel_errors
     de_novo
     nirvana
-    pc_relate
     realized_relationship_matrix
     sample_qc
     skat
@@ -78,6 +78,14 @@ Methods
     trio_matrix
     variant_qc
     vep
+
+
+.. rubric:: Relatedness
+
+.. autosummary::
+
+    pc_relate
+    king
 
 
 .. rubric:: Miscellaneous
