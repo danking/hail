@@ -8,8 +8,9 @@ Relatedness
 
 .. autosummary::
 
-    pc_relate
+    identity_by_descent
     king
+    pc_relate
 
 .. autofunction:: pc_relate
 .. autofunction:: king

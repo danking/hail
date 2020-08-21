@@ -1,8 +1,13 @@
 import hail as hl
+
+from hail.expr.expressions import expr_call
 from hail.expr.expressions import matrix_table_source
+from hail.typecheck import typecheck, nullable
+from hail.utils import deduplicate
 from hail.utils.java import Env
 
 
+@typecheck(call_expr=expr_call, block_size=nullable(int))
 def king(call_expr, *, block_size=None):
     r"""Compute relatedness estimates between individuals using a KING variant.
 
@@ -10,44 +15,44 @@ def king(call_expr, *, block_size=None):
 
     Examples
     --------
-    Estimate kinship for every pair of samples.
+    Estimate the kinship coefficient for every pair of samples.
 
     >>> kinship = hl.king(dataset.GT)
 
     Notes
     -----
 
-    The following presentation pervasively uses matrix-style typesetting rather
-    than the typesetting of Manichaikul, et. al.
+    The following presentation summarizes the methods section of Manichaikul,
+    et. al., but adopts a more consistent notation for matrices.
 
     Let
 
-    - :math:`i` and :math:`j` be two individuals (possibly their same
-      individual) in the dataset given by `call_expr`.
+    - :math:`i` and :math:`j` be two individuals in the dataset
 
     - :math:`N^{Aa}_{i}` be the number of heterozygote genotype force individual
       :math:`i`.
 
-    - :math:`N^{Aa,Aa}_{i,j}` be the number of variants at which both
-      individuals have heterozygote genotypes.
+    - :math:`N^{Aa,Aa}_{i,j}` be the number of variants at which a pair of
+      individuals both have heterozygote genotypes.
 
-    - :math:`N^{AA,aa}_{i,j}` be the number of variants at which the pair of
+    - :math:`N^{AA,aa}_{i,j}` be the number of variants at which a pair of
       individuals have opposing homozygote genotypes.
 
     - :math:`S_{i,j}` be the set of single-nucleotide variants for which both
       individuals :math:`i` and :math:`j` have a non-missing genotype.
 
-    - :math:`X_{i,s}` be the genotype score matrix. Homozyogus-reference
+    - :math:`X_{i,s}` be the genotype score matrix. Homozygous-reference
       genotypes are represented as 0, heterozygous genotypes are represented as
-      1, and homozygous-alternate genotypes are represented as 2. The argument
-      `call_expr` defines :math:`X_{i,s}`.
+      1, and homozygous-alternate genotypes are represented as
+      2. :math:`X_{i,s}` is calculated by invoking
+      :meth:`CallExpression.n_alt_alleles` on the `call_expr`.
 
     The three counts above, :math:`N^{Aa}`, :math:`N^{Aa,Aa}`, and
     :math:`N^{AA,aa}`, exclude variants where one or both individuals have
     missing genotypes.
 
     In terms of the symbols above, we can define :math:`d`, the genetic distance
-    between two samples. We can interpret :math:`d` as a unnormalized
+    between two samples. We can interpret :math:`d` as an unnormalized
     measurement of the genetic material not shared identically-by-descent:
 
     .. math::
@@ -56,7 +61,7 @@ def king(call_expr, *, block_size=None):
 
     In the supplement to Manichaikul, et. al, the authors show how to re-express
     the genetic distance above in terms of the three counts of hetero- and
-    homo-zygosity by considering the nine possible configurations of a pair of
+    homozygosity by considering the nine possible configurations of a pair of
     genotypes:
 
     +-------------------------------+----------+----------+----------+
@@ -80,14 +85,17 @@ def king(call_expr, *, block_size=None):
 
     The first term, :math:`4 N^{AA,aa}_{i,j}`, accounts for all pairs of
     genotypes with opposing homozygous genotypes. The second and third terms
-    accounts for the four cases of one. Unfortunately, they over count the pair
-    of heterozygous case. We offset that with the fourth and final term.
+    account for the four cases of one heteroyzgous genotype and one
+    non-heterozygous genotype. Unfortunately, the second and third term also
+    contribute to the case of a pair of heteroyzgous genotypes. We offset this
+    with the fourth and final term.
 
     The genetic distance, :math:`d_{i,j}`, ranges between zero and four times
     the number of variants in the dataset. In the supplement to Manichaikul,
-    et. al, the authors demonstrate that kinship, :math:`\phi_{i,j}`, between
-    two individuals from the same population is related to the expected genetic
-    distance at any *one* variant by way of the allele frequency:
+    et. al, the authors demonstrate that the kinship coefficient,
+    :math:`\phi_{i,j}`, between two individuals from the same population is
+    related to the expected genetic distance at any *one* variant by way of the
+    allele frequency:
 
     .. math::
 
@@ -101,21 +109,25 @@ def king(call_expr, *, block_size=None):
 
     .. math::
 
-        \frac{4 N^{AA,aa}_{i,j} + N^{Aa}_{i} + N^{Aa}_{j} - 2 N^{Aa,Aa}_{i,j}}
-             {\sum_{s \in S_{i,j}} 4 p_s (1 - p_s)}
+        1 - 2 \phi_{i,j} = \frac{4 N^{AA,aa}_{i,j}
+                                 + N^{Aa}_{i}
+                                 + N^{Aa}_{j}
+                                 - 2 N^{Aa,Aa}_{i,j}}
+                                {\sum_{s \in S_{i,j}} 4 p_s (1 - p_s)}
 
-    This is complementary to kinship which is "one-half of the fraction of
-    genetic material shared identically-by-descent".
+    Note that the "coefficient of relationship", (by definition: the fraction of
+    genetic material shared identically-by-descent) is equal to twice the
+    kinship coefficient: :math:`\phi_{i,j} = 2 r_{i,j}`.
 
-    Manichaikul, et. al demosntrate in Section 2.3 that the sum of the variance
-    of the allele frequencies,
+    Manichaikul, et. al, assuming one homogeneous population, demonstrate in
+    Section 2.3 that the sum of the variance of the allele frequencies,
 
     .. math::
 
         \sum_{s \in S_{i, j}} 2 p_s (1 - p_s)
 
     is, in expectation, proportional to the count of heterozygous genotypes of
-    either individual, if both individuals are members of the same population:
+    either individual:
 
     .. math::
 
@@ -129,7 +141,7 @@ def king(call_expr, *, block_size=None):
         \frac{N^{Aa}_{i} + N^{Aa}_{j}}{2}
 
     Using the aforementioned equality, we define a normalized genetic distance,
-    :math:`\widetwidle{d_{i,j}}`, for a pair of individuals from distinct
+    :math:`\widetilde{d_{i,j}}`, for a pair of individuals from distinct
     populations:
 
     .. math::
@@ -139,28 +151,29 @@ def king(call_expr, *, block_size=None):
             \frac{4 N^{AA,aa}_{i,j} + N^{Aa}_{i} + N^{Aa}_{j} - 2 N^{Aa,Aa}_{i,j}}
                  {N^{Aa}_{i} + N^{Aa}_{j}} \\
             &= 1
-               + \frac{2 N^{AA,aa}_{i,j} - N^{Aa,Aa}_{i,j}}
+               + \frac{4 N^{AA,aa}_{i,j} - 2 N^{Aa,Aa}_{i,j}}
                       {N^{Aa}_{i} + N^{Aa}_{j}}
         \end{aligned}
 
-    The complement of this normalized genetic distance is called the
-    "coefficient of relationship" and is defined as the fraction of genetic
-    material shared by two individuals:
+    As mentioned before, the complement of the normalized genetic distance is
+    the coefficient of relationship which is also equal to twice the kinship
+    coefficient:
 
     .. math::
 
-        r_{i,j} = 1 - \widetilde{d_{i,j}}
+        2 \phi_{i,j} = r_{i,j} = 1 - \widetilde{d_{i,j}}
 
-    We now present the KING "within-family" estimator of kinship as one-half of
-    the coefficient of relationship:
+    We now present the KING "within-family" estimator of the kinship coefficient
+    as one-half of the coefficient of relationship:
 
     .. math::
 
         \begin{aligned}
-        \widehat{\phi_{i,j}^{\prime}} &= \frac{1}{2} r_{i,j} \\
+        \widehat{\phi_{i,j}^{\mathrm{within}}} &= \frac{1}{2} r_{i,j} \\
             &= \frac{1}{2} \left( 1 - \widetilde{d_{i,j}} \right) \\
             &= \frac{N^{Aa,Aa}_{i,j} - 2 N^{AA,aa}_{i,j}}
                     {N^{Aa}_{i} + N^{Aa}_{j}}
+        \end{aligned}
 
     This "within-family" estimator over-estimates the kinship coefficient under
     certain circumstances detailed in Section 2.3 of Manichaikul, et. al. The
@@ -172,22 +185,23 @@ def king(call_expr, *, block_size=None):
 
         \frac{N^{Aa}_{i} + N^{Aa}_{j}}{2} \rightsquigarrow \mathrm{min}(N^{Aa}_{i}, N^{Aa}_{j})
 
-    With this replacement the "within-family" estimator becomes the
-    "between-family" estimator, defined in Equation 11 of Manichaikul, et. al.:
+    This transforms the "within-family" estimator into the "between-family"
+    estimator, defined by Equation 11 of Manichaikul, et. al.:
 
     .. math::
 
         \begin{aligned}
-        \widehat{\phi_{i,j}} &=
+        \widetilde{d_{i,j}^{\mathrm{between}}} &=
+            \frac{4 N^{AA,aa}_{i,j} + N^{Aa}_{i} + N^{Aa}_{j} - 2 N^{Aa,Aa}_{i,j}}
+                 {2 \mathrm{min}(N^{Aa}_{i}, N^{Aa}_{j})} \\
+        \widehat{\phi_{i,j}^{\mathrm{between}}} &=
             \frac{1}{2}
-            + \frac{N^{Aa,Aa}_{i,j} - 2 N^{AA,aa}_{i,j}}
-                   {2 \cdot \mathrm{min}(N^{Aa}_{i}, N^{Aa}_{j})}
-            - \frac{N^{Aa}_{i} + N^{Aa}_{j}}
-                   {4 \cdot \mathrm{min}(N^{Aa}_{i}, N^{Aa}_{j})} \\
+            + \frac{2 N^{Aa,Aa}_{i,j} - 4 N^{AA,aa}_{i,j} - N^{Aa}_{i} - N^{Aa}_{j}}
+                   {4 \cdot \mathrm{min}(N^{Aa}_{i}, N^{Aa}_{j})}
         \end{aligned}
 
     This function, :func:`.king`, only implements the "between-family"
-    estimator, :math:`\widehat{\phi_{i,j}}`.
+    estimator, :math:`\widehat{\phi_{i,j}^{\mathrm{between}}}`.
 
     Parameters
     ----------
@@ -228,24 +242,28 @@ def king(call_expr, *, block_size=None):
 
     het_hom_balance = N_Aa_Aa - (2 * N_AA_aa)
     het_hom_balance = het_hom_balance.to_matrix_table_row_major()
-    mt = mt.add_col_index('col_idx').key_cols_by('col_idx')
+
+    col_index_field = Env.get_uid()
+    col_key = mt.col_key
+    cols = mt.add_col_index(col_index_field).key_cols_by(col_index_field).cols()
+
     het_hom_balance = het_hom_balance.key_cols_by(
-        col=mt.cols()[het_hom_balance.col_idx].sample_idx
-    )
-    het_hom_balance = het_hom_balance.drop('col_idx')
-    het_hom_balance = het_hom_balance.key_rows_by(
-        row=mt.cols()[het_hom_balance.row_idx].sample_idx
+        **cols[het_hom_balance.col_idx].select(*col_key)
     )
 
-    # Numerator
+    renaming, _ = deduplicate(list(col_key), already_used=set(col_key))
+    assert len(renaming) == len(col_key)
+
+    het_hom_balance = het_hom_balance.key_rows_by(
+        **cols[het_hom_balance.row_idx].select(*col_key).rename(dict(renaming))
+    )
+
     king_robust = het_hom_balance.select_entries(
         het_hom_balance=het_hom_balance.element
     )
-    # N^i_Aa
     king_robust = king_robust.annotate_rows(
         n_hets_row=n_hets[king_robust.row_key].n_hets
     )
-    # N^j_Aa
     king_robust = king_robust.annotate_cols(
         n_hets_col=n_hets[king_robust.col_key].n_hets
     )
@@ -253,7 +271,6 @@ def king(call_expr, *, block_size=None):
         min_n_hets=hl.min(king_robust.n_hets_row,
                           king_robust.n_hets_col)
     )
-    # Equation 11
     return king_robust.select_entries(
         phi=(
             0.5

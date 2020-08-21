@@ -1,29 +1,12 @@
-import itertools
-import math
-import numpy as np
-from typing import Dict, List, Tuple, Callable
-import builtins
-
-import hail
 import hail as hl
 import hail.expr.aggregators as agg
-from hail.expr import Expression, ExpressionException, \
-    expr_float64, expr_call, expr_any, expr_numeric, expr_array, \
-    expr_locus, \
-    analyze, check_entry_indexed, check_row_indexed, \
-    matrix_table_source, table_source
-from hail.expr.types import tbool, tarray, tfloat64, tint32
+from hail.expr import (expr_float64, expr_call, expr_array, analyze,
+                       matrix_table_source)
+from hail.expr.types import tarray
 from hail import ir
-from hail.genetics.reference_genome import reference_genome_type
 from hail.linalg import BlockMatrix
-from hail.matrixtable import MatrixTable
-from hail.methods.misc import require_biallelic, require_row_key_variant, require_col_key_str
-from hail.stats import LinearMixedModel
 from hail.table import Table
-from hail.typecheck import typecheck, nullable, numeric, oneof, sequenceof, \
-    enumeration, anytype
-from hail.utils import wrap_to_list, new_temp_file, FatalError
-from hail.utils.java import Env, info, warning
+from hail.typecheck import typecheck, nullable, numeric, enumeration
 
 
 @typecheck(call_expr=expr_call,
