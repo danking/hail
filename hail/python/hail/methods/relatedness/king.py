@@ -257,7 +257,7 @@ def king(call_expr, *, block_size=None):
     het_hom_balance = het_hom_balance.key_rows_by(
         **cols[het_hom_balance.row_idx].select(**{
             new: cols[het_hom_balance.row_idx][old]
-            for new, old in renaming.items()
+            for old, new in renaming
         })
     )
 
