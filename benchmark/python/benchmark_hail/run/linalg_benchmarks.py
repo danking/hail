@@ -54,3 +54,10 @@ def blockmatrix_write_from_entry_expr_range_mt_standardize():
 def sum_table_of_ndarrays():
     ht = hl.utils.range_table(400).annotate(nd=hl.nd.ones((4096, 4096)))
     ht.aggregate(hl.agg.ndarray_sum(ht.nd))
+
+
+@benchmark()
+def king():
+    mt = hl.balding_nichols_model(6, n_variants=10000, n_samples=4096)
+    path = hl.utils.new_temp_file(extension='mt')
+    hl.king(mt.GT).write(path, overwrite=True)

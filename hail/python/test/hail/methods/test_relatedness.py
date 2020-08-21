@@ -4,7 +4,8 @@ from subprocess import DEVNULL, call as syscall
 
 import hail as hl
 import hail.utils as utils
-from ..helpers import resource, get_dataset, skip_unless_spark_backend
+from ..helpers import (resource, get_dataset, skip_unless_spark_backend,
+                       startTestHailContext, stopTestHailContext)
 
 setUpModule = startTestHailContext
 tearDownModule = stopTestHailContext
@@ -148,7 +149,3 @@ def test_pcrelate_issue_5263(self):
                            GT=hl.call(hl.rand_bool(0.5), hl.rand_bool(0.5)))
     actual = hl.pc_relate(mt.GT2, 0.10, k=2, statistics='all')
     assert expected._same(actual, tolerance=1e-4)
-
-
-def test_king_small(self):
-    

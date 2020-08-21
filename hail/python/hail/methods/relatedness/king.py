@@ -277,8 +277,8 @@ def king(call_expr, *, block_size=None):
         ) + (
             (
                 2 * king_robust.het_hom_balance +
-                king_robust.n_hets_row +
-                king_robust.n_hets_col
+                - king_robust.n_hets_row
+                - king_robust.n_hets_col
             ) / (
                 4 * king_robust.min_n_hets
             )
