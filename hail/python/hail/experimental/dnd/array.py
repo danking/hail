@@ -222,9 +222,7 @@ class DNDArray:
     def _block_inner_product(self,
                              right: 'DNDArray',
                              block_product: Callable[[Expression, Expression], Expression],
-                             block_aggregate: Callable[[Expression], Expression],
-                             *,
-                             write_after_product=False
+                             block_aggregate: Callable[[Expression], Expression]
                              ) -> 'DNDArray':
         left = self
         assert left.block_size == right.block_size
@@ -253,8 +251,6 @@ class DNDArray:
         o = o.annotate(right=right.m[o.k, o.c].block)
         o = o.annotate(product=block_product(o.left, o.right))
         o = o._key_by_assert_sorted('r', 'c', 'k')
-        if write_after_product:
-            o = o.checkpoint(new_temp_file(), _codec_spec=DNDArray.fast_codec_spec)
         o = o._key_by_assert_sorted('r', 'c')
 
         import hail.methods.misc as misc
