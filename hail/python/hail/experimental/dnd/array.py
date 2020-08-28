@@ -249,6 +249,7 @@ class DNDArray:
         o = o.annotate(left=left.m[o.r, o.k].block)
         o = o._key_by_assert_sorted('k', 'c', 'r')
         o = o.annotate(right=right.m[o.k, o.c].block)
+
         o = o.annotate(product=block_product(o.left, o.right))
         o = o._key_by_assert_sorted('r', 'c', 'k')
         o = o._key_by_assert_sorted('r', 'c')
