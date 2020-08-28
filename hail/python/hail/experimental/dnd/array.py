@@ -385,7 +385,6 @@ class DNDArray:
         return self._block_map(lambda right: left * right)
 
     def write(self, fname, *, _codec_spec=None, overwrite=False) -> 'DNDArray':
-        # FIXME: restore to None codec spec
         if _codec_spec is None:
             _codec_spec = DNDArray.fast_codec_spec
         kwargs = {'_codec_spec': _codec_spec,
