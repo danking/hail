@@ -89,6 +89,10 @@ class DNDArray:
                 block_size=0)
             return DNDArray(t, t, t)
 
+        assert 'r' not in mt.row
+        assert 'c' not in mt.row
+        assert 'block' not in mt.row
+
         n_rows, n_cols = mt.count()
         n_block_rows = (n_rows + block_size - 1) // block_size
         n_block_cols = (n_cols + block_size - 1) // block_size
