@@ -198,6 +198,83 @@ def test_dndarray_sort_columns():
     assert np.array_equal(result, expected)
 
 
+def test_show_no_error():
+    n_variants = 100
+    n_samples = 100
+    block_size = 32
+    mt = hl.balding_nichols_model(n_populations=2,
+                                  n_variants=n_variants,
+                                  n_samples=n_samples)
+    mt = mt.select_entries(dosage=hl.float(mt.GT.n_alt_alleles()))
+
+    da = hl.experimental.dnd.array(mt, 'dosage', block_size=block_size)
+
+    def test_show(**kwargs):
+        try:
+            da.show(handler=lambda x: x._ascii_str(), **kwargs)
+            da.show(handler=lambda x: x._html_str(), **kwargs)
+        except Exception as exc:
+            raise ValueError(f'{kwargs}') from exc
+
+    test_show(n_rows=40)
+    test_show(n_rows=40, types=False)
+    test_show(n_cols=40)
+    test_show(n_cols=40, types=False)
+    test_show(n_rows=35, n_cols=40)
+    test_show(n_rows=35, n_cols=40, types=False)
+
+
+def test_dndarray_round_trip():
+    n_variants = 100
+    n_samples = 100
+    block_size = 32
+    mt = hl.balding_nichols_model(n_populations=2,
+                                  n_variants=n_variants,
+                                  n_samples=n_samples)
+    mt = mt.select_cols().select_rows().select_globals()
+    mt = mt.select_entries(dosage=hl.float(mt.GT.n_alt_alleles()))
+
+    da = hl.experimental.dnd.array(mt, 'dosage', block_size=block_size)
+    new_mt = da.to_matrix_table()
+    new_mt = new_mt.select_entries(dosage = new_mt.x)
+    assert mt._same(new_mt)
+
+
+def test_dndarray_round_trip_int64_col_idx():
+    n_variants = 100
+    n_samples = 100
+    block_size = 32
+    mt = hl.balding_nichols_model(n_populations=2,
+                                  n_variants=n_variants,
+                                  n_samples=n_samples)
+    mt = mt.add_col_index('col_idx')
+    mt = mt.key_cols_by('col_idx')
+    mt = mt.select_cols().select_rows().select_globals()
+    mt = mt.select_entries(dosage=hl.float(mt.GT.n_alt_alleles()))
+
+    da = hl.experimental.dnd.array(mt, 'dosage', block_size=block_size)
+    new_mt = da.to_matrix_table()
+    new_mt = new_mt.select_entries(dosage = new_mt.x)
+    assert mt._same(new_mt)
+
+
+def test_row_fields_bug_in_to_matrix_table():
+    mt = hl.balding_nichols_model(1, 5, 5)
+    mt = mt.select_entries(genotype_score=hl.float(mt.GT.n_alt_alleles()))
+    da = hl.experimental.dnd.array(mt, 'genotype_score')
+
+    da = da.T.inner_product(
+        da,
+        lambda l, r: ((l - r)*(l - r)),
+        lambda l, r: l + r,
+        hl.float(0),
+        hl.agg.sum
+    )
+
+    new_mt = da.to_matrix_table()
+    new_mt.show()
+
+
 def test_dndarray_sum():
     n_variants = 10
     n_samples = 10

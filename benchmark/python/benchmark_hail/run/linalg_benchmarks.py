@@ -68,3 +68,11 @@ def king():
     mt = hl.balding_nichols_model(6, n_variants=10000, n_samples=4096)
     path = hl.utils.new_temp_file(extension='mt')
     hl.king(mt.GT).write(path, overwrite=True)
+
+
+@benchmark()
+def dnd_array_matmul():
+    mt = hl.utils.range_matrix_table(20_000, 20_000, n_partitions=4)
+    mt = mt.annotate_entries(x=mt.row_idx + mt.col_idx)
+    da = hl.dnd.array(mt, 'x')
+    assert (da @ da.T)._force_count_blocks() == 24
