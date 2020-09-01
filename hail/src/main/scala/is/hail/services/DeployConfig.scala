@@ -61,13 +61,6 @@ class DeployConfig(
   val serviceNamespace: Map[String, String]) {
   import DeployConfig._
 
-  def scheme(baseScheme: String = "http"): String = {
-    if (location == "external" || location == "k8s")
-      baseScheme + "s"
-    else
-      baseScheme
-  }
-
   def getServiceNamespace(service: String): String = {
     serviceNamespace.getOrElse(service, defaultNamespace)
   }
@@ -98,8 +91,8 @@ class DeployConfig(
       s"/$ns/$service"
   }
 
-  def baseUrl(service: String, baseScheme: String = "http"): String = {
-    s"${ scheme(baseScheme) }://${ domain(service) }${ basePath(service) }"
+  def baseUrl(service: String): String = {
+    s"https://${ domain(service) }${ basePath(service) }"
   }
 
   private[this] lazy val addressRequester = new Requester("address")
