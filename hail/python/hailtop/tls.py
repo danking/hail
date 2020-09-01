@@ -30,7 +30,7 @@ def _get_ssl_config() -> Dict[str, str]:
     raise NoSSLConfigFound(f'no ssl config found at {config_file}')
 
 
-def get_in_cluster_server_ssl_context() -> ssl.SSLContext:
+def get_in_cluster_server_ssl_context(mtls=None) -> ssl.SSLContext:
     global server_ssl_context
     if server_ssl_context is None:
         ssl_config = _get_ssl_config()
@@ -41,8 +41,8 @@ def get_in_cluster_server_ssl_context() -> ssl.SSLContext:
                                            keyfile=ssl_config['key'],
                                            password=None)
         server_ssl_context.verify_mode = ssl.CERT_OPTIONAL
-        # FIXME: mTLS
-        # server_ssl_context.verify_mode = ssl.CERT_REQURIED
+        if mtls is True:
+            server_ssl_context.verify_mode = ssl.CERT_REQUIRED
         server_ssl_context.check_hostname = False  # clients have no hostnames
     return server_ssl_context
 

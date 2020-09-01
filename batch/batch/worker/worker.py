@@ -22,7 +22,7 @@ from hailtop.utils import (time_msecs, request_retry_transient_errors,
                            RETRY_FUNCTION_SCRIPT, sleep_and_backoff, retry_all_errors, check_shell,
                            CalledProcessError, blocking_to_async, check_shell_output,
                            retry_long_running, run_if_changed)
-from hailtop.tls import get_context_specific_ssl_client_session
+from hailtop.tls import get_context_specific_ssl_client_session, check_ssl_config
 from hailtop.batch_client.parse import (parse_cpu_in_mcpu, parse_image_tag,
                                         parse_memory_in_bytes)
 # import uvloop
@@ -1196,6 +1196,13 @@ class Worker:
 
             with open('key.json', 'w') as f:
                 f.write(json.dumps(resp_json['key']))
+
+            os.mkdir('/ssl-config')
+            ssl_config = resp_json['ssl_config']
+            for fname, data in ssl_config.items():
+                open('/ssl-config/' + fname).write(data)
+            assert 'ssl-config.json' in ssl_config
+            check_ssl_config(ssl_config)
 
             credentials = google.oauth2.service_account.Credentials.from_service_account_file(
                 'key.json')

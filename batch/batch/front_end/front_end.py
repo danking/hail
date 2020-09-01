@@ -219,10 +219,10 @@ async def _get_job_log_from_record(app, batch_id, job_id, record):
     state = record['state']
     ip_address = record['ip_address']
     if state == 'Running':
-        async with aiohttp.ClientSession(
+        async with in_cluster_ssl_client_session(
                 raise_for_status=True, timeout=aiohttp.ClientTimeout(total=60)) as session:
             try:
-                url = (f'http://{ip_address}:5000'
+                url = (f'https://{ip_address}:5000'
                        f'/api/v1alpha/batches/{batch_id}/jobs/{job_id}/log')
                 resp = await request_retry_transient_errors(session, 'GET', url)
                 return await resp.json()
@@ -352,10 +352,10 @@ async def _get_full_job_status(app, record):
     assert record['status'] is None
 
     ip_address = record['ip_address']
-    async with aiohttp.ClientSession(
+    async with in_cluster_ssl_client_session(
             raise_for_status=True, timeout=aiohttp.ClientTimeout(total=60)) as session:
         try:
-            url = (f'http://{ip_address}:5000'
+            url = (f'https://{ip_address}:5000'
                    f'/api/v1alpha/batches/{batch_id}/jobs/{job_id}/status')
             resp = await request_retry_transient_errors(session, 'GET', url)
             return await resp.json()

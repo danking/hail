@@ -204,6 +204,7 @@ spec:
 {% endif %}
         ports:
          - containerPort: 5000
+         - containerPort: 5001
         resources:
           requests:
             memory: "250M"

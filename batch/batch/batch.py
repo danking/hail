@@ -11,8 +11,8 @@ from hailtop.utils import (
 from hailtop.tls import in_cluster_ssl_client_session
 
 from .globals import complete_states, tasks, STATUS_FORMAT_VERSION
-from .batch_configuration import KUBERNETES_TIMEOUT_IN_SECONDS, \
-    KUBERNETES_SERVER_URL
+from .batch_configuration import (KUBERNETES_TIMEOUT_IN_SECONDS,
+                                  KUBERNETES_SERVER_URL)
 from .batch_format_version import BatchFormatVersion
 from .spec_writer import SpecWriter
 from .utils import cost_str
@@ -276,14 +276,14 @@ async def unschedule_job(app, record):
         scheduler_state_changed.set()
         log.info(f'unschedule job {id}, attempt {attempt_id}: updated {instance} free cores')
 
-    url = (f'http://{instance.ip_address}:5000'
+    url = (f'https://{instance.ip_address}:5000'
            f'/api/v1alpha/batches/{batch_id}/jobs/{job_id}/delete')
     delay = 0.1
     while True:
         if instance.state in ('inactive', 'deleted'):
             break
         try:
-            async with aiohttp.ClientSession(
+            async with in_cluster_ssl_client_session(
                     raise_for_status=True, timeout=aiohttp.ClientTimeout(total=60)) as session:
                 await session.delete(url)
                 await instance.mark_healthy()
@@ -455,9 +455,9 @@ async def schedule_job(app, record, instance):
         log.info(f'schedule job {id} on {instance}: made job config')
 
         try:
-            async with aiohttp.ClientSession(
+            async with in_cluster_ssl_client_session(
                     raise_for_status=True, timeout=aiohttp.ClientTimeout(total=2)) as session:
-                url = (f'http://{instance.ip_address}:5000'
+                url = (f'https://{instance.ip_address}:5000'
                        f'/api/v1alpha/batches/jobs/create')
                 await session.post(url, json=body)
                 await instance.mark_healthy()

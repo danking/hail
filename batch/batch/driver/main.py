@@ -18,16 +18,18 @@ from hailtop.config import get_deploy_config
 from hailtop.utils import time_msecs, RateLimit
 from hailtop.tls import get_in_cluster_server_ssl_context
 from hailtop import aiogoogle
-from web_common import setup_aiohttp_jinja2, setup_common_static_routes, render_template, \
-    set_message
+from web_common import (setup_aiohttp_jinja2, setup_common_static_routes,
+                        render_template, set_message)
 import googlecloudprofiler
 import uvloop
 
 from ..batch import mark_job_complete, mark_job_started
 from ..log_store import LogStore
-from ..batch_configuration import REFRESH_INTERVAL_IN_SECONDS, \
-    DEFAULT_NAMESPACE, BATCH_BUCKET_NAME, HAIL_SHA, HAIL_SHOULD_PROFILE, \
-    WORKER_LOGS_BUCKET_NAME, PROJECT
+from ..batch_configuration import (REFRESH_INTERVAL_IN_SECONDS,
+                                   KUBERNETES_TIMEOUT_IN_SECONDS,
+                                   DEFAULT_NAMESPACE, BATCH_BUCKET_NAME,
+                                   HAIL_SHA, HAIL_SHOULD_PROFILE,
+                                   WORKER_LOGS_BUCKET_NAME, PROJECT)
 from ..globals import HTTP_CLIENT_MAX_SIZE
 
 from .instance_pool import InstancePool
@@ -41,6 +43,7 @@ log = logging.getLogger('batch')
 log.info(f'REFRESH_INTERVAL_IN_SECONDS {REFRESH_INTERVAL_IN_SECONDS}')
 
 routes = web.RouteTableDef()
+activate_routes = web.RouteTableDef()
 
 deploy_config = get_deploy_config()
 
@@ -181,8 +184,7 @@ async def delete_batch(request):
     return web.Response()
 
 
-async def activate_instance_1(request, instance):
-    body = await request.json()
+async def activate_instance_1(body, k8s_cache, instance):
     ip_address = body['ip_address']
 
     log.info(f'activating {instance}')
@@ -192,16 +194,26 @@ async def activate_instance_1(request, instance):
 
     with open('/gsa-key/key.json', 'r') as f:
         key = json.loads(f.read())
+
+    k8s_cache = k8s_cache
+    ssl_config_batch_worker = k8s_cache.read_secret(
+        'ssl-config-batch-worker', DEFAULT_NAMESPACE,
+        KUBERNETES_TIMEOUT_IN_SECONDS)
+
     return web.json_response({
         'token': token,
-        'key': key
+        'key': key,
+        'ssl_config': ssl_config_batch_worker
     })
 
 
-@routes.post('/api/v1alpha/instances/activate')
+@activate_routes.post('/api/v1alpha/instances/activate')
 @activating_instances_only
 async def activate_instance(request, instance):
-    return await asyncio.shield(activate_instance_1(request, instance))
+    body = await request.json()
+    k8s_cache = request.app['k8s_cache']
+    del request  # the activate route does not have a full request['app']
+    return await asyncio.shield(activate_instance_1(body, k8s_cache, instance))
 
 
 async def deactivate_instance_1(instance):
@@ -608,14 +620,9 @@ LOCK IN SHARE MODE;
         await asyncio.sleep(10)
 
 
-async def on_startup(app):
+def on_startup(app):
     pool = concurrent.futures.ThreadPoolExecutor()
     app['blocking_pool'] = pool
-
-    kube.config.load_incluster_config()
-    k8s_client = kube.client.CoreV1Api()
-    k8s_cache = K8sCache(k8s_client, refresh_time=5)
-    app['k8s_cache'] = k8s_cache
 
     db = Database()
     await db.async_init(maxsize=50)
@@ -692,7 +699,7 @@ async def on_cleanup(app):
     await app['db'].async_close()
 
 
-def run():
+async def arun():
     if HAIL_SHOULD_PROFILE:
         profiler_tag = f'{DEFAULT_NAMESPACE}'
         if profiler_tag == 'default':
@@ -711,13 +718,77 @@ def run():
     app.add_routes(routes)
     app.router.add_get("/metrics", server_stats)
 
-    app.on_startup.append(on_startup)
+    kube.config.load_incluster_config()
+    k8s_client = kube.client.CoreV1Api()
+    k8s_cache = K8sCache(k8s_client, refresh_time=5)
+
+    def set_k8s_cache(app):
+        app['k8s_cache'] = k8s_cache
+
+    app.on_startup.extend([on_startup, set_k8s_cache])
     app.on_cleanup.append(on_cleanup)
 
-    web.run_app(deploy_config.prefix_application(app,
-                                                 'batch-driver',
-                                                 client_max_size=HTTP_CLIENT_MAX_SIZE),
-                host='0.0.0.0',
-                port=5000,
-                access_log_class=AccessLogger,
-                ssl_context=get_in_cluster_server_ssl_context())
+    main_app = deploy_config.prefix_application(
+        app,
+        'batch-driver',
+        client_max_size=HTTP_CLIENT_MAX_SIZE)
+    main_runner = web.AppRunner(main_app, access_log_class=AccessLogger)
+
+    activate_app = web.Application(client_max_size=HTTP_CLIENT_MAX_SIZE)
+    setup_aiohttp_session(activate_app)
+    setup_aiohttp_jinja2(activate_app, 'batch.driver.activate')
+    setup_common_static_routes(activate_routes)
+    activate_app.add_routes(activate_routes)
+
+    activate_app.on_startup.append(set_k8s_cache)
+
+    activate_app = deploy_config.prefix_application(
+        activate_app,
+        'batch-driver-activate',
+        client_max_size=HTTP_CLIENT_MAX_SIZE)
+    activate_runner = web.AppRunner(activate_app, access_log_class=AccessLogger)
+
+    await main_runner.setup()
+    runners = [main_runner]
+    await activate_runner.setup()
+    runners.append(activate_runner)
+
+    try:
+        main_site = web.TCPSite(
+            main_runner,
+            '0.0.0.0',
+            5000,
+            ssl_context=get_in_cluster_server_ssl_context())
+        activate_site = web.TCPSite(
+            activate_runner,
+            '0.0.0.0',
+            5001,
+            ssl_context=get_in_cluster_server_ssl_context(mtls=False))
+
+        await main_site.start()
+        await activate_site.start()
+
+        while True:
+            await asyncio.sleep(3600)
+    except (web.GracefulExit, KeyboardInterrupt):
+        pass
+    finally:
+        exceptions = []
+        for runner in runners:
+            try:
+                await runner.cleanup()
+            except Exception as exc:
+                exceptions.append(exc)
+        for exception in exceptions:
+            log.info('encountered an exception while cleaning up', exc_info=exception)
+        if exceptions:
+            raise exception[0]
+
+
+def run():
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_until_complete(arun())
+    finally:
+        web._cancel_all_tasks(loop)
+        loop.close()

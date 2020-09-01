@@ -105,6 +105,18 @@ server {
 }
 
 server {
+    server_name batch-driver-activate.*;
+
+    location / {
+        proxy_pass https://batch-driver-activate/;
+        include /etc/nginx/proxy.conf;
+    }
+
+    listen 443 ssl;
+    listen [::]:443 ssl;
+}
+
+server {
     server_name notebook.*;
 
     # needed to correctly handle error_page with internal handles

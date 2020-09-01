@@ -86,6 +86,20 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
+  name: batch-driver-activate
+  labels:
+    app: batch-driver-activate
+spec:
+  ports:
+  - port: 443
+    protocol: TCP
+    targetPort: 5001
+  selector:
+    app: batch-driver
+---
+apiVersion: v1
+kind: Service
+metadata:
   name: ci
   labels:
     app: ci
