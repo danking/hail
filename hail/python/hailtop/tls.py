@@ -54,9 +54,10 @@ def get_in_cluster_client_ssl_context() -> ssl.SSLContext:
         client_ssl_context = ssl.create_default_context(
             purpose=Purpose.SERVER_AUTH,
             cafile=ssl_config['outgoing_trust'])
-        client_ssl_context.load_cert_chain(ssl_config['cert'],
-                                           keyfile=ssl_config['key'],
-                                           password=None)
+        if os.path.isfile(ssl_config['key']):
+            client_ssl_context.load_cert_chain(ssl_config['cert'],
+                                               keyfile=ssl_config['key'],
+                                               password=None)
         client_ssl_context.verify_mode = ssl.CERT_REQUIRED
         client_ssl_context.check_hostname = True
     return client_ssl_context
@@ -121,6 +122,30 @@ def check_ssl_config(ssl_config: Dict[str, str]):
         if not os.path.isfile(ssl_config[key]):
             raise ValueError(f'specified {key}, {ssl_config[key]} does not exist')
     log.info('using tls and verifying client and server certificates')
+
+
+def trust_only_ssl_secret(principal: str, ssl_secret: Dict[str, str]):
+    return {k: v for k, v in ssl_secret.items()
+            if k in {f'{principal}-outgoing.pem',
+                     f'{principal}-outgoing-store.jks',
+                     f'{principal}-incoming.pem',
+                     f'{principal}-incoming-store.jks',
+                     'ssl-config.json'}}
+
+
+def unpack_ssl_secret(principal: str, ssl_secret: Dict[str, str]):
+    config = json.loads(ssl_secret['ssl-config.json'])
+    open(config['outgoing_trust']).write(ssl_secret[f'{principal}-outgoing.pem'])
+    open(config['outgoing_trust_store']).write(ssl_secret[f'{principal}-outgoing-store.jks'])
+    open(config['incoming_trust']).write(ssl_secret[f'{principal}-incoming.pem'])
+    open(config['incoming_trust_store']).write(ssl_secret[f'{principal}-incoming-store.jks'])
+    if f'{principal}-key.pem' in ssl_secret:
+        open(config['key']).write(ssl_secret[f'{principal}-key.pem'])
+    if f'{principal}-cert.pem' in ssl_secret:
+        open(config['cert']).write(ssl_secret[f'{principal}-cert.pem'])
+    if f'{principal}-key-store.p12' in ssl_secret:
+        open(config['key_store']).write(ssl_secret[f'{principal}-key-store.p12'])
+    open('ssl-config.json').write(ssl_secret['ssl-config.json'])
 
 
 class TLSAdapter(HTTPAdapter):

@@ -1,3 +1,4 @@
+from typing import Set, Dict, Optional
 from collections import deque
 import os
 import secrets
@@ -13,6 +14,7 @@ import sortedcontainers
 import aiohttp
 from hailtop.utils import (
     retry_long_running, time_msecs, secret_alnum_string)
+from hailtop import tls
 
 from ..batch_configuration import DEFAULT_NAMESPACE, PROJECT, \
     WORKER_MAX_IDLE_TIME_MSECS, STANDING_WORKER_MAX_IDLE_TIME_MSECS, \
@@ -20,6 +22,7 @@ from ..batch_configuration import DEFAULT_NAMESPACE, PROJECT, \
 
 from .instance import Instance
 from ..worker_config import WorkerConfig
+from .k8s_cache import K8sCache
 
 log = logging.getLogger('instance_pool')
 
@@ -31,9 +34,9 @@ log.info(f'BATCH_WORKER_IMAGE {BATCH_WORKER_IMAGE}')
 class WindowFractionCounter:
     def __init__(self, window_size: int):
         self._window_size = window_size
-        self._q = deque()
+        self._q: deque = deque()
         self._n_true = 0
-        self._seen = set()
+        self._seen: Set[str] = set()
 
     def push(self, key: str, x: bool):
         self.assert_valid()
@@ -93,7 +96,7 @@ class ZoneSuccessRate:
 
 
 class InstancePool:
-    def __init__(self, app, machine_name_prefix):
+    def __init__(self, app, machine_name_prefix: str, k8s_cache: K8sCache):
         self.app = app
         self.instance_id = app['instance_id']
         self.log_store = app['log_store']
@@ -102,6 +105,7 @@ class InstancePool:
         self.compute_client = app['compute_client']
         self.logging_client = app['logging_client']
         self.machine_name_prefix = machine_name_prefix
+        self.k8s_cache: K8sCache = k8s_cache
 
         self.zone_success_rate = ZoneSuccessRate()
 
@@ -137,7 +141,7 @@ class InstancePool:
         self.live_free_cores_mcpu = 0
         self.live_total_cores_mcpu = 0
 
-        self.name_instance = {}
+        self.name_instance: Dict[str, Instance] = {}
 
     async def update_zones(self):
         northamerica_regions = {
@@ -274,7 +278,7 @@ SET worker_type = %s, worker_cores = %s, worker_disk_size_gb = %s,
         if instance in self.healthy_instances_by_free_cores:
             self.healthy_instances_by_free_cores.remove(instance)
 
-    async def remove_instance(self, instance, reason, timestamp=None):
+    async def remove_instance(self, instance: Instance, reason: str, timestamp: Optional[int] = None):
         await instance.deactivate(reason, timestamp)
 
         await self.db.just_execute(
@@ -283,7 +287,7 @@ SET worker_type = %s, worker_cores = %s, worker_disk_size_gb = %s,
         self.adjust_for_remove_instance(instance)
         del self.name_instance[instance.name]
 
-    def adjust_for_add_instance(self, instance):
+    def adjust_for_add_instance(self, instance: Instance):
         assert instance not in self.instances_by_last_updated
 
         self.n_instances_by_state[instance.state] += 1
@@ -296,7 +300,7 @@ SET worker_type = %s, worker_cores = %s, worker_disk_size_gb = %s,
                 and instance.failed_request_count <= 1):
             self.healthy_instances_by_free_cores.add(instance)
 
-    def add_instance(self, instance):
+    def add_instance(self, instance: Instance):
         assert instance.name not in self.name_instance
 
         self.name_instance[instance.name] = instance
@@ -307,6 +311,11 @@ SET worker_type = %s, worker_cores = %s, worker_disk_size_gb = %s,
             cores = self.worker_cores
         if max_idle_time_msecs is None:
             max_idle_time_msecs = WORKER_MAX_IDLE_TIME_MSECS
+
+        batch_worker_ssl_secret = self.k8s_cache.read_secret('batch-worker', 'default')
+        trust_only_ssl_secret = json.dumps(
+            tls.trust_only_ssl_secret('batch-worker', batch_worker_ssl_secret))
+        del batch_worker_ssl_secret
 
         while True:
             # 36 ** 5 = ~60M
@@ -471,6 +480,7 @@ WORKER_CONFIG=$(curl -s -H "Metadata-Flavor: Google" "http://metadata.google.int
 MAX_IDLE_TIME_MSECS=$(curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/attributes/max_idle_time_msecs")
 NAME=$(curl -s http://metadata.google.internal/computeMetadata/v1/instance/name -H 'Metadata-Flavor: Google')
 ZONE=$(curl -s http://metadata.google.internal/computeMetadata/v1/instance/zone -H 'Metadata-Flavor: Google')
+TRUST_ONLY_SSL_SECRET=$(curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/attributes/trust_only_ssl_secret")
 
 BATCH_WORKER_IMAGE=$(curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/attributes/batch_worker_image")
 
@@ -553,6 +563,7 @@ docker run \
     -e WORKER_CONFIG=$WORKER_CONFIG \
     -e MAX_IDLE_TIME_MSECS=$MAX_IDLE_TIME_MSECS \
     -e WORKER_DATA_DISK_MOUNT=/mnt/disks/$WORKER_DATA_DISK_NAME \
+    -e TRUST_ONLY_SSL_SECRET=$TRUST_ONLY_SSL_SECRET \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v /usr/bin/docker:/usr/bin/docker \
     -v /usr/sbin/xfs_quota:/usr/sbin/xfs_quota \
@@ -609,6 +620,9 @@ gsutil -m cp dockerd.log gs://$WORKER_LOGS_BUCKET_NAME/batch/logs/$INSTANCE_ID/w
                 }, {
                     'key': 'max_idle_time_msecs',
                     'value': max_idle_time_msecs
+                }, {
+                    'key': 'trust_only_ssl_secret',
+                    'value': trust_only_ssl_secret
                 }]
             },
             'tags': {

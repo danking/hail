@@ -1,3 +1,4 @@
+from typing import Optional
 import aiohttp
 import datetime
 import logging
@@ -78,7 +79,7 @@ VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
 
         return rv['token']
 
-    async def deactivate(self, reason, timestamp=None):
+    async def deactivate(self, reason: str, timestamp: Optional[int] = None):
         if self._state in ('inactive', 'deleted'):
             return
 

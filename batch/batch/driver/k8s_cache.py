@@ -3,6 +3,7 @@ import asyncio
 import sortedcontainers
 
 from hailtop.utils import retry_transient_errors
+from ..batch_configuration import KUBERNETES_TIMEOUT_IN_SECONDS
 
 
 class K8sCache:
@@ -21,7 +22,7 @@ class K8sCache:
             key=lambda id: self.service_accounts[id][1])
         self.service_account_locks = {}
 
-    async def read_secret(self, name, namespace, timeout):
+    async def read_secret(self, name, namespace, timeout=KUBERNETES_TIMEOUT_IN_SECONDS):
         id = (name, namespace)
 
         lock = self.secret_locks.get(id)
@@ -50,7 +51,7 @@ class K8sCache:
 
             return secret
 
-    async def read_service_account(self, name, namespace, timeout):
+    async def read_service_account(self, name, namespace, timeout=KUBERNETES_TIMEOUT_IN_SECONDS):
         id = (name, namespace)
 
         lock = self.service_account_locks.get(id)

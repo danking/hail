@@ -674,7 +674,7 @@ SELECT worker_type, worker_cores, worker_disk_size_gb,
     log_store = LogStore(BATCH_BUCKET_NAME, WORKER_LOGS_BUCKET_NAME, instance_id, pool, credentials=credentials)
     app['log_store'] = log_store
 
-    inst_pool = InstancePool(app, machine_name_prefix)
+    inst_pool = InstancePool(app, machine_name_prefix, k8s_cache)
     app['inst_pool'] = inst_pool
     await inst_pool.async_init()
 
