@@ -1,8 +1,6 @@
 FROM ubuntu:18.04
 
 ENV LANG C.UTF-8
-RUN apt-get update -qqy && \
- apt-get install -qqy curl  && \
 
 RUN apt-get -qqy update && \
   apt-get -qqy install \
