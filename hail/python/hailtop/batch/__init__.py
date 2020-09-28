@@ -4,7 +4,7 @@ from .batch import Batch
 from .batch_pool_executor import BatchPoolExecutor
 from .backend import LocalBackend, ServiceBackend, Backend
 from .utils import BatchException
-from .resource import Resource
+from .resource import Resource, ResourceGroup
 
 __all__ = ['Batch',
            'LocalBackend',
@@ -13,7 +13,8 @@ __all__ = ['Batch',
            'BatchException',
            'BatchPoolExecutor',
            'genetics',
-           'Resource'
+           'Resource',
+           'ResourceGroup'
            ]
 
 nest_asyncio.apply()
