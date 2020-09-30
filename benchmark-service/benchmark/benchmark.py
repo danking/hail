@@ -22,6 +22,9 @@ import gidgethub
 import aiohttp
 import hailtop.batch_client.aioclient as bc
 
+with open(os.environ.get('HAIL_CI_OAUTH_TOKEN', 'oauth-token/oauth-token'), 'r') as f:
+    oauth_token = f.read().strip()
+
 configure_logging()
 router = web.RouteTableDef()
 logging.basicConfig(level=logging.DEBUG)
@@ -226,7 +229,7 @@ async def on_startup(app):
     app['gs_reader'] = ReadGoogleStorage(service_account_key_file='/benchmark-gsa-key/key.json')
     app['github_client'] = gidgethub.aiohttp.GitHubAPI(aiohttp.ClientSession(),
                                                        'hail-is/hail',
-                                                       oauth_token=os.getenv("GH_AUTH"))
+                                                       oauth_token=oauth_token)
     app['batch_client'] = await bc.BatchClient(billing_project='hail')
     asyncio.ensure_future(retry_long_running('github_polling_loop', github_polling_loop, app))
 
