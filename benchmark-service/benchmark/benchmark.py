@@ -15,8 +15,11 @@ import plotly.express as px
 from scipy.stats.mstats import gmean, hmean
 import numpy as np
 import pandas as pd
-from benchmark.github import github_polling_loop
+from benchmark.github import query_github
 from hailtop.utils import retry_long_running
+import asyncio
+import gidgethub
+import aiohttp
 
 configure_logging()
 router = web.RouteTableDef()
@@ -209,8 +212,20 @@ async def compare(request, userdata):  # pylint: disable=unused-argument
     return await render_template('benchmark', request, userdata, 'compare.html', context)
 
 
+async def github_polling_loop(app):
+    github_client = app['github_client']
+    while True:
+        await query_github(github_client)
+        log.info(f'successfully queried github')
+        await asyncio.sleep(60)
+
+
 async def on_startup(app):
     app['gs_reader'] = ReadGoogleStorage(service_account_key_file='/benchmark-gsa-key/key.json')
+    app['github_client'] = gidgethub.aiohttp.GitHubAPI(aiohttp.ClientSession(),
+                                                       'hail-is/hail',
+                                                       oauth_token=os.getenv("GH_AUTH"))
+    asyncio.ensure_future(retry_long_running('github_polling_loop', github_polling_loop, app))
 
 
 def run():
@@ -222,8 +237,6 @@ def run():
     router.static('/static', f'{BENCHMARK_ROOT}/static')
     app.add_routes(router)
     app.on_startup.append(on_startup)
-
-    await retry_long_running('github-polling-loop', github_polling_loop)
 
     web.run_app(deploy_config.prefix_application(app, 'benchmark'),
                 host='0.0.0.0',
