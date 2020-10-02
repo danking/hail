@@ -22,9 +22,6 @@ import gidgethub
 import aiohttp
 import hailtop.batch_client.aioclient as bc
 
-with open(os.environ.get('HAIL_CI_OAUTH_TOKEN', 'oauth-token/oauth-token'), 'r') as f:
-    oauth_token = f.read().strip()
-
 configure_logging()
 router = web.RouteTableDef()
 logging.basicConfig(level=logging.DEBUG)
@@ -216,6 +213,10 @@ async def compare(request, userdata):  # pylint: disable=unused-argument
     return await render_template('benchmark', request, userdata, 'compare.html', context)
 
 
+@router.post('/api/v1alpha/create_benchmark')
+async def submit(request, userdata):
+
+
 async def github_polling_loop(app):
     github_client = app['github_client']
     batch_client = app['batch_client']
@@ -226,6 +227,8 @@ async def github_polling_loop(app):
 
 
 async def on_startup(app):
+    with open(os.environ.get('HAIL_CI_OAUTH_TOKEN', 'oauth-token/oauth-token'), 'r') as f:
+        oauth_token = f.read().strip()
     app['gs_reader'] = ReadGoogleStorage(service_account_key_file='/benchmark-gsa-key/key.json')
     app['github_client'] = gidgethub.aiohttp.GitHubAPI(aiohttp.ClientSession(),
                                                        'hail-is/hail',
