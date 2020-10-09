@@ -9,14 +9,14 @@ RUN hail-apt-get-install \
 
 RUN mkdir samtools && \
     (cd samtools && \
-     curl -LO https://github.com/samtools/samtools/releases/download/1.9/samtools-1.9.tar.bz2 && \
+     curl -LO https://www.github-cache/samtools/samtools/releases/download/1.9/samtools-1.9.tar.bz2 && \
      tar -xf samtools-1.9.tar.bz2 && \
      rm -rf samtools-1.9.tar.bz2 && \
      cd samtools-1.9 && \
      ./configure --without-curses && \
      make && \
      make install)
-RUN git clone --recursive https://github.com/vcflib/vcflib.git && \
+RUN git clone --recursive https://www.github-cache/vcflib/vcflib.git && \
     (cd vcflib && make)
 RUN curl -LO http://s3.amazonaws.com/plink2-assets/plink2_linux_avx2_latest.zip && \
     unzip plink2_linux_avx2_latest.zip && \
@@ -43,7 +43,7 @@ RUN hail-apt-get-install \
 
 RUN mkdir eigenstrat && \
     (cd eigenstrat && \
-     git clone https://github.com/DReichLab/EIG.git && \
+     git clone https://www.github-cache/DReichLab/EIG.git && \
      cd EIG && \
      cd src && \
      LDLIBS="-llapacke" make && \

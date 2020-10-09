@@ -86,3 +86,6 @@ principals:
 - name: monitoring-tests
   domain: monitoring-tests
   kind: json
+- name: github-cache
+  domain: github-cache
+  kind: nginx

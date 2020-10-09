@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: github-cache
+  labels:
+    app: github-cache
+    hail.is/sha: "{{ code.sha }}"
+spec:
+  selector:
+    matchLabels:
+      app: github-cache
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: github-cache
+        hail.is/sha: "{{ code.sha }}"
+    spec:
+{% if deploy %}
+      priorityClassName: production
+{% endif %}
+      nodeSelector:
+        preemptible: "true"
+      tolerations:
+       - key: preemptible
+         value: "true"
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: "app"
+                    operator: In
+                    values:
+                    - github-cache
+              topologyKey: "kubernetes.io/hostname"
+      containers:
+       - name: github-cache
+         image: {{ github-cache_image.image }}
+         resources:
+           requests:
+             memory: "100M"
+             cpu: "100m"
+           limits:
+             memory: "250M"
+             cpu: "1"
+         env:
+          - name: HAIL_DOMAIN
+            value: {{ global.domain }}
+          - name: HAIL_DEFAULT_NAMESPACE
+            value: {{ default_ns.name }}
+         ports:
+          - containerPort: 443
+         volumeMounts:
+          - name: ssl-config-github-cache
+            mountPath: /ssl-config
+            readOnly: true
+         readinessProbe:
+           tcpSocket:
+             port: 443
+           initialDelaySeconds: 5
+           periodSeconds: 5
+      volumes:
+       - name: ssl-config-github-cache
+         secret:
+           optional: false
+           secretName: ssl-config-github-cache
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: github-cache
+  labels:
+    app: github-cache
+spec:
+  ports:
+  - name: https
+    port: 443
+    protocol: TCP
+    targetPort: 443
+  selector:
+    app: github-cache
+---
+apiVersion: autoscaling/v2beta1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: github-cache
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: github-cache
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      targetAverageUtilization: 80
+---
+apiVersion: policy/v1beta1
+kind: PodDisruptionBudget
+metadata:
+  name: github-cache
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: github-cache

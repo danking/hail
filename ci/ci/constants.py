@@ -1,4 +1,4 @@
-GITHUB_CLONE_URL = 'https://github.com/'
+GITHUB_CLONE_URL = 'https://www.github-cache/'
 GITHUB_STATUS_CONTEXT = 'ci-test'
 
 AUTHORIZED_USERS = {
