@@ -7,3 +7,4 @@ RUN echo "APT::Acquire::Retries \"5\";" > /etc/apt/apt.conf.d/80-retries && \
     python3 -m pip install --upgrade --no-cache-dir pip
 COPY pip.conf /root/.config/pip/pip.conf
 COPY hail-pip-install /bin/hail-pip-install
+COPY hail-apt-get-install /bin/hail-apt-get-install
