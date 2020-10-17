@@ -157,6 +157,7 @@ class LocalBackend(
 
   def executeLiteral(ir: IR): IR = {
     ExecutionTimer.logTime("LocalBackend.executeLiteral") { timer =>
+      val ir = irMap(id).asInstanceOf[IR]
       val t = ir.typ
       assert(t.isRealizable)
       val (value, timings) = execute(timer, ir)
