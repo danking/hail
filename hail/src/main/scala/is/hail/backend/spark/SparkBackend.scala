@@ -11,7 +11,7 @@ import is.hail.expr.ir.lowering._
 import is.hail.expr.ir._
 import is.hail.types.physical.{PStruct, PTuple, PType}
 import is.hail.types.virtual.{TStruct, TVoid, Type}
-import is.hail.backend.{Backend, BackendContext, BroadcastValue, HailTaskContext}
+import is.hail.backend.{Backend, BackendContext, BroadcastValue, HailTaskContext, Py4JBackend}
 import is.hail.io.fs.HadoopFS
 import is.hail.utils._
 import is.hail.io.bgen.IndexBgen
@@ -216,10 +216,7 @@ object SparkBackend {
   }
 
   def stop(): Unit = synchronized {
-    if (theSparkBackend != null) {
-      theSparkBackend.sc.stop()
-      theSparkBackend = null
-    }
+    theSparkBackend = null
   }
 }
 
@@ -232,23 +229,21 @@ class AnonymousDependency[T](val _rdd: RDD[T]) extends NarrowDependency[T](_rdd)
 class SparkBackend(
   val tmpdir: String,
   val localTmpdir: String,
-  val sc: SparkContext
-) extends Backend {
+  var sc: SparkContext
+) extends Py4JBackend {
   lazy val sparkSession: SparkSession = SparkSession.builder().config(sc.getConf).getOrCreate()
 
   val fs: HadoopFS = new HadoopFS(new SerializableHadoopConfiguration(sc.hadoopConfiguration))
 
   val bmCache: SparkBlockMatrixCache = SparkBlockMatrixCache()
 
-  def persist(backendContext: BackendContext, id: String, value: BlockMatrix, storageLevel: String): Unit = bmCache.persistBlockMatrix(id, value, storageLevel)
+  def persistBlockMatrix(id: String, value: BlockMatrix, storageLevel: String): Unit = bmCache.persistBlockMatrix(id, value, storageLevel)
 
-  def unpersist(backendContext: BackendContext, id: String): Unit = unpersist(id)
+  def pyUnpersistBlockMatrix(id: String): Unit = bmCache.unpersistBlockMatrix(id)
 
-  def getPersistedBlockMatrix(backendContext: BackendContext, id: String): BlockMatrix = bmCache.getPersistedBlockMatrix(id)
+  def getPersistedBlockMatrix(id: String): BlockMatrix = bmCache.getPersistedBlockMatrix(id)
 
-  def getPersistedBlockMatrixType(backendContext: BackendContext, id: String): BlockMatrixType = bmCache.getPersistedBlockMatrixType(id)
-
-  def unpersist(id: String): Unit = bmCache.unpersistBlockMatrix(id)
+  def getPersistedBlockMatrixType(id: String): BlockMatrixType = bmCache.getPersistedBlockMatrixType(id)
 
   def withExecuteContext[T](timer: ExecutionTimer)(f: ExecuteContext => T): T = {
     ExecuteContext.scoped(tmpdir, localTmpdir, this, fs, timer)(f)
@@ -268,7 +263,12 @@ class SparkBackend(
 
   override def asSpark(op: String): SparkBackend = this
 
-  def stop(): Unit = SparkBackend.stop()
+  override def stop(): Unit = {
+    sc.stop()
+    sc = null
+    super.stop()
+    SparkBackend.stop()
+  }
 
   def startProgressBar() {
     ProgressBarBuilder.build(sc)
@@ -361,7 +361,8 @@ class SparkBackend(
     }
   }
 
-  def executeLiteral(ir: IR): IR = {
+  def executeLiteral(id: Long): Long = {
+    val ir = irMap(id).asInstanceOf[IR]
     val t = ir.typ
     assert(t.isRealizable)
     ExecutionTimer.logTime("SparkBackend.executeLiteral") { timer =>
@@ -377,10 +378,12 @@ class SparkBackend(
         literalIR
       }
     }
+    addIR(literalIR)
   }
 
-  def executeJSON(ir: IR): String = {
-    val (jsonValue, timer) = ExecutionTimer.time("SparkBackend.executeJSON") { timer =>
+  def executeJSON(id: Long): String = {
+    val (jsonValue, timer) = ExecutionTimer.logTime("SparkBackend.executeJSON") { timer =>
+      val ir = irMap(id).asInstanceOf[IR]
       val t = ir.typ
       val value = execute(timer, ir, optimize = true)
       JsonMethods.compact(JSONAnnotationImpex.exportAnnotation(value, t))
@@ -391,6 +394,7 @@ class SparkBackend(
   // Called from python
   def encodeToBytes(ir: IR, bufferSpecString: String): (String, Array[Byte]) = {
     ExecutionTimer.logTime("SparkBackend.encodeToBytes") { timer =>
+      val ir = irMap(id).asInstanceOf[IR]
       val bs = BufferSpec.parseOrDefault(bufferSpecString)
       withExecuteContext(timer) { ctx =>
         _execute(ctx, ir, true) match {
@@ -435,18 +439,19 @@ class SparkBackend(
     }
   }
 
-  def pyFromDF(df: DataFrame, jKey: java.util.List[String]): TableIR = {
+  def pyFromDF(df: DataFrame, jKey: java.util.List[String]): Long = {
     ExecutionTimer.logTime("SparkBackend.pyFromDF") { timer =>
       val key = jKey.asScala.toArray.toFastIndexedSeq
       val signature = SparkAnnotationImpex.importType(df.schema).setRequired(true).asInstanceOf[PStruct]
-      withExecuteContext(timer) { ctx =>
-        TableLiteral(TableValue(ctx, signature.virtualType.asInstanceOf[TStruct], key, df.rdd, Some(signature)))
+      withExecuteContext() { ctx =>
+        addIR(TableLiteral(TableValue(ctx, signature.virtualType.asInstanceOf[TStruct], key, df.rdd, Some(signature))))
       }
     }
   }
 
-  def pyPersistMatrix(storageLevel: String, mir: MatrixIR): MatrixIR = {
+  def pyPersistMatrix(storageLevel: String, id: Long): Long = {
     ExecutionTimer.logTime("SparkBackend.pyPersistMatrix") { timer =>
+      val mir = irMap(id).asInstanceOf[MatrixIR]
       val level = try {
         StorageLevel.fromString(storageLevel)
       } catch {
@@ -454,15 +459,23 @@ class SparkBackend(
           fatal(s"unknown StorageLevel: $storageLevel")
       }
 
-      withExecuteContext(timer) { ctx =>
+      withExecuteContext() { ctx =>
         val tv = Interpret(mir, ctx, optimize = true)
-        MatrixLiteral(mir.typ, TableLiteral(tv.persist(ctx, level)))
+        addIR(MatrixLiteral(mir.typ, TableLiteral(tv.persist(ctx, level))))
       }
     }
   }
 
-  def pyPersistTable(storageLevel: String, tir: TableIR): TableIR = {
+  def pyUnpersistMatrix(id: Long): Long = {
+    ExecutionTimer.logTime("SparkBackend.pyUnpersistMatrix") { timer =>
+      val mir = irMap(id).asInstanceOf[MatrixIR]
+      addIR(mir.unpersist())
+    }
+  }
+
+  def pyPersistTable(storageLevel: String, id: Long): Long = {
     ExecutionTimer.logTime("SparkBackend.pyPersistTable") { timer =>
+      val tir = irMap(id).asInstanceOf[TableIR]
       val level = try {
         StorageLevel.fromString(storageLevel)
       } catch {
@@ -470,16 +483,22 @@ class SparkBackend(
           fatal(s"unknown StorageLevel: $storageLevel")
       }
 
-      withExecuteContext(timer) { ctx =>
+      withExecuteContext() { ctx =>
         val tv = Interpret(tir, ctx, optimize = true)
-        TableLiteral(tv.persist(ctx, level))
+        addIR(TableLiteral(tv.persist(ctx, level)))
       }
     }
   }
 
-  def pyToDF(tir: TableIR): DataFrame = {
+  def pyUnpersistTable(id: Long): Long = {
+    val tir = irMap(id).asInstanceOf[TableIR]
+    addIR(tir.unpersist())
+  }
+
+  def pyToDF(id: Long): DataFrame = {
     ExecutionTimer.logTime("SparkBackend.pyToDF") { timer =>
-      withExecuteContext(timer) { ctx =>
+      val tir = irMap(id).asInstanceOf[TableIR]
+      withExecuteContext() { ctx =>
         Interpret(tir, ctx).toDF()
       }
     }
@@ -525,7 +544,7 @@ class SparkBackend(
         val out = JObject(
           "vector_ir_id" -> JInt(id),
           "length" -> JInt(irs.length),
-          "type" -> reader.typ.pyJson)
+          "type" -> reader.typ.toJSON)
         JsonMethods.compact(out)
       }
     }
@@ -583,8 +602,8 @@ class SparkBackend(
   def pyFitLinearMixedModel(lmm: LinearMixedModel, pa_t: RowMatrix, a_t: RowMatrix): TableIR = {
     ExecutionTimer.logTime("SparkBackend.pyAddSequence") { timer =>
       withExecuteContext(timer) { ctx =>
-        lmm.fit(ctx, pa_t, Option(a_t))
-      }
+        addIR(lmm.fit(ctx, pa_t, Option(a_t)))
+     }
     }
   }
 

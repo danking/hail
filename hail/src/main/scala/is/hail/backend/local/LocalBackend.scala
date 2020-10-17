@@ -4,7 +4,7 @@ import java.io.PrintWriter
 
 import is.hail.annotations.{Region, SafeRow, UnsafeRow}
 import is.hail.asm4s._
-import is.hail.backend.{Backend, BackendContext, BroadcastValue, HailTaskContext}
+import is.hail.backend.{Backend, BackendContext, BroadcastValue, Py4JBackend, HailTaskContext}
 import is.hail.expr.ir.lowering._
 import is.hail.expr.ir.{IRParser, _}
 import is.hail.expr.{JSONAnnotationImpex, Validate}
@@ -55,7 +55,7 @@ object LocalBackend {
 
 class LocalBackend(
   val tmpdir: String
-) extends Backend {
+) extends Py4JBackend {
   // FIXME don't rely on hadoop
   val hadoopConf = new hadoop.conf.Configuration()
   hadoopConf.set(
@@ -84,7 +84,10 @@ class LocalBackend(
 
   def defaultParallelism: Int = 1
 
-  def stop(): Unit = LocalBackend.stop()
+  override def stop(): Unit = {
+    super.stop()
+    LocalBackend.stop()
+  }
 
   private[this] def _jvmLowerAndExecute(ctx: ExecuteContext, ir0: IR, print: Option[PrintWriter] = None): (PType, Long) = {
     val ir = LoweringPipeline.darrayLowerer(true)(DArrayLowering.All).apply(ctx, ir0).asInstanceOf[IR]
@@ -143,6 +146,7 @@ class LocalBackend(
 
   def executeJSON(ir: IR): String = {
     val (jsonValue, timer) = ExecutionTimer.time("LocalBackend.executeJSON") { timer =>
+      val ir = irMap(id).asInstanceOf[IR]
       val t = ir.typ
       val (value, timings) = execute(timer, ir)
       JsonMethods.compact(JSONAnnotationImpex.exportAnnotation(value, t))
@@ -162,6 +166,7 @@ class LocalBackend(
 
   def encodeToBytes(ir: IR, bufferSpecString: String): (String, Array[Byte]) = {
     ExecutionTimer.logTime("LocalBackend.encodeToBytes") { timer =>
+      val ir = irMap(id).asInstanceOf[IR]
       val bs = BufferSpec.parseOrDefault(bufferSpecString)
       withExecuteContext(timer) { ctx =>
         assert(ir.typ != TVoid)
@@ -282,11 +287,11 @@ class LocalBackend(
   def pyImportFam(path: String, isQuantPheno: Boolean, delimiter: String, missingValue: String): String =
     LoadPlink.importFamJSON(fs, path, isQuantPheno, delimiter, missingValue)
 
-  def persist(backendContext: BackendContext, id: String, value: BlockMatrix, storageLevel: String): Unit = ???
+  def persistBlockMatrix(id: String, value: BlockMatrix, storageLevel: String): Unit = ???
 
-  def unpersist(backendContext: BackendContext, id: String): Unit = ???
+  def pyUnpersistBlockMatrix(id: String): Unit = ???
 
-  def getPersistedBlockMatrix(backendContext: BackendContext, id: String): BlockMatrix = ???
+  def getPersistedBlockMatrix(id: String): BlockMatrix = ???
 
-  def getPersistedBlockMatrixType(backendContext: BackendContext, id: String): BlockMatrixType = ???
+  def getPersistedBlockMatrixType(id: String): BlockMatrixType = ???
 }

@@ -433,11 +433,11 @@ class ServiceBackend() extends Backend {
     }
   }
 
-  def persist(backendContext: BackendContext, id: String, value: BlockMatrix, storageLevel: String): Unit = ???
+  def persistBlockMatrix(id: String, value: BlockMatrix, storageLevel: String): Unit = ???
 
-  def unpersist(backendContext: BackendContext, id: String): Unit = ???
+  def pyUnpersistBlockMatrix(id: String): Unit = ???
 
-  def getPersistedBlockMatrix(backendContext: BackendContext, id: String): BlockMatrix = ???
+  def getPersistedBlockMatrix(id: String): BlockMatrix = ???
 
   def getPersistedBlockMatrixType(backendContext: BackendContext, id: String): BlockMatrixType = ???
 

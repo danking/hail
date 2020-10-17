@@ -223,10 +223,6 @@ class BlockMatrix(object):
     - Natural logarithm, :meth:`log`.
     """
 
-    @staticmethod
-    def _from_java(jbm):
-        return BlockMatrix(JavaBlockMatrix(jbm))
-
     def __init__(self, bmir):
         self._bmir = bmir
 
@@ -1218,7 +1214,8 @@ class BlockMatrix(object):
         -------
         :obj:`bool`
         """
-        return Env.backend()._to_java_blockmatrix_ir(self._bmir).typ().isSparse()
+        backend = Env.py4j_backend('BlockMatrix.is_sparse')
+        return backend._jbackend.pyBlockMatrixIsSparse(backend._to_java_blockmatrix_ir(self._bmir))
 
     @property
     def T(self):
