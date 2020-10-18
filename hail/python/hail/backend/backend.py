@@ -9,7 +9,7 @@ class Backend(abc.ABC):
         self._running = False
 
     @abc.abstractmethod
-    def execute(self, ir, timed=False):
+    def execute(self, ir, *, timed: bool = False, raw: bool = False):
         pass
 
     @abc.abstractmethod

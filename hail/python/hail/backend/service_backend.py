@@ -95,15 +95,16 @@ class ServiceBackend(Backend):
         r = CSERenderer()
         return r(ir)
 
-    def execute(self, ir, timed=False):
+    def execute(self, ir, *, timed: bool = False, raw: bool = False):
         resp = self.socket.request('execute',
                                    code=self._render(ir),
                                    billing_project=self._billing_project,
                                    bucket=self._bucket)
         typ = dtype(resp['type'])
-        value = typ._convert_from_json_na(resp['value'])
+        value = resp['value']
+        if not raw:
+            value = typ._convert_from_json_na(value)
         # FIXME put back timings
-
         return (value, None) if timed else value
 
     def _request_type(self, ir, kind):
