@@ -109,8 +109,9 @@ async def _query_batch_jobs(request, batch_id):
     ]
     where_args = [batch_id]
 
-    last_job_and_attempt_id = json.loads(request.query.get('last_job_and_attempt_id'))
+    last_job_and_attempt_id = request.query.get('last_job_and_attempt_id')
     if last_job_and_attempt_id is not None:
+        last_job_and_attempt_id = json.loads(last_job_and_attempt_id)
         assert len(last_job_and_attempt_id) == 2, last_job_and_attempt_id
         last_job_id, last_attempt_id = last_job_and_attempt_id
 
