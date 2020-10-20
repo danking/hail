@@ -92,12 +92,12 @@
 	</tbody>
 	</table>
 	</div>
-      {% if last_job_id is not none %}
+      {% if last_job_and_attempt_id is not none %}
       <form method="GET" action="{{ base_path }}/batches/{{ batch['id'] }}">
 	{% if q is not none %}
 	  <input type="hidden" name="q" value="{{ q }}" />
 	{% endif %}
-	<input type="hidden" name="last_job_id" value="{{ last_job_id }}" />
+	<input type="hidden" name="last_job_and_attempt_id" value="{{ last_job_and_attempt_id }}" />
 	<button>
 	  Next page
 	</button>

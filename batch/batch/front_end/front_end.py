@@ -109,11 +109,18 @@ async def _query_batch_jobs(request, batch_id):
     ]
     where_args = [batch_id]
 
-    last_job_id = request.query.get('last_job_id')
-    if last_job_id is not None:
+    last_job_and_attempt_id = json.loads(request.query.get('last_job_and_attempt_id'))
+    if last_job_and_attempt_id is not None:
+        assert len(last_job_and_attempt_id) == 2, last_job_and_attempt_id
+        last_job_id, last_attempt_id = last_job_and_attempt_id
+
         last_job_id = int(last_job_id)
         where_conditions.append('(jobs.job_id > %s)')
         where_args.append(last_job_id)
+
+        last_attempt_id = int(last_attempt_id)
+        where_conditions.append('(attempts.attempt_id > %s)')
+        where_args.append(last_attempt_id)
 
     q = request.query.get('q', '')
     terms = q.split()
@@ -161,7 +168,7 @@ async def _query_batch_jobs(request, batch_id):
         where_args.extend(args)
 
     sql = f'''
-SELECT jobs.*, batches.format_version, job_attributes.value AS name, SUM(`usage` * rate), start_time, end_time, reason AS cost
+SELECT jobs.*, batches.format_version, job_attributes.value AS name, SUM(`usage` * rate), attempt_id, start_time, end_time, reason AS cost
 FROM jobs
 INNER JOIN batches ON jobs.batch_id = batches.id
 LEFT JOIN job_attributes
@@ -176,8 +183,8 @@ LEFT JOIN resources
 LEFT JOIN attempts
   ON jobs.batch_id = attempts.batch_id AND jobs.job_id = attempts.job_id
 WHERE {' AND '.join(where_conditions)}
-GROUP BY jobs.batch_id, jobs.job_id
-ORDER BY jobs.batch_id, jobs.job_id ASC
+GROUP BY jobs.batch_id, jobs.job_id, jobs.attempt_id
+ORDER BY jobs.batch_id, jobs.job_id, jobs.attempt_id ASC
 LIMIT 50;
 '''
     sql_args = where_args
@@ -199,11 +206,13 @@ LIMIT 50;
     jobs = jobs.values()
 
     if len(jobs) == 50:
-        last_job_id = jobs[-1]['job_id']
+        last_job = jobs[-1]
+        last_attempt = last_job['attempts'][-1]
+        last_job_and_attempt_id = json.dumps((last_job['job_id'], last_attempt['attempt_id']))
     else:
-        last_job_id = None
+        last_job_and_attempt_id = None
 
-    return (jobs, last_job_id)
+    return (jobs, last_job_and_attempt_id)
 
 
 @routes.get('/api/v1alpha/batches/{batch_id}/jobs')
@@ -222,12 +231,12 @@ WHERE user = %s AND id = %s AND NOT deleted;
     if not record:
         raise web.HTTPNotFound()
 
-    jobs, last_job_id = await _query_batch_jobs(request, batch_id)
+    jobs, last_job_and_attempt_id = await _query_batch_jobs(request, batch_id)
     resp = {
         'jobs': jobs
     }
-    if last_job_id is not None:
-        resp['last_job_id'] = last_job_id
+    if last_job_and_attempt_id is not None:
+        resp['last_job_and_attempt_id'] = last_job_and_attempt_id
     return web.json_response(resp)
 
 
@@ -1008,7 +1017,7 @@ async def ui_batch(request, userdata):
 
     batch = await _get_batch(app, batch_id, user)
 
-    jobs, last_job_id = await _query_batch_jobs(request, batch_id)
+    jobs, last_job_and_attempt_id = await _query_batch_jobs(request, batch_id)
     for j in jobs:
         j['duration'] = humanize_timedelta_msecs(j['duration'])
     batch['jobs'] = jobs
@@ -1016,7 +1025,7 @@ async def ui_batch(request, userdata):
     page_context = {
         'batch': batch,
         'q': request.query.get('q'),
-        'last_job_id': last_job_id
+        'last_job_and_attempt_id': last_job_and_attempt_id
     }
     return await render_template('batch', request, userdata, 'batch.html', page_context)
 
