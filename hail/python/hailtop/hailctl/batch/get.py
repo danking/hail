@@ -6,6 +6,7 @@ def init_parser(parser):
     parser.add_argument('batch_id', type=int, help="ID number of the desired batch")
     parser.add_argument('-o', type=str, default='yaml', help="Specify output format",
                         choices=["yaml", "json"])
+    parser.add_argument('--jobs', action='store_true', default='yaml', help="Include all batch job statuses.")
 
 
 def main(args, pass_through_args, client):  # pylint: disable=unused-argument
@@ -16,4 +17,7 @@ def main(args, pass_through_args, client):  # pylint: disable=unused-argument
 
     batch = maybe_batch
 
-    print(make_formatter(args.o)(batch.last_known_status()))
+    data = batch.last_known_status()
+    if args.jobs:
+        data['jobs'] = list(batch.jobs())
+    print(make_formatter(args.o)(data))

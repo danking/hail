@@ -161,7 +161,7 @@ async def _query_batch_jobs(request, batch_id):
         where_args.extend(args)
 
     sql = f'''
-SELECT jobs.*, batches.format_version, job_attributes.value AS name, SUM(`usage` * rate) AS cost
+SELECT jobs.*, batches.format_version, job_attributes.value AS name, SUM(`usage` * rate), start_time, end_time, reason AS cost
 FROM jobs
 INNER JOIN batches ON jobs.batch_id = batches.id
 LEFT JOIN job_attributes
@@ -173,6 +173,8 @@ LEFT JOIN aggregated_job_resources
      jobs.job_id = aggregated_job_resources.job_id
 LEFT JOIN resources
   ON aggregated_job_resources.resource = resources.resource
+LEFT JOIN attempts
+  ON jobs.batch_id = attempts.batch_id AND jobs.job_id = attempts.job_id
 WHERE {' AND '.join(where_conditions)}
 GROUP BY jobs.batch_id, jobs.job_id
 ORDER BY jobs.batch_id, jobs.job_id ASC
@@ -180,9 +182,21 @@ LIMIT 50;
 '''
     sql_args = where_args
 
-    jobs = [job_record_to_dict(record, record['name'])
-            async for record
-            in db.select_and_fetchall(sql, sql_args)]
+    jobs = dict()
+    async for record in db.select_and_fetchall(sql, sql_args):
+        job = job_record_to_dict(record, record['name'])
+        job_id = job['job_id']
+        attempt = {
+            'start_time': record['start_time'],
+            'end_time': record['end_time'],
+            'reason': record['reason']}
+        maybe_job = jobs.get(job_id)
+        if maybe_job:
+            maybe_job['attempts'].append(attempt)
+        else:
+            job['attempts'] = [attempt]
+            jobs[job_id] = job
+    jobs = jobs.values()
 
     if len(jobs) == 50:
         last_job_id = jobs[-1]['job_id']
