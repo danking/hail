@@ -53,7 +53,7 @@ dependencies {
   implementation project(':hail')
 }
 
-mainClassName = is.hail.services.shuffler.ShuffleServer'
+mainClassName = 'is.hail.services.shuffler.ShuffleServer'
 sourceCompatibility = '1.8'
 vertex_version = '3.9.0'
 
