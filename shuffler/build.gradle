@@ -53,11 +53,13 @@ dependencies {
   implementation project(':hail')
 }
 
-mainClassName = 'io.vertx.example.HelloWorldEmbedded'
+mainClassName = is.hail.services.shuffler.ShuffleServer'
 sourceCompatibility = '1.8'
+vertex_version = '3.9.0'
 
 dependencies {
-  implementation "io.vertx:vertx-core:3.9.0"
+  implementation "io.vertx:vertx-core:${vertex_version}"
+  implementation "io.vertx:vertx-web:${vertex_version}"
   implementation 'com.indeed:lsmtree-core:1.0.7'
   implementation 'com.indeed:util-serialization:1.0.31'
   implementation 'com.indeed:util-mmap:1.0.31'
@@ -71,7 +73,12 @@ shadowJar {
   }
 }
 
+task shadowTestJar(type: ShadowJar) {
+    classifier = 'test'
+    from sourceSets.test.output
+    configurations = [project.configurations.testRuntime]
+}
+
 task wrapper(type: Wrapper) {
   gradleVersion = '4.0'
 }
-
