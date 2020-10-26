@@ -763,7 +763,8 @@ steps:
     - create_certs
     - hail_run_image
     - build_hail
-    - deploy_batch
+    - deploy_shuffler
+    - deploy_address
  - kind: buildImage
    name: hail_repl_image
    dockerFile: hail/Dockerfile.hail-repl
@@ -3353,8 +3354,6 @@ steps:
     - hail_run_image
     - build_hail
     - deploy_batch
-    - deploy_shuffler
-    - deploy_address
  - kind: runImage
    name: test_batch_invariants
    image:

@@ -4,6 +4,9 @@ import java.net._
 import java.security.SecureRandom
 import java.util.concurrent.{ConcurrentSkipListMap, Executors, _}
 
+import io.vertx.scala.core.Vertx;
+import io.vertx.scala.ext.web._;
+import io.vertx.scala.ext.web.handler.LoggerHandler
 import is.hail.annotations.Region
 import is.hail.expr.ir._
 import is.hail.types.encoded._
@@ -17,7 +20,7 @@ import org.apache.log4j.Logger
 
 import scala.annotation.switch
 
-class Handler (
+class TCPHandler (
   private[this] val server: ShuffleServer,
   private[this] val socket: Socket
 ) extends Runnable {
@@ -127,6 +130,35 @@ class Handler (
   }
 }
 
+class HTTPHandler (
+  private[this] val router: Router
+) {
+  val loggerHandler = new LoggerHandler()
+  def start(routingContext: io.vertx.scala.ext.web.RoutingContext): Unit = {
+    var response = routingContext.response()
+    response.putHeader("content-type", "application/plain")
+    // Write to the response and end it
+    response.end("Hello World from Vert.x-Web!")
+  }
+  router.post("/api/v1alpha/start").handler(loggerHandler).handler(start)
+
+  def put(routingContext: io.vertx.scala.ext.web.RoutingContext): Unit = {
+  }
+  router.post("/api/v1alpha/put").handler(loggerHandler).handler(put)
+
+  def get(routingContext: io.vertx.scala.ext.web.RoutingContext): Unit = {
+  }
+  router.get("/api/v1alpha/get").handler(loggerHandler).handler(get)
+
+  def stop(routingContext: io.vertx.scala.ext.web.RoutingContext): Unit = {
+  }
+  router.post("/api/v1alpha/stop").handler(loggerHandler).handler(stop)
+
+  def partitionBounds(routingContext: io.vertx.scala.ext.web.RoutingContext): Unit = {
+  }
+  router.get("/api/v1alpha/partitionBounds").handler(loggerHandler).handler(partitionBounds)
+}
+
 class Shuffle (
   uuid: Array[Byte],
   shuffleType: TShuffle
@@ -220,13 +252,14 @@ object ShuffleServer {
 
 class ShuffleServer() extends AutoCloseable {
   val ssl = getSSLContext
-  val port = 443
+  val tcpPort = 443
+  val httpPort = 5000
   val log = Logger.getLogger(this.getClass.getName());
 
   val shuffles = new ConcurrentSkipListMap[Array[Byte], Shuffle](new SameLengthByteArrayComparator())
 
   val ssf = ssl.getServerSocketFactory()
-  val ss = ssf.createServerSocket(port).asInstanceOf[SSLServerSocket]
+  val ss = ssf.createServerSocket(tcpPort).asInstanceOf[SSLServerSocket]
 
   val executor = Executors.newCachedThreadPool()
   var stopped = false
@@ -235,12 +268,17 @@ class ShuffleServer() extends AutoCloseable {
     executor.submit(new Runnable() { def run(): Unit = serve() })
 
   def serve(): Unit = {
+    executor.execute(tcpServe())
+    httpServe()
+  }
+
+  def tcpServe(): Unit = {
     try {
-      log.info(s"serving on ${port}")
+      log.info(s"Serving TCP on ${tcpPort}.")
       while (true) {
         val sock = ss.accept()
         log.info(s"accepted")
-        executor.execute(new Handler(this, sock))
+        executor.execute(new TCPHandler(this, sock))
       }
     } catch {
       case se: SocketException =>
@@ -251,6 +289,22 @@ class ShuffleServer() extends AutoCloseable {
           fatal("unexpected closed server socket", se)
         }
     }
+  }
+
+  def httpServe(): Unit = {
+    val httpPort = 5000
+    val router = Router.router(vertx)
+    val handler = new HTTPHandler(router)
+    Vertx.vertx()
+      .createHttpServer()
+      .requestHandler(router)
+      .listen(httpPort, handler -> {
+        if (handler.succeeded()) {
+          log.info(s"Serving HTTP on ${httpPort}.");
+        } else {
+          log.error(s"Failed to listen for HTTP on port ${httpPort}.");
+        }
+      });
   }
 
   def stop(): Unit = {
