@@ -574,7 +574,6 @@ steps:
      time retry ./gradlew --version
      time retry make jars wheel HAIL_DEBUG_MODE=1
      (cd build/deploy/dist/ && tar -cvf debug-wheel-container.tar hail-*-py3-none-any.whl)
-     cd /io/repo/hail
      mkdir build/debug_libs
      mv build/libs/hail-all-spark.jar build/debug_libs/
      mv build/libs/hail-all-spark-test.jar build/debug_libs/
@@ -589,9 +588,14 @@ steps:
      (cd build/deploy/dist/ && tar -cvf wheel-container.tar hail-*-py3-none-any.whl)
      time TESTNG_SPLITS=5 python3 generate_splits.py
      time tar czf splits.tar.gz testng-splits-*.xml
+
+     cd ../shuffler
+     ../hail/gradlew shadowJar
    outputs:
      - from: /io/repo/hail/build/libs/hail-all-spark.jar
        to: /hail.jar
+     - from: /io/repo/shuffler/build/libs/shuffler-fat.jar
+       to: /shuffler-fat.jar
      - from: /io/repo/hail/build/libs/hail-all-spark-test.jar
        to: /hail-test.jar
      - from: /io/repo/hail/build/debug_libs/hail-all-spark-test.jar
@@ -696,8 +700,8 @@ steps:
    contextPath: shuffler
    publishAs: shuffler
    inputs:
-     - from: /hail.jar
-       to: /hail.jar
+     - from: /shuffler-fat.jar
+       to: /shuffler-fat.jar
    dependsOn:
      - service_base_image
      - build_hail

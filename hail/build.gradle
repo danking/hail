@@ -6,10 +6,8 @@ buildscript {
 }
 
 plugins {
-  id "com.gradle.build-scan" version "2.3"
   id 'java'
   id 'scala'
-  id 'idea'
   id 'maven'
   id 'com.github.johnrengelman.shadow' version '5.0.0'
   id "de.undercouch.download" version "3.2.0"
@@ -193,11 +191,6 @@ dependencies {
     unbundled group: 'org.apache.commons', name: 'commons-math3', version: '3.6.1'
     bundled group: 'commons-codec', name: 'commons-codec', version: '1.11'
     bundled group: 'org.apache.commons', name: 'commons-lang3', version: '3.0'
-
-    bundled 'com.indeed:lsmtree-core:1.0.7'
-    bundled 'com.indeed:util-serialization:1.0.31'
-    bundled 'com.indeed:util-mmap:1.0.31'
-    bundled group: 'org.freemarker', name: 'freemarker', version: '2.3.14'
 }
 
 task(checkSettings) doLast {
@@ -262,13 +255,10 @@ tasks.withType(ShadowJar) {
     relocate 'org.codehaus.jackson', 'is.hail.relocated.org.codehaus.jackson'
     relocate 'org.apache.commons.lang3', 'is.hail.relocated.org.apache.commons.lang3'
     relocate 'org.apache.commons.io', 'is.hail.relocated.org.apache.commons.io'
-    // we should really shade indeed, but it has native libraries
-    // relocate 'com.indeed', 'is.hail.relocated.com.indeed'
     relocate 'com.google.cloud', 'is.hail.relocated.com.google.cloud'
     relocate 'org.elasticsearch', 'is.hail.relocated.org.elasticsearch'
     relocate 'com.github.samtools', 'is.hail.relocated.com.github.samtools'
     relocate 'org.lz4', 'is.hail.relocated.org.lz4'
-    relocate 'org.freemarker', 'is.hail.relocated.org.freemarker'
 
     exclude 'META-INF/*.RSA'
     exclude 'META-INF/*.SF'
