@@ -4,9 +4,9 @@ import java.net._
 import java.security.SecureRandom
 import java.util.concurrent.{ConcurrentSkipListMap, Executors, _}
 
-import io.vertx.scala.core.Vertx;
-import io.vertx.scala.ext.web._;
-import io.vertx.scala.ext.web.handler.LoggerHandler
+import io.vertx.scala.core.Vertx
+import io.vertx.scala.ext.web._
+import io.vertx.scala.ext.web.handler._
 import is.hail.annotations.Region
 import is.hail.expr.ir._
 import is.hail.types.encoded._
@@ -133,30 +133,29 @@ class TCPHandler (
 class HTTPHandler (
   private[this] val router: Router
 ) {
-  val loggerHandler = new LoggerHandler()
   def start(routingContext: io.vertx.scala.ext.web.RoutingContext): Unit = {
     var response = routingContext.response()
     response.putHeader("content-type", "application/plain")
     // Write to the response and end it
     response.end("Hello World from Vert.x-Web!")
   }
-  router.post("/api/v1alpha/start").handler(loggerHandler).handler(start)
+  router.post("/api/v1alpha/start").handler(start)
 
   def put(routingContext: io.vertx.scala.ext.web.RoutingContext): Unit = {
   }
-  router.post("/api/v1alpha/put").handler(loggerHandler).handler(put)
+  router.post("/api/v1alpha/put").handler(put)
 
   def get(routingContext: io.vertx.scala.ext.web.RoutingContext): Unit = {
   }
-  router.get("/api/v1alpha/get").handler(loggerHandler).handler(get)
+  router.get("/api/v1alpha/get").handler(get)
 
   def stop(routingContext: io.vertx.scala.ext.web.RoutingContext): Unit = {
   }
-  router.post("/api/v1alpha/stop").handler(loggerHandler).handler(stop)
+  router.post("/api/v1alpha/stop").handler(stop)
 
   def partitionBounds(routingContext: io.vertx.scala.ext.web.RoutingContext): Unit = {
   }
-  router.get("/api/v1alpha/partitionBounds").handler(loggerHandler).handler(partitionBounds)
+  router.get("/api/v1alpha/partitionBounds").handler(partitionBounds)
 }
 
 class Shuffle (
@@ -293,10 +292,13 @@ class ShuffleServer() extends AutoCloseable {
 
   def httpServe(): Unit = {
     val httpPort = 5000
+    val vertx = Vertx.vertx()
     val router = Router.router(vertx)
+    val loggerHandler = LoggerHandler.create()
+    val errorHandler = ErrorHandler.create()
+    router.route().handler(loggerHandler()).failureHandler(errorHandler)
     val handler = new HTTPHandler(router)
-    Vertx.vertx()
-      .createHttpServer()
+    vertx.createHttpServer()
       .requestHandler(router)
       .listen(httpPort, handler -> {
         if (handler.succeeded()) {
