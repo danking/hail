@@ -5,7 +5,7 @@ import java.security.SecureRandom
 import java.util.concurrent.{ConcurrentSkipListMap, Executors, _}
 
 import io.vertx.scala.core.Vertx
-import io.vertx.scala.core.http._
+import io.vertx.scala.core.http.HttpServerRequest
 import io.vertx.core.buffer.Buffer
 import io.vertx.scala.ext.web._
 import io.vertx.scala.ext.web.handler._
@@ -137,10 +137,12 @@ trait BufferHandler {
 }
 
 class ReadShuffleUUIDHandler (
-  private[this] val request: HTTPServerRequest,
+  private[this] val request: HttpServerRequest,
+  private[this] val server: ShuffleServer,
   private[this] val operation: String,
   private[this] val next: (Buffer, Shuffle) => BufferHandler
 ) extends BufferHandler {
+  private[this] val log = Logger.getLogger(getClass.getName())
   private[this] val buf = Buffer.buffer()
   private[this] var length = -1
 
@@ -153,7 +155,7 @@ class ReadShuffleUUIDHandler (
       if (buf.length() > 4 + length) {
         val uuid = buf.getBytes(4, 4 + length)
         assert(uuid.length == Wire.ID_SIZE, s"${uuid.length} ${Wire.ID_SIZE}")
-        log.info(s"uuid ${uuidToString(uuid)}")
+        this.log.info(s"uuid ${uuidToString(uuid)}")
         val shuffle = server.shuffles.get(uuid)
         if (shuffle == null) {
           throw new RuntimeException(s"shuffle does not exist ${uuidToString(uuid)}")
@@ -161,8 +163,8 @@ class ReadShuffleUUIDHandler (
         val remaining = Buffer.buffer()
         remaining.setBuffer(0, buf, 4 + length, buf.length())
         val handler = next(remaining, shuffle)
-        request.handler(handler)
-        request.endHandler(handler)
+        request.handler(handler.handle)
+        request.endHandler((_: Unit) => handler.handleEnd())
       }
     }
   }
@@ -175,8 +177,10 @@ class ShufflePutHandler (
   private[this] val buf: Buffer,
   private[this] val shuffle: Shuffle
 ) extends BufferHandler {
+  // private[this] val log = Logger.getLogger(getClass.getName())
+
   def handle(b: Buffer): Unit = {
-    ????
+    ???
   }
 
   def handleEnd(): Unit = {
@@ -219,7 +223,7 @@ class HTTPHandler (
   def put(routingContext: io.vertx.scala.ext.web.RoutingContext): Unit = {
     val request = routingContext.request()
     request.setExpectMultipart(true)
-    new ReadShuffleUUIDHandler(request, "put", ShufflePutHandler)
+    new ReadShuffleUUIDHandler(request, server, "put", (x, y) => new ShufflePutHandler(x, y))
     // val handler = new PutHandler(routingCountext.response())
     // request.handler(handler.data).endHandler(handler.end)
   }

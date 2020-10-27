@@ -14,13 +14,12 @@ import is.hail.services.shuffler.ShufflerTestUtils._
 import is.hail.io._
 import is.hail.utils._
 import is.hail._
-import org.scalatest.testng.TestNGSuite
 import org.testng.annotations.Test
 
 import scala.util.Random
 import scala.language.implicitConversions
 
-class ShuffleSuite extends HailSuite {
+class ShuffleSuite {
   private[this] val log = Logger.getLogger(getClass.getName())
 
   private[this] def arrayOfUnsafeRow(elementPType: PStruct, array: Array[Long]): Array[UnsafeRow] =

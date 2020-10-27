@@ -58,12 +58,13 @@ ext {
 
 dependencies {
   implementation project(':hail')
-  testImplementation project(':hail')
   implementation "io.vertx:vertx-lang-scala_2.12:${vertxVersion}"
   implementation "io.vertx:vertx-web-scala_2.12:${vertxVersion}"
   implementation 'com.indeed:lsmtree-core:1.0.7'
   implementation 'com.indeed:util-serialization:1.0.31'
   implementation 'com.indeed:util-mmap:1.0.31'
+
+  testImplementation 'org.testng:testng:6.8.21'
 }
 
 shadowJar {

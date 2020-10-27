@@ -9,16 +9,13 @@ import is.hail.types.encoded._
 import is.hail.services.shuffler.server._
 import is.hail.services.shuffler.ShufflerTestUtils._
 import is.hail.io.{ BufferSpec, TypedCodecSpec }
-import is.hail.testUtils._
 import is.hail.utils._
-import is.hail.{HailSuite, TestUtils}
-import org.scalatest.testng.TestNGSuite
 import org.testng.annotations.{DataProvider, Test}
 
 import scala.util.Random
 import scala.language.implicitConversions
 
-class LSMSuite extends HailSuite {
+class LSMSuite {
   val log = Logger.getLogger(this.getClass.getName());
 
   def testPartitionKeysFiveElementsThreePartitions() {
