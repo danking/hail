@@ -5,11 +5,11 @@ import java.security.SecureRandom
 import java.util.concurrent.{ConcurrentSkipListMap, Executors, _}
 
 import io.vertx.scala.core.Vertx
+import io.vertx.core.buffer.Buffer
 import io.vertx.scala.ext.web._
 import io.vertx.scala.ext.web.handler._
 import is.hail.annotations.Region
 import is.hail.expr.ir._
-import is.hail.types.encoded._
 import is.hail.types.virtual._
 import is.hail.io._
 import is.hail.services.tls._
@@ -131,22 +131,44 @@ class TCPHandler (
 }
 
 class HTTPHandler (
+  private[this] val server: ShuffleServer,
   private[this] val router: Router
 ) {
-  def start(routingContext: io.vertx.scala.ext.web.RoutingContext): Unit = {
-    val request = routingContext.request()
-    request.setExpectMultipart(true)
+  private[this] val log = Logger.getLogger(getClass.getName())
+  private[this] val random = new SecureRandom();
 
-    val response = routingContext.response()
-    response.putHeader("content-type", "application/plain")
-    // Write to the response and end it
-    response.end("Hello World from Vert.x-Web!")
+  def start(routingContext: io.vertx.scala.ext.web.RoutingContext): Unit = {
+    val in = new BufferWire.BufferReader(routingContext.getBody.get)
+
+    log.info(s"start")
+    val rowType = in.readTStruct()
+    log.info(s"start got row type ${rowType}")
+    val rowEType = in.readEBaseStruct()
+    log.info(s"start got row encoded type ${rowEType}")
+    val keyFields = in.readSortFieldArray()
+    log.info(s"start got key fields ${keyFields.mkString("[", ",", "]")}")
+    val keyEType = in.readEBaseStruct()
+    log.info(s"start got key encoded type ${keyEType}")
+    val uuid = new Array[Byte](Wire.ID_SIZE)
+    random.nextBytes(uuid)
+    server.shuffles.put(uuid, new Shuffle(uuid, TShuffle(keyFields, rowType, rowEType, keyEType)))
+
+    val out = Buffer.buffer()
+    BufferWire.writeByteArray(out, uuid)
+
+    routingContext.response().end(out)
+
+    log.info(s"start done")
   }
-  router.post("/api/v1alpha/start").handler(start)
+  router.post("/api/v1alpha/start").handler(BodyHandler.create()).handler(start)
 
   def put(routingContext: io.vertx.scala.ext.web.RoutingContext): Unit = {
+    val request = routingContext.request()
+    request.setExpectMultipart(true)
+    // val handler = new PutHandler(routingCountext.response())
+    // request.handler(handler.data).endHandler(handler.end)
   }
-  router.post("/api/v1alpha/put").handler(put)
+  router.post("/api/v1alpha/put").handler(BodyHandler.create()).handler(put)
 
   def get(routingContext: io.vertx.scala.ext.web.RoutingContext): Unit = {
   }
@@ -163,7 +185,7 @@ class HTTPHandler (
 
 class Shuffle (
   uuid: Array[Byte],
-  shuffleType: TShuffle
+ shuffleType: TShuffle
 ) extends AutoCloseable {
   private[this] val log = Logger.getLogger(getClass.getName)
   private[this] val rootRegion = Region()
@@ -270,7 +292,7 @@ class ShuffleServer() extends AutoCloseable {
     executor.submit(new Runnable() { def run(): Unit = serve() })
 
   def serve(): Unit = {
-    executor.execute(tcpServe())
+    executor.execute(new Runnable() { def run(): Unit = tcpServe() })
     httpServe()
   }
 
@@ -299,17 +321,17 @@ class ShuffleServer() extends AutoCloseable {
     val router = Router.router(vertx)
     val loggerHandler = LoggerHandler.create()
     val errorHandler = ErrorHandler.create()
-    router.route().path("*").handler(loggerHandler()).failureHandler(errorHandler)
-    val handler = new HTTPHandler(router)
+    router.route().path("*").handler(loggerHandler).failureHandler(errorHandler)
+    new HTTPHandler(this, router)
     vertx.createHttpServer()
       .requestHandler(router)
-      .listen(httpPort, handler -> {
+      .listen(httpPort, { handler =>
         if (handler.succeeded()) {
           log.info(s"Serving HTTP on ${httpPort}.");
         } else {
           log.error(s"Failed to listen for HTTP on port ${httpPort}.");
         }
-      });
+      })
   }
 
   def stop(): Unit = {
