@@ -176,6 +176,7 @@ class ShufflePutHandler (
   private[this] val shuffle: Shuffle
 ) extends BufferHandler {
   def handle(b: Buffer): Unit = {
+    ????
   }
 
   def handleEnd(): Unit = {
@@ -218,7 +219,7 @@ class HTTPHandler (
   def put(routingContext: io.vertx.scala.ext.web.RoutingContext): Unit = {
     val request = routingContext.request()
     request.setExpectMultipart(true)
-    new ReadShuffleUUIDHandler(request, "put", (buf, shuffle) =>)
+    new ReadShuffleUUIDHandler(request, "put", ShufflePutHandler)
     // val handler = new PutHandler(routingCountext.response())
     // request.handler(handler.data).endHandler(handler.end)
   }
