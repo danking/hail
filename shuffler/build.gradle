@@ -55,11 +55,14 @@ dependencies {
 
 mainClassName = 'is.hail.services.shuffler.ShuffleServer'
 sourceCompatibility = '1.8'
-vertex_version = '3.9.0'
+
+ext {
+  vertexVersion = '3.9.0'
+}
 
 dependencies {
-  implementation "io.vertx:vertx-core:${vertex_version}"
-  implementation "io.vertx:vertx-web:${vertex_version}"
+  implementation "io.vertx:vertx-core:${vertexVersion}"
+  implementation "io.vertx:vertx-web:${vertexVersion}"
   implementation 'com.indeed:lsmtree-core:1.0.7'
   implementation 'com.indeed:util-serialization:1.0.31'
   implementation 'com.indeed:util-mmap:1.0.31'

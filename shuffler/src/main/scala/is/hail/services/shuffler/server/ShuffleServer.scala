@@ -134,7 +134,10 @@ class HTTPHandler (
   private[this] val router: Router
 ) {
   def start(routingContext: io.vertx.scala.ext.web.RoutingContext): Unit = {
-    var response = routingContext.response()
+    val request = routingContext.request()
+    request.setExpectMultipart(true)
+
+    val response = routingContext.response()
     response.putHeader("content-type", "application/plain")
     // Write to the response and end it
     response.end("Hello World from Vert.x-Web!")
@@ -296,7 +299,7 @@ class ShuffleServer() extends AutoCloseable {
     val router = Router.router(vertx)
     val loggerHandler = LoggerHandler.create()
     val errorHandler = ErrorHandler.create()
-    router.route().handler(loggerHandler()).failureHandler(errorHandler)
+    router.route().path("*").handler(loggerHandler()).failureHandler(errorHandler)
     val handler = new HTTPHandler(router)
     vertx.createHttpServer()
       .requestHandler(router)
