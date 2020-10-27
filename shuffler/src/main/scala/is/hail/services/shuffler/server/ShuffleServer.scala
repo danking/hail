@@ -5,6 +5,7 @@ import java.security.SecureRandom
 import java.util.concurrent.{ConcurrentSkipListMap, Executors, _}
 
 import io.vertx.scala.core.Vertx
+import io.vertx.scala.core.http._
 import io.vertx.core.buffer.Buffer
 import io.vertx.scala.ext.web._
 import io.vertx.scala.ext.web.handler._
@@ -130,6 +131,58 @@ class TCPHandler (
   }
 }
 
+trait BufferHandler {
+  def handle(b: Buffer): Unit
+  def handleEnd(): Unit
+}
+
+class ReadShuffleUUIDHandler (
+  private[this] val request: HTTPServerRequest,
+  private[this] val operation: String,
+  private[this] val next: (Buffer, Shuffle) => BufferHandler
+) extends BufferHandler {
+  private[this] val buf = Buffer.buffer()
+  private[this] var length = -1
+
+  def handle(b: Buffer): Unit = {
+    buf.appendBuffer(b)
+    if (length == -1 && buf.length() > 4) {
+      length = buf.getInt(0)
+    }
+    if (length != -1) {
+      if (buf.length() > 4 + length) {
+        val uuid = buf.getBytes(4, 4 + length)
+        assert(uuid.length == Wire.ID_SIZE, s"${uuid.length} ${Wire.ID_SIZE}")
+        log.info(s"uuid ${uuidToString(uuid)}")
+        val shuffle = server.shuffles.get(uuid)
+        if (shuffle == null) {
+          throw new RuntimeException(s"shuffle does not exist ${uuidToString(uuid)}")
+        }
+        val remaining = Buffer.buffer()
+        remaining.setBuffer(0, buf, 4 + length, buf.length())
+        val handler = next(remaining, shuffle)
+        request.handler(handler)
+        request.endHandler(handler)
+      }
+    }
+  }
+  def handleEnd(): Unit = {
+    throw new RuntimeException(s"Incomplete shuffle UUID in ${operation}")
+  }
+}
+
+class ShufflePutHandler (
+  private[this] val buf: Buffer,
+  private[this] val shuffle: Shuffle
+) extends BufferHandler {
+  def handle(b: Buffer): Unit = {
+  }
+
+  def handleEnd(): Unit = {
+    ???
+  }
+}
+
 class HTTPHandler (
   private[this] val server: ShuffleServer,
   private[this] val router: Router
@@ -165,6 +218,7 @@ class HTTPHandler (
   def put(routingContext: io.vertx.scala.ext.web.RoutingContext): Unit = {
     val request = routingContext.request()
     request.setExpectMultipart(true)
+    new ReadShuffleUUIDHandler(request, "put", (buf, shuffle) =>)
     // val handler = new PutHandler(routingCountext.response())
     // request.handler(handler.data).endHandler(handler.end)
   }
