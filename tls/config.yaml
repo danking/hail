@@ -91,4 +91,6 @@ principals:
   kind: json
 - name: atgu
   domain: atgu
+- name: tcp-proxy
+  domain: tcp-proxy
   kind: json

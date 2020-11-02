@@ -3583,3 +3583,23 @@ steps:
     - deploy_auth
     - atgu_image
     - atgu_database
+ - kind: buildImage
+   name: tcp_proxy_image
+   dockerFile: tcp_proxy/Dockerfile
+   contextPath: tcp_proxy
+   publishAs: txp-proxy
+   dependsOn:
+     - service_base_image
+ - kind: deploy
+   name: deploy_tcp_proxy
+   namespace:
+     valueFrom: default_ns.name
+   config: tcp_proxy/deployment.yaml
+   wait:
+    - kind: Service
+      name: tcp_proxy
+      for: alive
+   dependsOn:
+    - default_ns
+    - tcp_proxy_image
+    - create_certs

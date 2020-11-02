@@ -1,6 +1,8 @@
 package is.hail.services.shuffler
 
+import java.io.IOException
 import java.net.Socket
+import java.util.UUID
 
 import is.hail._
 import is.hail.annotations._
@@ -18,7 +20,7 @@ import org.apache.log4j.Logger
 object ShuffleClient {
   private[this] val log = Logger.getLogger(getClass.getName())
 
-  def socket(): Socket = DeployConfig.get.socket("shuffler")
+  def socket(): (UUID, Socket) = tcp.openConnection("shuffler", 443)
 
   def codeSocket(): Code[Socket] =
     Code.invokeScalaObject0[Socket](ShuffleClient.getClass, "socket")
@@ -146,38 +148,56 @@ class ShuffleClient (
     }
   }
 
-  private[this] val s = ShuffleClient.socket()
-  private[this] val in = shuffleBufferSpec.buildInputBuffer(s.getInputStream())
-  private[this] val out = shuffleBufferSpec.buildOutputBuffer(s.getOutputStream())
+  private[this] val idAndSocket = ShuffleClient.socket()
+  private[this] var connectionId: UUID = null
+  private[this] var s: Socket = null
+  def log_info(msg: String): Unit = {
+    log.info(s"${connectionId}: ${msg}")
+  }
+  log_info("opened a socket")
+  private[this] var in = shuffleBufferSpec.buildInputBuffer(s.getInputStream())
+  private[this] var out = shuffleBufferSpec.buildOutputBuffer(s.getOutputStream())
 
   private[this] def startOperation(op: Byte) = {
     assert(op != Wire.EOS)
-    out.writeByte(op)
+    while(true) {
+      try {
+        out.writeByte(op)
+      } catch {
+        case exc: IOException =>
+          log_info(s"connection lost due to ${exc}, reconnecting")
+          val (_connectionId, _s) = ShuffleClient.socket()
+          connectionId = _connectionId
+          s = _s
+          in = shuffleBufferSpec.buildInputBuffer(s.getInputStream)
+          out = shuffleBufferSpec.buildOutputBuffer(s.getOutputStream)
+      }
+    }
     if (op != Wire.START) {
       assert(uuid != null)
-      log.info(s"operation $op uuid ${uuidToString(uuid)}")
+      log_info(s"operation $op uuid ${uuidToString(uuid)}")
       Wire.writeByteArray(out, uuid)
     }
   }
 
   def start(): Unit = {
     startOperation(Wire.START)
-    log.info(s"start")
+    log_info(s"start")
     Wire.writeTStruct(out, shuffleType.rowType)
     Wire.writeEBaseStruct(out, shuffleType.rowEType)
     Wire.writeSortFieldArray(out, shuffleType.keyFields)
-    log.info(s"using ${shuffleType.keyEType}")
+    log_info(s"using ${shuffleType.keyEType}")
     Wire.writeEBaseStruct(out, shuffleType.keyEType)
     out.flush()
     uuid = Wire.readByteArray(in)
     assert(uuid.length == Wire.ID_SIZE, s"${uuid.length} ${Wire.ID_SIZE}")
-    log.info(s"start done")
+    log_info(s"start done")
   }
 
   private[this] var encoder: Encoder = null
 
   def startPut(): Unit = {
-    log.info(s"put")
+    log_info(s"put")
     startOperation(Wire.PUT)
     out.flush()
     encoder = codecs.makeRowEncoder(out)
@@ -202,7 +222,7 @@ class ShuffleClient (
     // fixme: server needs to send uuid for the successful partition
     encoder.flush()
     assert(in.readByte() == 0.toByte)
-    log.info(s"put done")
+    log_info(s"put done")
   }
 
   private[this] var decoder: Decoder = null
@@ -213,7 +233,7 @@ class ShuffleClient (
     end: Long,
     endInclusive: Boolean
   ): Unit = {
-    log.info(s"get ${Region.pretty(codecs.keyEncodingPType, start)} ${startInclusive} " +
+    log_info(s"get ${Region.pretty(codecs.keyEncodingPType, start)} ${startInclusive} " +
       s"${Region.pretty(codecs.keyEncodingPType, end)} ${endInclusive}")
     val keyEncoder = codecs.makeKeyEncoder(out)
     decoder = codecs.makeRowDecoder(in)
@@ -223,7 +243,7 @@ class ShuffleClient (
     keyEncoder.writeRegionValue(end)
     keyEncoder.writeByte(if (endInclusive) 1.toByte else 0.toByte)
     keyEncoder.flush()
-    log.info(s"get receiving values")
+    log_info(s"get receiving values")
   }
 
   def get(
@@ -248,7 +268,7 @@ class ShuffleClient (
   }
 
   def getDone(): Unit = {
-    log.info(s"get done")
+    log_info(s"get done")
   }
 
   private[this] var keyDecoder: Decoder = null
@@ -256,11 +276,11 @@ class ShuffleClient (
   def startPartitionBounds(
     nPartitions: Int
   ): Unit = {
-    log.info(s"partitionBounds")
+    log_info(s"partitionBounds")
     startOperation(Wire.PARTITION_BOUNDS)
     out.writeInt(nPartitions)
     out.flush()
-    log.info(s"partitionBounds receiving values")
+    log_info(s"partitionBounds receiving values")
     keyDecoder = codecs.makeKeyDecoder(in)
   }
 
@@ -280,18 +300,19 @@ class ShuffleClient (
   }
 
   def endPartitionBounds(): Unit = {
-    log.info(s"partitionBounds done")
+    log_info(s"partitionBounds done")
   }
 
   def stop(): Unit = {
     startOperation(Wire.STOP)
     out.flush()
-    log.info(s"stop")
+    log_info(s"stop")
     assert(in.readByte() == 0.toByte)
-    log.info(s"stop done")
+    log_info(s"stop done")
   }
 
   def close(): Unit = {
+    log_info(s"close")
     out.writeByte(Wire.EOS)
     out.flush()
     assert(in.readByte() == Wire.EOS)
