@@ -39,6 +39,9 @@ spec:
           - python3
           - -m
           - tcp_proxy
+         env:
+          - name: HAIL_DEFAULT_NAMESPACE
+            value: "{{ default_ns.name }}"
          resources:
            requests:
              memory: "2500M"
