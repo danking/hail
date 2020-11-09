@@ -44,7 +44,6 @@ async def open_direct_connection(service: str,
                                  port: int,
                                  *,
                                  session_ids: Optional[Tuple[bytes, bytes]] = None,
-                                 request_id: Optional[uuid.UUID] = None,
                                  **kwargs
                                  ) -> Tuple[uuid.UUID, asyncio.StreamReader, asyncio.StreamWriter]:
     if 'ssl' not in kwargs:
@@ -63,11 +62,10 @@ async def open_direct_connection(service: str,
     if is_success != b'\x01':
         raise HailTCPConnectionError(f'{service}.{ns}:{port}')
 
-    request_id = uuid.uuid4()
-    assert len(request_id.bytes) == 16
-    writer.write(request_id.bytes)
+    connection_id_bytes = await reader.read(16)
+    connection_id = uuid.UUID(bytes=connection_id_bytes)
 
-    return request_id, reader, writer
+    return connection_id, reader, writer
 
 
 async def open_proxied_connection(proxy_hostname: str,
@@ -77,7 +75,6 @@ async def open_proxied_connection(proxy_hostname: str,
                                   port: int,
                                   *,
                                   session_ids: Optional[Tuple[bytes, bytes]] = None,
-                                  request_id: Optional[uuid.UUID] = None,
                                   **kwargs
                                   ) -> Tuple[uuid.UUID, asyncio.StreamReader, asyncio.StreamWriter]:
     reader, writer = await asyncio.open_connection(
@@ -102,10 +99,10 @@ async def open_proxied_connection(proxy_hostname: str,
     if is_success != b'\x01':
         raise HailTCPConnectionError(f'{service}.{ns}:{port} {is_success!r}')
 
-    request_id_bytes = await reader.read(16)
-    request_id = uuid.UUID(bytes=request_id_bytes)
+    connection_id_bytes = await reader.read(16)
+    connection_id = uuid.UUID(bytes=connection_id_bytes)
 
-    return request_id, reader, writer
+    return connection_id, reader, writer
 
 
 async def write_session_ids(writer: asyncio.StreamWriter,

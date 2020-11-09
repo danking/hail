@@ -24,13 +24,13 @@ HAIL_DEFAULT_NAMESPACE = os.environ['HAIL_DEFAULT_NAMESPACE']
 # IN: ?? bytes, service_name, UTF-8 string
 # IN: 2 bytes, port, unsigned integer
 # OUT: 1 byte, connect_is_successful, unsigned integer, 1 = success, 0 = not-success
-# OUT: 16 bytes, request_id, bytes
+# OUT: 16 bytes, connection_id, bytes
 
-### Other Service TCP Protocol
+### Other Service Authentication Header
 # IN: 32 bytes, session_id, bytes
 # IN: 32 bytes, internal_session_id, bytes, may be all zeros
 # OUT: 1 byte, connect_is_successful, unsigned integer, 1 = success, 0 = not-success
-# IN: 16 bytes, request_id, bytes
+# IN: 16 bytes, connection_id, bytes
 
 
 async def pipe(
@@ -92,7 +92,7 @@ async def handle(source_reader: asyncio.StreamReader, source_writer: asyncio.Str
         target_addr = (hostname, port)
 
         if namespace_name == HAIL_DEFAULT_NAMESPACE:
-            request_id, target_reader, target_writer = await open_direct_connection(
+            connection_id, target_reader, target_writer = await open_direct_connection(
                 service_name, namespace_name, port,
                 session_ids=(session_id, maybe_internal_session_id))
         elif HAIL_DEFAULT_NAMESPACE == 'default':  # default router may forward to namespaced ones
@@ -100,7 +100,7 @@ async def handle(source_reader: asyncio.StreamReader, source_writer: asyncio.Str
             client_tls_context = ssl.create_default_context()
             client_tls_context.check_hostname = False
             client_tls_context.verify_mode = ssl.CERT_NONE
-            request_id, target_reader, target_writer = await open_proxied_connection(
+            connection_id, target_reader, target_writer = await open_proxied_connection(
                 proxy_hostname=f'router.{namespace_name}',
                 proxy_port=5000,
                 service=service_name,
@@ -117,21 +117,21 @@ async def handle(source_reader: asyncio.StreamReader, source_writer: asyncio.Str
         source_writer.close()
         return
 
-    request_metadata = {
-        'request_id': request_id,
+    connection_metadata = {
+        'connection_id': connection_id,
         'source_addr': source_addr,
         'target_addr': target_addr
     }
 
     def log_info(*args, **kwargs):
-        kwargs['extra'] = request_metadata
+        kwargs['extra'] = connection_metadata
         log.info(*args, **kwargs)
 
     log_info(f'OPEN')
 
     source_writer.write(b'\x01')
-    assert len(request_id.bytes) == 16
-    source_writer.write(request_id.bytes)
+    assert len(connection_id.bytes) == 16
+    source_writer.write(connection_id.bytes)
 
     source_to_target = None
     target_to_source = None

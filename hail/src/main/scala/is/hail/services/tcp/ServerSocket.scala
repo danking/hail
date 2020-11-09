@@ -1,6 +1,6 @@
 package is.hail.services.tcp
 
-import java.io.{Closeable, DataInputStream}
+import java.io.{Closeable, DataInputStream, DataOutputStream}
 import java.net.Socket
 import java.util.UUID
 
@@ -17,10 +17,16 @@ class ServerSocket(port: Int) extends Closeable {
   def accept(): (UUID, Socket) = {
     val s = ss.accept()
     val in = new DataInputStream(s.getInputStream)
-    val connectionIdMostSignificant = in.readLong()
-    val connectionIdLeastSignificant = in.readLong()
+    val out = new DataOutputStream(s.getOutputStream())
 
-    (new UUID(connectionIdMostSignificant, connectionIdLeastSignificant), s)
+    val sessionId = new Array[Byte](32)
+    in.read(sessionId)
+    in.skipBytes(32)
+
+    val uuid = UUID.randomUUID()
+    out.writeLong(uuid.getMostSignificantBits)
+    out.writeLong(uuid.getLeastSignificantBits)
+    (uuid, s)
   }
 
   def close(): Unit = {

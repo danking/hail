@@ -1,6 +1,6 @@
 package is.hail.services
 
-import java.io.{DataInputStream, DataOutputStream}
+import java.io.{DataInputStream, DataOutputStream, OutputStream}
 import java.net.{ConnectException, Socket}
 
 import is.hail.services.tls._
@@ -13,30 +13,67 @@ package object tcp {
     val ns = deployConfig.getServiceNamespace(service)
     deployConfig.location match {
       case "k8s" =>
-        val s = socket(s"${service}.${ns}", port)
-        val uuid = UUID.randomUUID()
-        val out = new DataOutputStream(s.getOutputStream())
-        out.writeLong(uuid.getMostSignificantBits)
-        out.writeLong(uuid.getLeastSignificantBits)
-        (uuid, s)
+        openDirectConnection(service, ns, port)
       case "gce" =>
-        proxySocket("hail", 5000, service, ns, port)
+        openProxiedConnection("hail", 5000, service, ns, port)
       case "external" =>
-        proxySocket("hail.is", 5000, service, ns, port)
+        openProxiedConnection("hail.is", 5000, service, ns, port)
     }
   }
 
   def serverSocket(port: Int): ServerSocket = new ServerSocket(port)
 
-  private[this] def proxySocket(proxyHost: String,
-                                proxyPort: Int,
-                                service: String,
-                                ns: String,
-                                port: Int
-                               ): (UUID, Socket) = {
+  private[this] def openDirectConnection(service: String,
+                                         ns: String,
+                                         port: Int): (UUID, Socket) = {
+    val s = socket(s"${service}.${ns}", port)
+
+    writeSessionIds(ns, s.getOutputStream)
+
+    val in = new DataInputStream(s.getInputStream)
+
+    val isSuccess = in.read()
+    if (isSuccess != 1)
+      throw new HailTCPConnectionError(s"${service}.${ns}:${port} ${isSuccess}")
+
+    val connectionIdMostSignificant = in.readLong()
+    val connectionIdLeastSignificant = in.readLong()
+
+    (new UUID(connectionIdMostSignificant, connectionIdLeastSignificant), s)
+  }
+
+  private[this] def openProxiedConnection(proxyHost: String,
+                                          proxyPort: Int,
+                                          service: String,
+                                          ns: String,
+                                          port: Int
+                                         ): (UUID, Socket) = {
     val s = socket(proxyHost, proxyPort)
     val in = new DataInputStream(s.getInputStream)
     val out = new DataOutputStream(s.getOutputStream)
+
+    writeSessionIds(ns, out)
+
+    out.writeInt(ns.length)
+    out.write(ns.getBytes(StandardCharsets.UTF_8))
+
+    out.writeInt(service.length)
+    out.write(service.getBytes(StandardCharsets.UTF_8))
+
+    out.writeShort(port)
+    out.flush()
+
+    val isSuccess = in.read()
+    if (isSuccess != 1)
+      throw new HailTCPConnectionError(s"${service}.${ns}:${port} ${isSuccess}")
+
+    val connectionIdMostSignificant = in.readLong()
+    val connectionIdLeastSignificant = in.readLong()
+
+    (new UUID(connectionIdMostSignificant, connectionIdLeastSignificant), s)
+  }
+
+  private[this] def writeSessionIds(ns: String, out: OutputStream): Unit = {
     val tokens = Tokens.get
     val defaultSessionId = tokens.namespaceToken("default")
     val defaultSessionIdBytes = Base64.getUrlDecoder.decode(defaultSessionId)
@@ -50,18 +87,6 @@ package object tcp {
     } else {
       out.write(new Array[Byte](32))
     }
-    out.writeInt(ns.length)
-    out.write(ns.getBytes(StandardCharsets.UTF_8))
-    out.writeInt(service.length)
-    out.write(service.getBytes(StandardCharsets.UTF_8))
-    out.writeShort(port)
-    out.flush()
-    if (in.read() != 1)
-      throw new HailTCPProxyConnectionError(s"${service}.${ns}:${port}")
-    val connectionIdMostSignificant = in.readLong()
-    val connectionIdLeastSignificant = in.readLong()
-
-    (new UUID(connectionIdMostSignificant, connectionIdLeastSignificant), s)
   }
 
   private[this] def socket(host: String, port: Int): Socket = {
