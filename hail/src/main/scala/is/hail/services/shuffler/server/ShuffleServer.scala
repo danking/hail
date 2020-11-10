@@ -255,7 +255,7 @@ class ShuffleServer() extends AutoCloseable {
           return
         } else {
           fatal("unexpected closed server socket", se)
-        }
+        t
     }
   }
 

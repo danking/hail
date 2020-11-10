@@ -15,23 +15,6 @@ from hailtop.tcp import (open_direct_connection, open_proxied_connection,
 log = logging.getLogger('scorecard')
 HAIL_DEFAULT_NAMESPACE = os.environ['HAIL_DEFAULT_NAMESPACE']
 
-### Router TCP Protocol
-# IN: 32 bytes, session_id, bytes
-# IN: 32 bytes, internal_session_id, bytes, may be all zeros
-# IN: 4 bytes, namespace_name length, unsigned integer
-# IN: ?? bytes, namespace_name, UTF-8 string
-# IN: 4 bytes, service_name length, unsigned integer
-# IN: ?? bytes, service_name, UTF-8 string
-# IN: 2 bytes, port, unsigned integer
-# OUT: 1 byte, connect_is_successful, unsigned integer, 1 = success, 0 = not-success
-# OUT: 16 bytes, connection_id, bytes
-
-### Other Service Authentication Header
-# IN: 32 bytes, session_id, bytes
-# IN: 32 bytes, internal_session_id, bytes, may be all zeros
-# OUT: 1 byte, connect_is_successful, unsigned integer, 1 = success, 0 = not-success
-# IN: 16 bytes, connection_id, bytes
-
 
 async def pipe(
         reader: asyncio.StreamReader,
