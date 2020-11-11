@@ -25,7 +25,7 @@ STRING_ENCODING = 'utf-8'
 # IN: 32 bytes, session_id, bytes
 # IN: 32 bytes, internal_session_id, bytes, may be all zeros
 # OUT: 1 byte, connect_is_successful, unsigned integer, 1 = success, 0 = not-success
-# IN: 16 bytes, connection_id, bytes
+# OUT: 16 bytes, connection_id, bytes
 
 
 class HailTCPConnectionError(Exception):

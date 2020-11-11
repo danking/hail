@@ -1,3 +1,4 @@
+from typing import Optional, Type, TracebackType
 import asyncio
 import logging
 import weakref
@@ -11,7 +12,9 @@ class BackgroundTaskManager:
         self.tasks: weakref.WeakSet = weakref.WeakSet()
 
     def ensure_future(self, coroutine):
-        self.tasks.add(asyncio.ensure_future(coroutine))
+        fut = asyncio.ensure_future(coroutine)
+        self.tasks.add(fut)
+        return fut
 
     def shutdown(self):
         for task in self.tasks:
@@ -19,3 +22,12 @@ class BackgroundTaskManager:
                 task.cancel()
             except Exception:
                 log.warning(f'encountered an exception while cancelling background task: {task}', exc_info=True)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self,
+                 exc_type: Optional[Type[BaseException]],
+                 exc_value: Optional[BaseException],
+                 traceback: Optional[TracebackType]):
+        self.shutdown()

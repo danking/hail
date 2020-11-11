@@ -39,13 +39,8 @@ async def auth(request):
             raise web.HTTPUnauthorized()
         headers['Authorization'] = f'Bearer {session_id}'
 
-    is_developer = False
-    try:
-        userdata = await async_get_userinfo(headers=headers)
-        is_developer = userdata['is_developer'] == 1
-    except aiohttp.client_exceptions.ClientResponseError as err:
-        assert err.status == 401, err
-
+    userdata = await async_get_userinfo(headers=headers)
+    is_developer = userdata is not None and userdata['is_developer'] == 1
     if not is_developer:
         raise web.HTTPUnauthorized()
 

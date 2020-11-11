@@ -7,6 +7,7 @@ import aiohttp_session
 from hailtop.config import get_deploy_config
 from hailtop.utils import request_retry_transient_errors
 from hailtop.tls import in_cluster_ssl_client_session
+from hailtop.auth import async_get_userinfo
 
 log = logging.getLogger('gear.auth')
 
@@ -14,19 +15,9 @@ deploy_config = get_deploy_config()
 
 
 async def _userdata_from_session_id(session_id):
-    headers = {'Authorization': f'Bearer {session_id}'}
     try:
-        async with in_cluster_ssl_client_session(
-                raise_for_status=True, timeout=aiohttp.ClientTimeout(total=5)) as session:
-            resp = await request_retry_transient_errors(
-                session, 'GET', deploy_config.url('auth', '/api/v1alpha/userinfo'),
-                headers=headers)
-            assert resp.status == 200
-            return await resp.json()
+        return await async_get_userinfo(deploy_config=deploy_config, session_id=session_id)
     except aiohttp.ClientResponseError as e:
-        if e.status == 401:
-            return None
-
         log.exception('unknown exception getting userinfo')
         raise web.HTTPInternalServerError() from e
     except Exception as e:  # pylint: disable=broad-except
@@ -38,7 +29,7 @@ async def userdata_from_web_request(request):
     session = await aiohttp_session.get_session(request)
     if 'session_id' not in session:
         return None
-    return await _userdata_from_session_id(session['session_id'])
+    return await userdata_from_session_id(session['session_id'])
 
 
 async def userdata_from_rest_request(request):
@@ -47,7 +38,7 @@ async def userdata_from_rest_request(request):
     auth_header = request.headers['Authorization']
     if not auth_header.startswith('Bearer '):
         return None
-    return await _userdata_from_session_id(auth_header[7:])
+    return await userdata_from_session_id(auth_header[7:])
 
 
 def rest_authenticated_users_only(fun):

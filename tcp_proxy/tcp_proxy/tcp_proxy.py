@@ -6,10 +6,14 @@ import asyncio
 from contextlib import closing
 import logging
 from .constants import BYTE_ORDER, STRING_ENCODING, BUFFER_SIZE
+from hailtop.config import get_deploy_config
 from hailtop.tls import (get_in_cluster_client_ssl_context,
                          get_in_cluster_server_ssl_context)
 from hailtop.tcp import (open_direct_connection, open_proxied_connection,
                          HailTCPConnectionError)
+from hailtop.auth import async_get_userinfo
+from hailtop.aiotools import BackgroundTaskManager
+from hailtop.auth import session_id_encode_to_str
 
 
 log = logging.getLogger('scorecard')
@@ -59,8 +63,10 @@ SERVER_TLS_CONTEXT = get_in_cluster_server_ssl_context()
 async def handle(source_reader: asyncio.StreamReader, source_writer: asyncio.StreamWriter):
     source_addr = source_writer.get_extra_info('peername')
 
-    session_id = await source_reader.read(32)
-    maybe_internal_session_id = await source_reader.read(32)
+    session_id_bytes = await source_reader.read(32)
+    session_id = session_id_encode_to_str(session_id_bytes)
+    internal_session_id_bytes = await source_reader.read(32)
+    internal_session_id = session_id_encode_to_str(internal_session_id_bytes)
     namespace_name_length = int.from_bytes(await source_reader.read(4), byteorder=BYTE_ORDER, signed=False)
     namespace_name = (await source_reader.read(namespace_name_length)).decode(encoding=STRING_ENCODING)
     service_name_length = int.from_bytes(await source_reader.read(4), byteorder=BYTE_ORDER, signed=False)
@@ -68,17 +74,30 @@ async def handle(source_reader: asyncio.StreamReader, source_writer: asyncio.Str
     port = int.from_bytes(await source_reader.read(2), byteorder=BYTE_ORDER, signed=False)
 
     try:
-        if '.' in service_name or '.' in namespace_name:
-            raise HailTCPConnectionError(f'malformed request: {namespace_name} {service_name}')
-
         hostname = f'{service_name}.{namespace_name}'
         target_addr = (hostname, port)
+
+        userinfo = await async_get_userinfo(session_id=session_id)
+        if userinfo is None:
+            raise HailTCPConnectionError(f'invalid credentials {session_id}')
+
+        if '.' in service_name or '.' in namespace_name:
+            raise HailTCPConnectionError('malformed request')
 
         if namespace_name == HAIL_DEFAULT_NAMESPACE:
             connection_id, target_reader, target_writer = await open_direct_connection(
                 service_name, namespace_name, port,
-                session_ids=(session_id, maybe_internal_session_id))
+                session_ids=(session_id_bytes, internal_session_id_bytes))
         elif HAIL_DEFAULT_NAMESPACE == 'default':  # default router may forward to namespaced ones
+            if userinfo['is_developer'] != 1:
+                raise HailTCPConnectionError('not developer')
+
+            internal_deploy_config = get_deploy_config().with_service('auth', namespace_name)
+            internal_userinfo = await async_get_userinfo(deploy_config=internal_deploy_config,
+                                                         session_id=internal_session_id)
+            if internal_userinfo is None:
+                raise HailTCPConnectionError(f'invalid internal credentials {internal_session_id}')
+
             # we do not verify namespaced certs
             client_tls_context = ssl.create_default_context()
             client_tls_context.check_hostname = False
@@ -89,13 +108,13 @@ async def handle(source_reader: asyncio.StreamReader, source_writer: asyncio.Str
                 service=service_name,
                 ns=namespace_name,
                 port=port,
-                session_ids=(maybe_internal_session_id, b'\x00' * 32),
+                session_ids=(internal_session_id, b'\x00' * 32),
                 ssl=client_tls_context)
         else:
             raise HailTCPConnectionError(
-                f'denying request to access {service_name}.{namespace_name} sent to me in {HAIL_DEFAULT_NAMESPACE}')
+                f'cannot route to namespace from {HAIL_DEFAULT_NAMESPACE}')
     except HailTCPConnectionError:
-        log.info(f'could not connect to {hostname}:{port} on behalf of {source_addr}', exc_info=True)
+        log.info(f'failed to connect {target_addr} -> {source_addr}', exc_info=True)
         source_writer.write(b'\x00')
         source_writer.close()
         return

@@ -5,6 +5,7 @@ import java.net.{ConnectException, Socket}
 
 import is.hail.services.tls._
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.ExecutorService
 import java.util.{Base64, UUID}
 
 package object tcp {
@@ -20,8 +21,6 @@ package object tcp {
         openProxiedConnection("hail.is", 5000, service, ns, port)
     }
   }
-
-  def serverSocket(port: Int): ServerSocket = new ServerSocket(port)
 
   private[this] def openDirectConnection(service: String,
                                          ns: String,
@@ -73,15 +72,21 @@ package object tcp {
     (new UUID(connectionIdMostSignificant, connectionIdLeastSignificant), s)
   }
 
+  private[this] val sessionIdDecoder = Base64.getUrlDecoder
+  def sessionIdDecodeFromStr(id: String): Array[Byte] = sessionIdDecoder.decode(id)
+
+  private[this] val sessionIdEncoder = Base64.getUrlEncoder
+  def sessionIdEncodeToStr(id: Array[Byte]): String = sessionIdEncoder.encodeToString(id)
+
   private[this] def writeSessionIds(ns: String, out: OutputStream): Unit = {
     val tokens = Tokens.get
     val defaultSessionId = tokens.namespaceToken("default")
-    val defaultSessionIdBytes = Base64.getUrlDecoder.decode(defaultSessionId)
+    val defaultSessionIdBytes = sessionIdDecodeFromStr(defaultSessionId)
     assert(defaultSessionIdBytes.length == 32)
     out.write(defaultSessionIdBytes)
     if (ns != "default") {
       val namespacedSessionId = tokens.namespaceToken(ns)
-      val namespacedSessionIdBytes = Base64.getUrlDecoder.decode(namespacedSessionId)
+      val namespacedSessionIdBytes = sessionIdDecodeFromStr(namespacedSessionId)
       assert(namespacedSessionIdBytes.length == 32)
       out.write(namespacedSessionIdBytes)
     } else {
