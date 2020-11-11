@@ -4,6 +4,7 @@ import signal
 import uuid
 import asyncio
 from contextlib import closing
+import aiohttp
 import logging
 from .constants import BYTE_ORDER, STRING_ENCODING, BUFFER_SIZE
 from hailtop.config import get_deploy_config
@@ -92,24 +93,29 @@ async def handle(source_reader: asyncio.StreamReader, source_writer: asyncio.Str
             if userinfo['is_developer'] != 1:
                 raise HailTCPConnectionError('not developer')
 
-            internal_deploy_config = get_deploy_config().with_service('auth', namespace_name)
-            internal_userinfo = await async_get_userinfo(deploy_config=internal_deploy_config,
-                                                         session_id=internal_session_id)
-            if internal_userinfo is None:
-                raise HailTCPConnectionError(f'invalid internal credentials {internal_session_id}')
-
             # we do not verify namespaced certs
             client_tls_context = ssl.create_default_context()
             client_tls_context.check_hostname = False
             client_tls_context.verify_mode = ssl.CERT_NONE
+
+            internal_deploy_config = get_deploy_config().with_service('auth', namespace_name)
+            internal_userinfo = await async_get_userinfo(deploy_config=internal_deploy_config,
+                                                         session_id=internal_session_id,
+                                                         client_session=aiohttp.ClientSession(
+                                                             connector=aiohttp.TCPConnector(
+                                                                 ssl=client_tls_context)))
+            if internal_userinfo is None:
+                raise HailTCPConnectionError(f'invalid internal credentials {internal_session_id}')
+
             connection_id, target_reader, target_writer = await open_proxied_connection(
-                proxy_hostname=f'router.{namespace_name}',
+                proxy_hostname=f'tcp-router.{namespace_name}',
                 proxy_port=5000,
                 service=service_name,
                 ns=namespace_name,
                 port=port,
                 session_ids=(internal_session_id, b'\x00' * 32),
                 ssl=client_tls_context)
+            log.info(f'successful connection {target_addr} -> {source_addr}')
         else:
             raise HailTCPConnectionError(
                 f'cannot route to namespace from {HAIL_DEFAULT_NAMESPACE}')

@@ -7,7 +7,7 @@ from hailtop.tls import get_context_specific_ssl_client_session
 from .tokens import get_tokens
 
 
-async def async_get_userinfo(*, deploy_config=None, headers=None, session_id=None):
+async def async_get_userinfo(*, deploy_config=None, headers=None, session_id=None, client_session=None):
     if deploy_config is None:
         deploy_config = get_deploy_config()
     if session_id is not None:
@@ -17,8 +17,10 @@ async def async_get_userinfo(*, deploy_config=None, headers=None, session_id=Non
         assert session_id is None
         headers = service_auth_headers(deploy_config, 'auth')
     userinfo_url = deploy_config.url('auth', '/api/v1alpha/userinfo')
-    async with get_context_specific_ssl_client_session(
-            raise_for_status=True, timeout=aiohttp.ClientTimeout(total=5)) as session:
+    if client_session is None:
+        client_session = get_context_specific_ssl_client_session(
+            raise_for_status=True, timeout=aiohttp.ClientTimeout(total=5))
+    async with client_session as session:
         try:
             resp = await request_retry_transient_errors(
                 session, 'GET', userinfo_url, headers=headers)
