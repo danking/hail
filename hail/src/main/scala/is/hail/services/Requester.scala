@@ -45,7 +45,7 @@ class Requester(
 
   import Requester._
 
-  def request(req: HttpUriRequest, body: HttpEntity = null, addAuthHeaders: Boolean = True): JValue = {
+  def request(req: HttpUriRequest, body: HttpEntity = null, addAuthHeaders: Boolean = true): JValue = {
     log.info(s"request ${ req.getMethod } ${ req.getURI }")
 
     if (body != null)
