@@ -3597,7 +3597,7 @@ steps:
    config: tcp_proxy/deployment.yaml
    wait:
     - kind: Service
-      name: tcp_proxy
+      name: tcp-proxy
       for: alive
    dependsOn:
     - default_ns
