@@ -1,4 +1,5 @@
-from typing import Optional, Type, TracebackType
+from types import TracebackType
+from typing import Optional, Type
 import asyncio
 import logging
 import weakref
