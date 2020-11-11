@@ -10,12 +10,12 @@ from .tokens import get_tokens
 async def async_get_userinfo(*, deploy_config=None, headers=None, session_id=None):
     if deploy_config is None:
         deploy_config = get_deploy_config()
-    if headers is None:
-        assert session_id is None
-        headers = service_auth_headers(deploy_config, 'auth')
     if session_id is not None:
         assert headers is None
         headers = {'Authorization': f'Bearer {session_id}'}
+    if headers is None:
+        assert session_id is None
+        headers = service_auth_headers(deploy_config, 'auth')
     userinfo_url = deploy_config.url('auth', '/api/v1alpha/userinfo')
     async with get_context_specific_ssl_client_session(
             raise_for_status=True, timeout=aiohttp.ClientTimeout(total=5)) as session:
