@@ -62,6 +62,15 @@ async def pipe(
 SERVER_TLS_CONTEXT = get_in_cluster_server_ssl_context()
 
 async def handle(source_reader: asyncio.StreamReader, source_writer: asyncio.StreamWriter):
+    main_task = asyncio.create_task(_handle(source_reader, source_writer))
+    try:
+        await source_writer.wait_closed()
+    finally:
+        main_task.cancel()
+        main_task.result()
+
+async def _handle(source_reader: asyncio.StreamReader, source_writer: asyncio.StreamWriter):
+    # FIXME: need a way to kill this entire method if the connection is dropped
     source_addr = source_writer.get_extra_info('peername')
 
     session_id_bytes = await source_reader.read(32)

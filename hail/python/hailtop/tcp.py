@@ -95,11 +95,14 @@ async def open_proxied_connection(proxy_hostname: str,
                                   session_ids: Optional[Tuple[bytes, bytes]] = None,
                                   **kwargs
                                   ) -> Tuple[uuid.UUID, asyncio.StreamReader, asyncio.StreamWriter]:
+    if 'ssl' not in kwargs:
+        kwargs['ssl'] = CLIENT_TLS_CONTEXT,
+    if 'loop' not in kwargs:
+        kwargs['loop'] = asyncio.get_event_loop(),
+
     reader, writer = await asyncio.open_connection(
         proxy_hostname,
         proxy_port,
-        loop=asyncio.get_event_loop(),
-        ssl=CLIENT_TLS_CONTEXT,
         **kwargs)
 
     await write_session_ids(writer, ns, session_ids=session_ids)
