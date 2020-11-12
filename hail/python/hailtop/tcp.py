@@ -1,6 +1,7 @@
 from typing import Tuple, Optional
 import uuid
 import asyncio
+import logging
 from .auth import session_id_decode_from_str, get_tokens
 from .config import get_deploy_config
 from .tls import get_context_specific_client_ssl_context
@@ -8,6 +9,7 @@ from .tls import get_context_specific_client_ssl_context
 
 BYTE_ORDER = 'big'
 STRING_ENCODING = 'utf-8'
+log = logging.getLogger('tcp')
 
 
 ### Router TCP Protocol
@@ -65,22 +67,23 @@ async def open_direct_connection(service: str,
                                  **kwargs
                                  ) -> Tuple[uuid.UUID, asyncio.StreamReader, asyncio.StreamWriter]:
     if 'ssl' not in kwargs:
-        kwargs['ssl'] = CLIENT_TLS_CONTEXT,
+        kwargs['ssl'] = CLIENT_TLS_CONTEXT
     if 'loop' not in kwargs:
-        kwargs['loop'] = asyncio.get_event_loop(),
+        kwargs['loop'] = asyncio.get_event_loop()
 
     reader, writer = await asyncio.open_connection(
         f'{service}.{ns}',
         port,
         **kwargs)
-    write_session_ids(writer, ns, session_ids=session_ids)
+
+    await write_session_ids(writer, ns, session_ids=session_ids)
 
     await writer.drain()
-    is_success = await reader.read(1)
+    is_success = await reader.readexactly(1)
     if is_success != b'\x01':
-        raise HailTCPConnectionError(f'{service}.{ns}:{port}')
+        raise HailTCPConnectionError(f'{service}.{ns}:{port} {is_success!r}')
 
-    connection_id_bytes = await reader.read(16)
+    connection_id_bytes = await reader.readexactly(16)
     connection_id = uuid.UUID(bytes=connection_id_bytes)
 
     return connection_id, reader, writer
@@ -96,9 +99,9 @@ async def open_proxied_connection(proxy_hostname: str,
                                   **kwargs
                                   ) -> Tuple[uuid.UUID, asyncio.StreamReader, asyncio.StreamWriter]:
     if 'ssl' not in kwargs:
-        kwargs['ssl'] = CLIENT_TLS_CONTEXT,
+        kwargs['ssl'] = CLIENT_TLS_CONTEXT
     if 'loop' not in kwargs:
-        kwargs['loop'] = asyncio.get_event_loop(),
+        kwargs['loop'] = asyncio.get_event_loop()
 
     reader, writer = await asyncio.open_connection(
         proxy_hostname,
@@ -106,6 +109,8 @@ async def open_proxied_connection(proxy_hostname: str,
         **kwargs)
 
     await write_session_ids(writer, ns, session_ids=session_ids)
+
+    log.info(f'establishing proxy connection')
 
     writer.write(len(ns).to_bytes(4, BYTE_ORDER))
     writer.write(ns.encode(STRING_ENCODING))
@@ -116,11 +121,11 @@ async def open_proxied_connection(proxy_hostname: str,
     writer.write((port).to_bytes(2, BYTE_ORDER))
 
     await writer.drain()
-    is_success = await reader.read(1)
+    is_success = await reader.readexactly(1)
     if is_success != b'\x01':
         raise HailTCPConnectionError(f'{service}.{ns}:{port} {is_success!r}')
 
-    connection_id_bytes = await reader.read(16)
+    connection_id_bytes = await reader.readexactly(16)
     connection_id = uuid.UUID(bytes=connection_id_bytes)
 
     return connection_id, reader, writer
@@ -133,14 +138,17 @@ async def write_session_ids(writer: asyncio.StreamWriter,
     if session_ids is None:
         tokens = get_tokens()
         default_session_id = session_id_decode_from_str(tokens.namespace_token_or_error('default'))
-        assert len(default_session_id) == 32
         namespace_session_id = b'\x00' * 32
         if ns != 'default':
             namespace_session_id = session_id_decode_from_str(tokens.namespace_token_or_error(ns))
-            assert len(namespace_session_id) == 32
     else:
         assert len(session_ids) == 2, session_ids
         default_session_id, namespace_session_id = session_ids
 
+    assert len(default_session_id) == 32
+    assert len(namespace_session_id) == 32
+
+    log.info(f'writing default session id')
     writer.write(default_session_id)
+    log.info(f'writing namespaced session id')
     writer.write(namespace_session_id)

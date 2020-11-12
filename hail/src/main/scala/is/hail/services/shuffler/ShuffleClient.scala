@@ -149,8 +149,8 @@ class ShuffleClient (
   }
 
   private[this] val idAndSocket = ShuffleClient.socket()
-  private[this] var connectionId: UUID = null
-  private[this] var s: Socket = null
+  private[this] var connectionId: UUID = idAndSocket._1
+  private[this] var s: Socket = idAndSocket._2
   def log_info(msg: String): Unit = {
     log.info(s"${connectionId}: ${msg}")
   }
@@ -160,9 +160,11 @@ class ShuffleClient (
 
   private[this] def startOperation(op: Byte) = {
     assert(op != Wire.EOS)
-    while(true) {
+    var continue = true
+    while(continue) {
       try {
         out.writeByte(op)
+        continue = false
       } catch {
         case exc: IOException =>
           log_info(s"connection lost due to ${exc}, reconnecting")

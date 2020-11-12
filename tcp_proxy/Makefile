@@ -26,7 +26,7 @@ push: build
 	docker tag tcp-proxy $(TCP_PROXY_IMAGE)
 	docker push $(TCP_PROXY_IMAGE)
 
-JINJA_ENVIRONMENT = '{"code":{"sha":"$(shell git rev-parse --short=12 HEAD)"},"deploy":true,"tcp_proxy_image":{"image":"$(TCP_PROXY_IMAGE)"},"default_ns":{"name":"default"},"global":{"project":"$(PROJECT)","domain":"$(DOMAIN)","k8s_server_url":"$(KUBERNETES_SERVER_URL)"},"scope":"deploy"}'
+JINJA_ENVIRONMENT = '{"code":{"sha":"$(shell git rev-parse --short=12 HEAD)"},"deploy":true,"tcp_proxy_image":{"image":"$(TCP_PROXY_IMAGE)"},"default_ns":{"name":"$(NAMESPACE)"},"global":{"project":"$(PROJECT)","domain":"$(DOMAIN)","k8s_server_url":"$(KUBERNETES_SERVER_URL)"},"scope":"deploy"}'
 
 .PHONY: deploy
 deploy: push

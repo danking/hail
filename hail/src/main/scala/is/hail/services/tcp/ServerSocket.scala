@@ -21,7 +21,7 @@ class ServerSocket(port: Int, executor: ExecutorService) extends Closeable {
   }
 
   private[this] val auth = new Requester("auth")
-  private[this] val authBaseUrl = DeployConfig.get.baseUrl("batch")
+  private[this] val authBaseUrl = DeployConfig.get.baseUrl("auth")
 
   class GetUserInfo(
     private[this] val s: Socket,
@@ -38,6 +38,8 @@ class ServerSocket(port: Int, executor: ExecutorService) extends Closeable {
         in.read(sessionIdBytes)
         val sessionId = tcp.sessionIdEncodeToStr(sessionIdBytes)
         in.skipBytes(32) // internal auth is only for routers and gateways
+
+        log.info(s"checking session id ${sessionId} from ${s.getInetAddress}")
 
         val userInfo = try {
           val req = new HttpGet(s"$authBaseUrl/api/v1alpha/userinfo")
@@ -60,9 +62,10 @@ class ServerSocket(port: Int, executor: ExecutorService) extends Closeable {
         out.write(1)
         out.writeLong(uuid.getMostSignificantBits)
         out.writeLong(uuid.getLeastSignificantBits)
+        out.flush()
 
         val conn = new TCPConnection(userInfo, uuid, s)
-        conn.log.info(s"authenticated connection, calling handler")
+        conn.log_info(s"authenticated connection, calling handler")
         next(conn)
       } catch {
         case exc: Exception =>

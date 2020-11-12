@@ -63,25 +63,25 @@ SERVER_TLS_CONTEXT = get_in_cluster_server_ssl_context()
 
 async def handle(source_reader: asyncio.StreamReader, source_writer: asyncio.StreamWriter):
     main_task = asyncio.create_task(_handle(source_reader, source_writer))
-    try:
-        await source_writer.wait_closed()
-    finally:
-        main_task.cancel()
-        main_task.result()
+    await main_task
+    # try:
+    #     await source_writer.wait_closed()
+    # finally:
+    #     main_task.cancel()
+    #     await main_task
 
 async def _handle(source_reader: asyncio.StreamReader, source_writer: asyncio.StreamWriter):
-    # FIXME: need a way to kill this entire method if the connection is dropped
     source_addr = source_writer.get_extra_info('peername')
 
-    session_id_bytes = await source_reader.read(32)
+    session_id_bytes = await source_reader.readexactly(32)
     session_id = session_id_encode_to_str(session_id_bytes)
-    internal_session_id_bytes = await source_reader.read(32)
+    internal_session_id_bytes = await source_reader.readexactly(32)
     internal_session_id = session_id_encode_to_str(internal_session_id_bytes)
-    namespace_name_length = int.from_bytes(await source_reader.read(4), byteorder=BYTE_ORDER, signed=False)
-    namespace_name = (await source_reader.read(namespace_name_length)).decode(encoding=STRING_ENCODING)
-    service_name_length = int.from_bytes(await source_reader.read(4), byteorder=BYTE_ORDER, signed=False)
-    service_name = (await source_reader.read(service_name_length)).decode(encoding=STRING_ENCODING)
-    port = int.from_bytes(await source_reader.read(2), byteorder=BYTE_ORDER, signed=False)
+    namespace_name_length = int.from_bytes(await source_reader.readexactly(4), byteorder=BYTE_ORDER, signed=False)
+    namespace_name = (await source_reader.readexactly(namespace_name_length)).decode(encoding=STRING_ENCODING)
+    service_name_length = int.from_bytes(await source_reader.readexactly(4), byteorder=BYTE_ORDER, signed=False)
+    service_name = (await source_reader.readexactly(service_name_length)).decode(encoding=STRING_ENCODING)
+    port = int.from_bytes(await source_reader.readexactly(2), byteorder=BYTE_ORDER, signed=False)
 
     try:
         hostname = f'{service_name}.{namespace_name}'
@@ -95,9 +95,11 @@ async def _handle(source_reader: asyncio.StreamReader, source_writer: asyncio.St
             raise HailTCPConnectionError('malformed request')
 
         if namespace_name == HAIL_DEFAULT_NAMESPACE:
+            log.info(f'attempting direct connection {target_addr} -> {source_addr}')
             connection_id, target_reader, target_writer = await open_direct_connection(
                 service_name, namespace_name, port,
                 session_ids=(session_id_bytes, internal_session_id_bytes))
+            log.info(f'sucessful direct connection {target_addr} -> {source_addr}')
         elif HAIL_DEFAULT_NAMESPACE == 'default':  # default router may forward to namespaced ones
             if userinfo['is_developer'] != 1:
                 raise HailTCPConnectionError('not developer')
@@ -111,25 +113,33 @@ async def _handle(source_reader: asyncio.StreamReader, source_writer: asyncio.St
             internal_userinfo = await async_get_userinfo(deploy_config=internal_deploy_config,
                                                          session_id=internal_session_id,
                                                          client_session=aiohttp.ClientSession(
+                                                             raise_for_status=True,
+                                                             timeout=aiohttp.ClientTimeout(total=5),
                                                              connector=aiohttp.TCPConnector(
                                                                  ssl=client_tls_context)))
             if internal_userinfo is None:
                 raise HailTCPConnectionError(f'invalid internal credentials {internal_session_id}')
 
+            log.info(f'attempting proxied connection {target_addr} -> {source_addr}')
             connection_id, target_reader, target_writer = await open_proxied_connection(
-                proxy_hostname=f'tcp-router.{namespace_name}',
+                proxy_hostname=f'tcp-proxy.{namespace_name}',
                 proxy_port=5000,
                 service=service_name,
                 ns=namespace_name,
                 port=port,
-                session_ids=(internal_session_id, b'\x00' * 32),
+                session_ids=(internal_session_id_bytes, b'\x00' * 32),
                 ssl=client_tls_context)
-            log.info(f'successful connection {target_addr} -> {source_addr}')
+            log.info(f'successful proxied connection {target_addr} -> {source_addr}')
         else:
             raise HailTCPConnectionError(
                 f'cannot route to namespace from {HAIL_DEFAULT_NAMESPACE}')
     except HailTCPConnectionError:
-        log.info(f'failed to connect {target_addr} -> {source_addr}', exc_info=True)
+        log.info(f'failed to connect {target_addr} <- {source_addr}', exc_info=True)
+        source_writer.write(b'\x00')
+        source_writer.close()
+        return
+    except Exception:
+        log.info(f'unexpected connection failure {target_addr} <- {source_addr}', exc_info=True)
         source_writer.write(b'\x00')
         source_writer.close()
         return

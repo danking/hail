@@ -11,5 +11,9 @@ class TCPConnection(
   val connectionId: UUID,
   val s: Socket
 ) {
-  val log: Logger = LogManager.getLogger(s"TCPConnection(${userInfo.email}, $connectionId, ${s.getInetAddress})")
+  private[this] val log: Logger = LogManager.getLogger(s"TCPConnection")
+
+  def log_info(msg: String): Unit = {
+    log.info(s"${userInfo.email}, $connectionId, ${s.getInetAddress}: ${msg}")
+  }
 }

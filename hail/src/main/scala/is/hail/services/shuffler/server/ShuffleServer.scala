@@ -33,12 +33,12 @@ class Handler (
 
   def run(): Unit = {
     try {
-      conn.log.info(s"handle")
+      conn.log_info(s"handle")
       try {
         var continue = true
         while (continue) {
           val op = in.readByte()
-          conn.log.info(s"operation ${op}")
+          conn.log_info(s"operation ${op}")
             (op: @switch) match {
             case Wire.START => start()
             case Wire.PUT => put()
@@ -46,7 +46,7 @@ class Handler (
             case Wire.STOP => stop()
             case Wire.PARTITION_BOUNDS => partitionBounds()
             case Wire.EOS =>
-              conn.log.info(s"client ended session, replying, then exiting cleanly")
+              conn.log_info(s"client ended session, replying, then exiting cleanly")
               eos()
               continue = false
             case op => fatal(s"bad operation number $op")
@@ -64,7 +64,7 @@ class Handler (
   def readShuffleUUID(): Shuffle = {
     val uuid = Wire.readByteArray(in)
     assert(uuid.length == Wire.ID_SIZE, s"${uuid.length} ${Wire.ID_SIZE}")
-    conn.log.info(s"uuid ${uuidToString(uuid)}")
+    conn.log_info(s"uuid ${uuidToString(uuid)}")
     val shuffle = server.shuffles.get(uuid)
     if (shuffle == null) {
       throw new RuntimeException(s"shuffle does not exist ${uuidToString(uuid)}")
@@ -73,41 +73,41 @@ class Handler (
   }
 
   def start(): Unit = {
-    conn.log.info(s"start")
+    conn.log_info(s"start")
     val rowType = Wire.readTStruct(in)
-    conn.log.info(s"start got row type ${rowType}")
+    conn.log_info(s"start got row type ${rowType}")
     val rowEType = Wire.readEBaseStruct(in)
-    conn.log.info(s"start got row encoded type ${rowEType}")
+    conn.log_info(s"start got row encoded type ${rowEType}")
     val keyFields = Wire.readSortFieldArray(in)
-    conn.log.info(s"start got key fields ${keyFields.mkString("[", ",", "]")}")
+    conn.log_info(s"start got key fields ${keyFields.mkString("[", ",", "]")}")
     val keyEType = Wire.readEBaseStruct(in)
-    conn.log.info(s"start got key encoded type ${keyEType}")
+    conn.log_info(s"start got key encoded type ${keyEType}")
     val uuid = new Array[Byte](Wire.ID_SIZE)
     random.nextBytes(uuid)
     server.shuffles.put(uuid, new Shuffle(uuid, TShuffle(keyFields, rowType, rowEType, keyEType)))
     Wire.writeByteArray(out, uuid)
-    conn.log.info(s"start wrote uuid")
+    conn.log_info(s"start wrote uuid")
     out.flush()
-    conn.log.info(s"start flush")
-    conn.log.info(s"start done")
+    conn.log_info(s"start flush")
+    conn.log_info(s"start done")
   }
 
   def put(): Unit = {
-    conn.log.info(s"put")
+    conn.log_info(s"put")
     val shuffle = readShuffleUUID()
     shuffle.put(in, out)
-    conn.log.info(s"put done")
+    conn.log_info(s"put done")
   }
 
   def get(): Unit = {
-    conn.log.info(s"get")
+    conn.log_info(s"get")
     val shuffle = readShuffleUUID()
     shuffle.get(in, out)
-    conn.log.info(s"get done")
+    conn.log_info(s"get done")
   }
 
   def stop(): Unit = {
-    conn.log.info(s"stop")
+    conn.log_info(s"stop")
     val uuid = Wire.readByteArray(in)
     assert(uuid.length == Wire.ID_SIZE, s"${uuid.length} ${Wire.ID_SIZE}")
     val shuffle = server.shuffles.remove(uuid)
@@ -116,14 +116,14 @@ class Handler (
     }
     out.writeByte(0.toByte)
     out.flush()
-    conn.log.info(s"stop done")
+    conn.log_info(s"stop done")
   }
 
   def partitionBounds(): Unit = {
-    conn.log.info(s"partitionBounds")
+    conn.log_info(s"partitionBounds")
     val shuffle = readShuffleUUID()
     shuffle.partitionBounds(in, out)
-    conn.log.info(s"partitionBounds done")
+    conn.log_info(s"partitionBounds done")
   }
 
   def eos(): Unit = {
@@ -240,7 +240,7 @@ class ShuffleServer() extends AutoCloseable {
   def serve(): Unit = {
     try {
       log.info(s"serving on ${port}")
-      ss.serveForever(new Handler(this, _))
+      ss.serveForever(conn => new Handler(this, conn).run())
     } catch {
       case se: SocketException =>
         if (stopped) {

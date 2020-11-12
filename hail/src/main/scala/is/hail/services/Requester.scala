@@ -51,7 +51,8 @@ class Requester(
     if (body != null)
       req.asInstanceOf[HttpEntityEnclosingRequest].setEntity(body)
 
-    tokens.addServiceAuthHeaders(service, req)
+    if (addAuthHeaders)
+      tokens.addServiceAuthHeaders(service, req)
 
     retryTransientErrors {
       using(httpClient.execute(req)) { resp =>
