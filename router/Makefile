@@ -19,8 +19,8 @@ push: build
 
 .PHONY: deploy
 deploy: push
-	python3 ../ci/jinja2_render.py '{"code":{"sha":"$(shell git rev-parse --short=12 HEAD)"},"deploy":true,"router_image":{"image":"$(ROUTER_IMAGE)"},"default_ns":{"name":"dking"},"global":{"domain":"$(DOMAIN)"}}' deployment.yaml deployment.yaml.out
-	kubectl -n dking apply -f deployment.yaml.out
+	python3 ../ci/jinja2_render.py '{"code":{"sha":"$(shell git rev-parse --short=12 HEAD)"},"deploy":true,"router_image":{"image":"$(ROUTER_IMAGE)"},"default_ns":{"name":"default"},"global":{"domain":"$(DOMAIN)"}}' deployment.yaml deployment.yaml.out
+	kubectl -n default apply -f deployment.yaml.out
 
 .PHONY: clean
 clean:
