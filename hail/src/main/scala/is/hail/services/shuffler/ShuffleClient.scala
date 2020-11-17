@@ -3,6 +3,7 @@ package is.hail.services.shuffler
 import java.io.IOException
 import java.net.Socket
 import java.util.UUID
+import java.util.function.Supplier
 
 import is.hail._
 import is.hail.annotations._
@@ -14,16 +15,38 @@ import is.hail.services._
 import is.hail.services.tls._
 import is.hail.io._
 import is.hail.utils._
+import is.hail.utils.richUtils.UnexpectedEndOfFileHailException
 import javax.net.ssl._
 import org.apache.log4j.Logger
 
+import scala.collection.mutable
+
 object ShuffleClient {
-  private[this] val log = Logger.getLogger(getClass.getName())
+  private val clients = ThreadLocal.withInitial(new Supplier[mutable.Map[IndexedSeq[Byte], ShuffleClient]]() {
+    def get() = mutable.Map[IndexedSeq[Byte], ShuffleClient]()
+  })
 
   def socket(): (UUID, Socket) = tcp.openConnection("shuffler", 443)
 
   def codeSocket(): Code[Socket] =
     Code.invokeScalaObject0[Socket](ShuffleClient.getClass, "socket")
+
+  def getOrCreate(
+    shuffleType: TShuffle,
+    uuid: Array[Byte],
+    rowEncodingPType: PType,
+    keyEncodingPType: PType
+  ): ShuffleClient = {
+    clients.get().get(uuid) match {
+      case None =>
+        val client = new ShuffleClient(shuffleType, uuid, rowEncodingPType, keyEncodingPType)
+        clients.get().put(uuid, client)
+        client
+      case Some(client) =>
+        assert(client.shuffleType == shuffleType)
+        client
+    }
+  }
 }
 
 object CodeShuffleClient {
@@ -31,11 +54,11 @@ object CodeShuffleClient {
     new ValueShuffleClient(
       cb.newField[ShuffleClient]("shuffleClient", create(shuffleType)))
 
-  def createValue(cb: CodeBuilderLike, shuffleType: Code[TShuffle], uuid: Code[Array[Byte]]): ValueShuffleClient =
+  def getOrCreateValue(cb: CodeBuilderLike, shuffleType: Code[TShuffle], uuid: Code[Array[Byte]]): ValueShuffleClient =
     new ValueShuffleClient(
-      cb.newField[ShuffleClient]("shuffleClient", create(shuffleType, uuid)))
+      cb.newField[ShuffleClient]("shuffleClient", getOrCreate(shuffleType, uuid)))
 
-  def createValue(
+  def getOrCreateValue(
     cb: CodeBuilderLike,
     shuffleType: Code[TShuffle],
     uuid: Code[Array[Byte]],
@@ -45,21 +68,26 @@ object CodeShuffleClient {
     new ValueShuffleClient(
       cb.newField[ShuffleClient](
         "shuffleClient",
-        create(shuffleType, uuid, rowEncodingPType, keyEncodingPType)))
+        getOrCreate(shuffleType, uuid, rowEncodingPType, keyEncodingPType)))
 
   def create(shuffleType: Code[TShuffle]): Code[ShuffleClient] =
     Code.newInstance[ShuffleClient, TShuffle](shuffleType)
 
-  def create(shuffleType: Code[TShuffle], uuid: Code[Array[Byte]]): Code[ShuffleClient] =
-    Code.newInstance[ShuffleClient, TShuffle, Array[Byte]](shuffleType, uuid)
+  def getOrCreate(shuffleType: Code[TShuffle], uuid: Code[Array[Byte]]): Code[ShuffleClient] =
+    Code.invokeScalaObject4[TShuffle, Array[Byte], PType, PType, ShuffleClient](
+      ShuffleClient.getClass,
+      "getOrCreate",
+      shuffleType, uuid, Code._null, Code._null)
 
-  def create(
+  def getOrCreate(
     shuffleType: Code[TShuffle],
     uuid: Code[Array[Byte]],
     rowEncodingPType: Code[PType],
     keyEncodingPType: Code[PType]
   ): Code[ShuffleClient] =
-    Code.newInstance[ShuffleClient, TShuffle, Array[Byte], PType, PType](
+    Code.invokeScalaObject4[TShuffle, Array[Byte], PType, PType, ShuffleClient](
+      ShuffleClient.getClass,
+      "getOrCreate",
       shuffleType, uuid, rowEncodingPType, keyEncodingPType)
 }
 
@@ -122,7 +150,7 @@ class ValueShuffleClient(
 }
 
 class ShuffleClient (
-  shuffleType: TShuffle,
+  val shuffleType: TShuffle,
   var uuid: Array[Byte],
   rowEncodingPType: Option[PType],
   keyEncodingPType: Option[PType]
@@ -158,15 +186,12 @@ class ShuffleClient (
   private[this] var in = shuffleBufferSpec.buildInputBuffer(s.getInputStream())
   private[this] var out = shuffleBufferSpec.buildOutputBuffer(s.getOutputStream())
 
-  private[this] def startOperation(op: Byte) = {
-    assert(op != Wire.EOS)
-    var continue = true
-    while(continue) {
+  private[this] def retry[T](block: => T): T = {
+    while(true) {
       try {
-        out.writeByte(op)
-        continue = false
+        return block
       } catch {
-        case exc: IOException =>
+        case exc @ (_: IOException | _: UnexpectedEndOfFileHailException) =>
           log_info(s"connection lost due to ${exc}, reconnecting")
           val (_connectionId, _s) = ShuffleClient.socket()
           connectionId = _connectionId
@@ -175,6 +200,12 @@ class ShuffleClient (
           out = shuffleBufferSpec.buildOutputBuffer(s.getOutputStream)
       }
     }
+    throw new RuntimeException("unreachable")  // scala cannot infer this is unreachable
+  }
+
+  private[this] def startOperation(op: Byte) = {
+    assert(op != Wire.EOS)
+    out.writeByte(op)
     if (op != Wire.START) {
       assert(uuid != null)
       log_info(s"operation $op uuid ${uuidToString(uuid)}")
@@ -182,6 +213,7 @@ class ShuffleClient (
     }
   }
 
+  // FIXME: cannot retry start b/c garbage
   def start(): Unit = {
     startOperation(Wire.START)
     log_info(s"start")
@@ -205,6 +237,7 @@ class ShuffleClient (
     encoder = codecs.makeRowEncoder(out)
   }
 
+  // FIXME: PUT is not idempotent
   def put(values: Array[Long]): Unit = {
     startPut()
     writeRegionValueArray(encoder, values)
@@ -254,7 +287,7 @@ class ShuffleClient (
     startInclusive: Boolean,
     end: Long,
     endInclusive: Boolean
-  ): Array[Long] = {
+  ): Array[Long] = retry {
     startGet(start, startInclusive, end, endInclusive)
     val values = readRegionValueArray(region, decoder)
     getDone()
@@ -286,7 +319,7 @@ class ShuffleClient (
     keyDecoder = codecs.makeKeyDecoder(in)
   }
 
-  def partitionBounds(region: Region, nPartitions: Int): Array[Long] = {
+  def partitionBounds(region: Region, nPartitions: Int): Array[Long] = retry {
     startPartitionBounds(nPartitions)
     val keys = readRegionValueArray(region, keyDecoder, nPartitions + 1)
     endPartitionBounds()
@@ -305,7 +338,7 @@ class ShuffleClient (
     log_info(s"partitionBounds done")
   }
 
-  def stop(): Unit = {
+  def stop(): Unit = retry {
     startOperation(Wire.STOP)
     out.flush()
     log_info(s"stop")
@@ -313,11 +346,12 @@ class ShuffleClient (
     log_info(s"stop done")
   }
 
-  def close(): Unit = {
+  def close(): Unit = retry {
     log_info(s"close")
-    out.writeByte(Wire.EOS)
-    out.flush()
-    assert(in.readByte() == Wire.EOS)
-    using(s) { _ => () }  // close with proper exception suppression notices
+//    log_info(s"close")
+//    out.writeByte(Wire.EOS)
+//    out.flush()
+//    assert(in.readByte() == Wire.EOS)
+//    using(s) { _ => () }  // close with proper exception suppression notices
   }
 }

@@ -1592,7 +1592,7 @@ class Emit[C](
           .get(cb, "shuffle ID must be non-missing")
           .asInstanceOf[PCanonicalShuffleCode]
           .memoize(cb, "shuffleClientUUID")
-        val shuffle = CodeShuffleClient.createValue(
+        val shuffle = CodeShuffleClient.getOrCreateValue(
           cb,
           mb.ecb.getType(shuffleType),
           uuid.loadBytes(),

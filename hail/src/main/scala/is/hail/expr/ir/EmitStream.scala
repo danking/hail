@@ -2092,7 +2092,7 @@ object EmitStream {
                           shuffleType.rowDecodedPType, shuffle.getValue(eltRegion.code))))
                   },
                   setup = Some(Code(
-                    shuffleLocal := CodeShuffleClient.create(
+                    shuffleLocal := CodeShuffleClient.getOrCreate(
                       mb.ecb.getType(shuffleType),
                       uuid.loadBytes(),
                       Code._null,
@@ -2129,7 +2129,7 @@ object EmitStream {
                 },
                 setup = Some(Code(
                   uuidLocal := idt.tcode[Long],
-                  shuffleLocal := CodeShuffleClient.create(mb.ecb.getType(shuffleType), uuid.loadBytes()),
+                  shuffleLocal := CodeShuffleClient.getOrCreate(mb.ecb.getType(shuffleType), uuid.loadBytes()),
                   shuffle.startPartitionBounds(nPartitionst.codeTuple()(0).asInstanceOf[Code[Int]]))),
                 close = Some(Code(
                   shuffle.endPartitionBounds(),

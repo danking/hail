@@ -25,15 +25,26 @@ package object tcp {
   private[this] def openDirectConnection(service: String,
                                          ns: String,
                                          port: Int): (UUID, Socket) = {
-    val s = socket(s"${service}.${ns}", port)
+    var s: Socket = null
+    var in: DataInputStream = null
+    var out: DataOutputStream = null
+    var connected = false
+    while (!connected) {
+      s = socket(s"${service}.${ns}", port)
+      in = new DataInputStream(s.getInputStream)
+      out = new DataOutputStream(s.getOutputStream)
 
-    writeSessionIds(ns, s.getOutputStream)
+      writeSessionIds(ns, out)
 
-    val in = new DataInputStream(s.getInputStream)
-
-    val isSuccess = in.read()
-    if (isSuccess != 1)
-      throw new HailTCPConnectionError(s"${service}.${ns}:${port} ${isSuccess}")
+      val isSuccess = in.read()
+      if (isSuccess == -1) {
+        log.info("first byte was end of file, retrying connection")
+      } else if (isSuccess != 1) {
+        throw new HailTCPConnectionError(s"${service}.${ns}:${port} ${isSuccess}")
+      } else {
+        connected = true
+      }
+    }
 
     val connectionIdMostSignificant = in.readLong()
     val connectionIdLeastSignificant = in.readLong()
@@ -47,24 +58,35 @@ package object tcp {
                                           ns: String,
                                           port: Int
                                          ): (UUID, Socket) = {
-    val s = socket(proxyHost, proxyPort)
-    val in = new DataInputStream(s.getInputStream)
-    val out = new DataOutputStream(s.getOutputStream)
+    var s: Socket = null
+    var in: DataInputStream = null
+    var out: DataOutputStream = null
+    var connected = false
+    while (!connected) {
+      s = socket(proxyHost, proxyPort)
+      in = new DataInputStream(s.getInputStream)
+      out = new DataOutputStream(s.getOutputStream)
 
-    writeSessionIds(ns, out)
+      writeSessionIds(ns, out)
 
-    out.writeInt(ns.length)
-    out.write(ns.getBytes(StandardCharsets.UTF_8))
+      out.writeInt(ns.length)
+      out.write(ns.getBytes(StandardCharsets.UTF_8))
 
-    out.writeInt(service.length)
-    out.write(service.getBytes(StandardCharsets.UTF_8))
+      out.writeInt(service.length)
+      out.write(service.getBytes(StandardCharsets.UTF_8))
 
-    out.writeShort(port)
-    out.flush()
+      out.writeShort(port)
+      out.flush()
 
-    val isSuccess = in.read()
-    if (isSuccess != 1)
-      throw new HailTCPConnectionError(s"${service}.${ns}:${port} ${isSuccess}")
+      val isSuccess = in.read()
+      if (isSuccess == -1) {
+        log.info("first byte was end of file, retrying connection")
+      } else if (isSuccess != 1) {
+        throw new HailTCPConnectionError(s"${service}.${ns}:${port} ${isSuccess}")
+      } else {
+        connected = true
+      }
+    }
 
     val connectionIdMostSignificant = in.readLong()
     val connectionIdLeastSignificant = in.readLong()
