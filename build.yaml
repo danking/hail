@@ -1649,6 +1649,7 @@ steps:
       mountPath: /user-tokens
    dependsOn:
     - default_ns
+    - batch_pods_ns
     - create_deploy_config
     - create_accounts
     - deploy_auth
