@@ -1,4 +1,3 @@
-import json
 import sys
 
 from hailtop.auth import create_session
