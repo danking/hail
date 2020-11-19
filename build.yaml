@@ -443,27 +443,6 @@ steps:
     - auth_database
     - service_base_image
     - create_deploy_config
- - kind: runImage
-   name: pr_test_user
-   image:
-     valueFrom: service_base_image.image
-   script: |
-     hailctl auth create-user pr-test-user --service-account
-   secrets:
-    - name: gce-deploy-config
-      namespace:
-        valueFrom: default_ns.name
-      mountPath: /deploy-config
-    - name: test-dev-tokens
-      namespace:
-        valueFrom: batch_pods_ns.name
-      mountPath: /user-tokens
-   dependsOn:
-    - default_ns
-    - create_deploy_config
-    - create_accounts
-    - deploy_auth
-    - service_base_image
  - kind: buildImage
    name: hail_build_image
    dockerFile: hail/Dockerfile.hail-build
@@ -1653,6 +1632,27 @@ steps:
     - create_dummy_oauth2_client_secret
     - create_certs
     - create_accounts
+ - kind: runImage
+   name: pr_test_user
+   image:
+     valueFrom: service_base_image.image
+   script: |
+     hailctl auth create-user pr-test-user --service-account
+   secrets:
+    - name: gce-deploy-config
+      namespace:
+        valueFrom: default_ns.name
+      mountPath: /deploy-config
+    - name: test-dev-tokens
+      namespace:
+        valueFrom: batch_pods_ns.name
+      mountPath: /user-tokens
+   dependsOn:
+    - default_ns
+    - create_deploy_config
+    - create_accounts
+    - deploy_auth
+    - service_base_image
  - kind: runImage
    name: check_monitoring
    image:

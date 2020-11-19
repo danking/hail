@@ -608,7 +608,7 @@ VALUES (%s, %s, %s, %s, %s);
 async def rest_delete_user(request, userdata):  # pylint: disable=unused-argument
     db = request.app['db']
     data = await request.post()
-    n_affected = await delete_user(username=data['username'])
+    n_affected = await delete_user(db, username=data['username'])
     assert n_affected <= 1
     return web.json_response({})
 
