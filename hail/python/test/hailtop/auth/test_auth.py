@@ -9,6 +9,8 @@ def test_create_user_and_session():
 
         response = create_user(username, email, '--service-account')
         assert response == {}
+        response = create_user(username, email, '--service-account')  # test idempotence
+        assert response == {}
         tokens = create_session(username, max_age_secs=5 * 60)
         assert len(tokens) == 1
         session_id = tokens.values()[0]

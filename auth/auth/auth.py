@@ -586,14 +586,36 @@ async def create_user(db,
     if not is_service_account and email is None:
         raise HailHTTPUserError('Email is required for users that are not service accounts.', 'error')
 
-    user_id = await db.execute_insertone(
-        '''
+    @transaction(db)
+    async def maybe_insert(tx):
+        user = await tx.execute_and_fetchone("""
+SELECT username, email, is_developer, is_service_account
+FROM users
+WHERE username = %s OR email = %s""")
+        if user is not None:
+            if user['email'] != email:
+                raise HailHTTPUserError(
+                    'a user with the same username already exists')
+            if user['username'] != username:
+                raise HailHTTPUserError(
+                    'a user with the same email already exists')
+            if user['is_developer'] != is_developer:
+                raise HailHTTPUserError(
+                    'user already exists with different is_developer')
+            if user['is_service_account'] != is_service_account:
+                raise HailHTTPUserError(
+                    'user already exists with different is_service_account')
+            return user['user_id']
+
+        assert user is None
+        return await db.execute_insertone(
+            '''
 INSERT INTO users (state, username, email, is_developer, is_service_account)
 VALUES (%s, %s, %s, %s, %s);
 ''',
-        ('creating', username, email, is_developer, is_service_account))
+            ('creating', username, email, is_developer, is_service_account))
 
-    return user_id
+    return await maybe_insert()  # pylint: disable=no-value-for-parameter
 
 
 @routes.post('/api/v1alpha/users/delete')
