@@ -631,7 +631,7 @@ WHERE id = %s AND username = %s;
 async def rest_create_session(request, userdata):  # pylint: disable=unused-argument
     db = request.app['db']
     data = await request.json()
-    user = await user_from_username(data['username'])
+    user = await user_from_username(db, data['username'])
     one_hour = 60 * 60
     thirty_days = 30 * 24 * 60 * 60
     max_age_secs = min(data.get('max_age_secs', one_hour),

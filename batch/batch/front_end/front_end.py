@@ -18,7 +18,7 @@ import google.api_core.exceptions
 from hailtop.utils import (time_msecs, time_msecs_str, humanize_timedelta_msecs,
                            request_retry_transient_errors, run_if_changed,
                            retry_long_running, LoggingTimer, cost_str,
-                           handle_error_for_api)
+                           handle_error_for_api, HailHTTPUserError)
 from hailtop.batch_client.parse import (parse_cpu_in_mcpu, parse_memory_in_bytes,
                                         parse_storage_in_bytes)
 from hailtop.config import get_deploy_config
@@ -40,7 +40,7 @@ from ..utils import (adjust_cores_for_memory_request, worker_memory_per_core_gb,
                      adjust_cores_for_storage_request, total_worker_storage_gib,
                      query_billing_projects)
 from ..batch import batch_record_to_dict, job_record_to_dict, cancel_batch_in_db
-from ..exceptions import (BatchUserError, NonExistentBillingProjectError,
+from ..exceptions import (NonExistentBillingProjectError,
                           NonExistentUserError, ClosedBillingProjectError,
                           InvalidBillingLimitError)
 from ..log_store import LogStore
@@ -1467,7 +1467,7 @@ WHERE billing_projects.name = %s;
         assert row['billing_project'] == billing_project
 
         if row['status'] in {'closed', 'deleted'}:
-            raise BatchUserError(f'Billing project {billing_project} has been closed or deleted and cannot be modified.', 'error')
+            raise HailHTTPUserError(f'Billing project {billing_project} has been closed or deleted and cannot be modified.', 'error')
 
         if row['user'] is None:
             raise NonExistentUserError(user, billing_project)
@@ -1530,7 +1530,7 @@ WHERE billing_projects.name = %s AND billing_projects.`status` != 'deleted' LOCK
             raise ClosedBillingProjectError(billing_project)
 
         if row['user'] is not None:
-            raise BatchUserError(f'User {user} is already member of billing project {billing_project}.', 'info')
+            raise HailHTTPUserError(f'User {user} is already member of billing project {billing_project}.', 'info')
         await tx.execute_insertone(
             '''
 INSERT INTO billing_project_users(billing_project, user)
@@ -1581,7 +1581,7 @@ FOR UPDATE;
 ''',
             (billing_project))
         if row is not None:
-            raise BatchUserError(f'Billing project {billing_project} already exists.', 'error')
+            raise HailHTTPUserError(f'Billing project {billing_project} already exists.', 'error')
 
         await tx.execute_insertone(
             '''
@@ -1639,9 +1639,9 @@ WHERE name = %s LIMIT 1 FOR UPDATE;
             raise NonExistentBillingProjectError(billing_project)
         assert row['name'] == billing_project
         if row['status'] == 'closed':
-            raise BatchUserError(f'Billing project {billing_project} is already closed or deleted.', 'info')
+            raise HailHTTPUserError(f'Billing project {billing_project} is already closed or deleted.', 'info')
         if row['batch_id'] is not None:
-            raise BatchUserError(f'Billing project {billing_project} has open or running batches.', 'error')
+            raise HailHTTPUserError(f'Billing project {billing_project} has open or running batches.', 'error')
 
         await tx.execute_update(
             "UPDATE billing_projects SET `status` = 'closed' WHERE name = %s;",
@@ -1685,9 +1685,9 @@ async def _reopen_billing_project(db, billing_project):
             raise NonExistentBillingProjectError(billing_project)
         assert row['name'] == billing_project
         if row['status'] == 'deleted':
-            raise BatchUserError(f'Billing project {billing_project} has been deleted and cannot be reopened.', 'error')
+            raise HailHTTPUserError(f'Billing project {billing_project} has been deleted and cannot be reopened.', 'error')
         if row['status'] == 'open':
-            raise BatchUserError(f'Billing project {billing_project} is already open.', 'info')
+            raise HailHTTPUserError(f'Billing project {billing_project} is already open.', 'info')
 
         await tx.execute_update(
             "UPDATE billing_projects SET `status` = 'open' WHERE name = %s;",
@@ -1730,9 +1730,9 @@ async def _delete_billing_project(db, billing_project):
             raise NonExistentBillingProjectError(billing_project)
         assert row['name'] == billing_project
         if row['status'] == 'deleted':
-            raise BatchUserError(f'Billing project {billing_project} is already deleted.', 'info')
+            raise HailHTTPUserError(f'Billing project {billing_project} is already deleted.', 'info')
         if row['status'] == 'open':
-            raise BatchUserError(f'Billing project {billing_project} is open and cannot be deleted.', 'error')
+            raise HailHTTPUserError(f'Billing project {billing_project} is open and cannot be deleted.', 'error')
 
         await tx.execute_update(
             "UPDATE billing_projects SET `status` = 'deleted' WHERE name = %s;",
