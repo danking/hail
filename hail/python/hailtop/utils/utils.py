@@ -552,7 +552,7 @@ class HailHTTPUserError(Exception):
         return web.HTTPForbidden(reason=self.message)
 
 
-async def handle_error_for_cli(session, f, *args, **kwargs):
+async def handle_error_for_cli(f, *args, **kwargs):
     ret = None
     try:
         ret = await f(*args, **kwargs)

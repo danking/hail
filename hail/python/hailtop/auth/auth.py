@@ -42,7 +42,7 @@ async def async_create_session(username: str, max_age_secs: Optional[int] = None
 
 
 def create_session(username: str, max_age_secs: Optional[int] = None):
-    return async_to_blocking(async_create_session(username))
+    return async_to_blocking(async_create_session(username, max_age_secs))
 
 
 async def async_delete_user(username: str):
