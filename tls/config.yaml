@@ -47,8 +47,8 @@ principals:
   domain: internal-gateway
   unmanged: True
   kind: nginx
-- name: batch-tests
-  domain: batch-tests
+- name: services-tests
+  domain: services-tests
   kind: json
 - name: ci-tests
   domain: ci-tests

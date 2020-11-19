@@ -1014,7 +1014,7 @@ steps:
      export PYSPARK_SUBMIT_ARGS="--driver-memory 6g pyspark-shell"
      export PYTEST_SPLITS=5
      export PYTEST_SPLIT_INDEX=0
-     python3 -m pytest --ignore=test/hailtop/batch/ --log-cli-level=INFO -s -vv --instafail --durations=50 test
+     python3 -m pytest --ignore=test/hailtop/batch/ --ignore=test/hailtop/auth/ --log-cli-level=INFO -s -vv --instafail --durations=50 test
    inputs:
      - from: /debug-wheel-container.tar
        to: /io/debug-wheel-container.tar
@@ -1055,7 +1055,7 @@ steps:
      export PYSPARK_SUBMIT_ARGS="--driver-memory 6g pyspark-shell"
      export PYTEST_SPLITS=5
      export PYTEST_SPLIT_INDEX=1
-     python3 -m pytest --ignore=test/hailtop/batch/ --log-cli-level=INFO -s -vv --instafail --durations=50 test
+     python3 -m pytest --ignore=test/hailtop/batch/ --ignore=test/hailtop/auth/ --log-cli-level=INFO -s -vv --instafail --durations=50 test
    inputs:
      - from: /debug-wheel-container.tar
        to: /io/debug-wheel-container.tar
@@ -1096,7 +1096,7 @@ steps:
      export PYSPARK_SUBMIT_ARGS="--driver-memory 6g pyspark-shell"
      export PYTEST_SPLITS=5
      export PYTEST_SPLIT_INDEX=2
-     python3 -m pytest --ignore=test/hailtop/batch/ --log-cli-level=INFO -s -vv --instafail --durations=50 test
+     python3 -m pytest --ignore=test/hailtop/batch/ --ignore=test/hailtop/auth/ --log-cli-level=INFO -s -vv --instafail --durations=50 test
    inputs:
      - from: /debug-wheel-container.tar
        to: /io/debug-wheel-container.tar
@@ -1137,7 +1137,7 @@ steps:
      export PYSPARK_SUBMIT_ARGS="--driver-memory 6g pyspark-shell"
      export PYTEST_SPLITS=5
      export PYTEST_SPLIT_INDEX=3
-     python3 -m pytest --ignore=test/hailtop/batch/ --log-cli-level=INFO -s -vv --instafail --durations=50 test
+     python3 -m pytest --ignore=test/hailtop/batch/ --ignore=test/hailtop/auth/ --log-cli-level=INFO -s -vv --instafail --durations=50 test
    inputs:
      - from: /debug-wheel-container.tar
        to: /io/debug-wheel-container.tar
@@ -1178,7 +1178,7 @@ steps:
      export PYSPARK_SUBMIT_ARGS="--driver-memory 6g pyspark-shell"
      export PYTEST_SPLITS=5
      export PYTEST_SPLIT_INDEX=4
-     python3 -m pytest --ignore=test/hailtop/batch/ --log-cli-level=INFO -s -vv --instafail --durations=50 test
+     python3 -m pytest --ignore=test/hailtop/batch/ --ignore=test/hailtop/auth/ --log-cli-level=INFO -s -vv --instafail --durations=50 test
    inputs:
      - from: /debug-wheel-container.tar
        to: /io/debug-wheel-container.tar
@@ -1217,7 +1217,7 @@ steps:
      export HAIL_TEST_BUCKET=hail-test-dmk9z
      export GOOGLE_APPLICATION_CREDENTIALS=/test-gsa-key/key.json
      export PYSPARK_SUBMIT_ARGS="--driver-memory 6g pyspark-shell"
-     python3 -m pytest -m unchecked_allocator --ignore=test/hailtop/batch/ --log-cli-level=INFO -s -vv --instafail --durations=50 test
+     python3 -m pytest -m unchecked_allocator --ignore=test/hailtop/batch/ --ignore=test/hailtop/auth/ --log-cli-level=INFO -s -vv --instafail --durations=50 test
    inputs:
      - from: /wheel-container.tar
        to: /io/wheel-container.tar
@@ -2276,7 +2276,7 @@ steps:
       namespace:
         valueFrom: default_ns.name
       mountPath: /dev-tokens
-    - name: ssl-config-batch-tests
+    - name: ssl-config-services-tests
       namespace:
         valueFrom: default_ns.name
       mountPath: /ssl-config
@@ -2341,7 +2341,7 @@ steps:
       namespace:
         valueFrom: default_ns.name
       mountPath: /dev-tokens
-    - name: ssl-config-batch-tests
+    - name: ssl-config-services-tests
       namespace:
         valueFrom: default_ns.name
       mountPath: /ssl-config
@@ -2406,7 +2406,7 @@ steps:
       namespace:
         valueFrom: default_ns.name
       mountPath: /dev-tokens
-    - name: ssl-config-batch-tests
+    - name: ssl-config-services-tests
       namespace:
         valueFrom: default_ns.name
       mountPath: /ssl-config
@@ -2471,7 +2471,7 @@ steps:
       namespace:
         valueFrom: default_ns.name
       mountPath: /dev-tokens
-    - name: ssl-config-batch-tests
+    - name: ssl-config-services-tests
       namespace:
         valueFrom: default_ns.name
       mountPath: /ssl-config
@@ -2536,7 +2536,7 @@ steps:
       namespace:
         valueFrom: default_ns.name
       mountPath: /dev-tokens
-    - name: ssl-config-batch-tests
+    - name: ssl-config-services-tests
       namespace:
         valueFrom: default_ns.name
       mountPath: /ssl-config
@@ -2707,7 +2707,7 @@ steps:
       namespace:
         valueFrom: default_ns.name
       mountPath: /test-gsa-key
-    - name: ssl-config-batch-tests
+    - name: ssl-config-services-tests
       namespace:
         valueFrom: default_ns.name
       mountPath: /ssl-config
@@ -2718,6 +2718,57 @@ steps:
     - copy_files
     - service_base_image
     - deploy_batch
+ - kind: runImage
+   name: test_hailtop_auth
+   image:
+     valueFrom: service_base_image.image
+   script: |
+     cd /io/hailtop
+     set -ex
+
+     python3 -m pytest \
+             --durations=0 \
+             --log-cli-level=INFO \
+             -s \
+             -vv \
+             --instafail \
+             /io/test/test/hailtop/auth/
+   inputs:
+    - from: /repo/test
+      to: /io/
+    - from: /repo/hailtop
+      to: /io/
+   timeout: 1200
+   scopes:
+     - test
+     - dev
+     # these tests create and delete users but we don't fully delete users from
+     # the database currently, so don't run in deploy
+   secrets:
+    - name: gce-deploy-config
+      namespace:
+        valueFrom: default_ns.name
+      mountPath: /deploy-config
+    - name: test-dev-tokens
+      namespace:
+        valueFrom: batch_pods_ns.name
+      mountPath: /dev-tokens
+    - name: test-tokens
+      namespace:
+        valueFrom: batch_pods_ns.name
+      mountPath: /user-tokens
+    - name: ssl-config-services-tests
+      namespace:
+        valueFrom: default_ns.name
+      mountPath: /ssl-config
+   dependsOn:
+    - create_deploy_config
+    - create_accounts
+    - default_ns
+    - batch_pods_ns
+    - copy_files
+    - service_base_image
+    - deploy_auth
  - kind: runImage
    name: test_hailtop_batch_1
    image:
@@ -2757,7 +2808,7 @@ steps:
       namespace:
         valueFrom: default_ns.name
       mountPath: /test-gsa-key
-    - name: ssl-config-batch-tests
+    - name: ssl-config-services-tests
       namespace:
         valueFrom: default_ns.name
       mountPath: /ssl-config
@@ -2807,7 +2858,7 @@ steps:
       namespace:
         valueFrom: default_ns.name
       mountPath: /test-gsa-key
-    - name: ssl-config-batch-tests
+    - name: ssl-config-services-tests
       namespace:
         valueFrom: default_ns.name
       mountPath: /ssl-config
@@ -2857,7 +2908,7 @@ steps:
       namespace:
         valueFrom: default_ns.name
       mountPath: /test-gsa-key
-    - name: ssl-config-batch-tests
+    - name: ssl-config-services-tests
       namespace:
         valueFrom: default_ns.name
       mountPath: /ssl-config
@@ -2907,7 +2958,7 @@ steps:
       namespace:
         valueFrom: default_ns.name
       mountPath: /test-gsa-key
-    - name: ssl-config-batch-tests
+    - name: ssl-config-services-tests
       namespace:
         valueFrom: default_ns.name
       mountPath: /ssl-config
@@ -3387,7 +3438,7 @@ steps:
       namespace:
         valueFrom: default_ns.name
       mountPath: /user-tokens
-    - name: ssl-config-batch-tests
+    - name: ssl-config-services-tests
       namespace:
         valueFrom: default_ns.name
       mountPath: /ssl-config

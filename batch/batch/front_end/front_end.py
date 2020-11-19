@@ -17,7 +17,8 @@ import google.oauth2.service_account
 import google.api_core.exceptions
 from hailtop.utils import (time_msecs, time_msecs_str, humanize_timedelta_msecs,
                            request_retry_transient_errors, run_if_changed,
-                           retry_long_running, LoggingTimer, cost_str)
+                           retry_long_running, LoggingTimer, cost_str,
+                           handle_error_for_api)
 from hailtop.batch_client.parse import (parse_cpu_in_mcpu, parse_memory_in_bytes,
                                         parse_storage_in_bytes)
 from hailtop.config import get_deploy_config
@@ -30,7 +31,7 @@ from gear import (Database, setup_aiohttp_session,
                   web_authenticated_developers_only,
                   check_csrf_token, transaction)
 from web_common import (setup_aiohttp_jinja2, setup_common_static_routes,
-                        render_template, set_message)
+                        render_template, set_message, handle_error_for_web)
 
 # import uvloop
 
@@ -114,23 +115,6 @@ def rest_authenticated_developers_or_auth_only(fun):
 @routes.get('/healthcheck')
 async def get_healthcheck(request):  # pylint: disable=W0613
     return web.Response()
-
-
-async def _handle_ui_error(session, f, *args, **kwargs):
-    try:
-        await f(*args, **kwargs)
-    except BatchUserError as e:
-        set_message(session, e.message, e.ui_error_type)
-        return True
-    else:
-        return False
-
-
-async def _handle_api_error(f, *args, **kwargs):
-    try:
-        await f(*args, **kwargs)
-    except BatchUserError as e:
-        raise e.http_response()
 
 
 async def _query_batch_jobs(request, batch_id):
@@ -1285,7 +1269,7 @@ async def post_edit_billing_limits(request, userdata):  # pylint: disable=unused
     billing_project = request.match_info['billing_project']
     data = await request.json()
     limit = data['limit']
-    await _handle_api_error(_edit_billing_limit, db, billing_project, limit)
+    await handle_error_for_api(_edit_billing_limit, db, billing_project, limit)
     return web.json_response({'billing_project': billing_project, 'limit': limit})
 
 
@@ -1299,7 +1283,7 @@ async def post_edit_billing_limits_ui(request, userdata):  # pylint: disable=unu
     post = await request.post()
     limit = post['limit']
     session = await aiohttp_session.get_session(request)
-    errored = await _handle_ui_error(session, _edit_billing_limit, db, billing_project, limit)
+    errored = await handle_error_for_web(session, _edit_billing_limit, db, billing_project, limit)
     if not errored:
         set_message(session, f'Modified limit {limit} for billing project {billing_project}.', 'info')
     return web.HTTPFound(deploy_config.external_url('batch', '/billing_limits'))
@@ -1507,7 +1491,7 @@ async def post_billing_projects_remove_user(request, userdata):  # pylint: disab
     user = request.match_info['user']
 
     session = await aiohttp_session.get_session(request)
-    errored = await _handle_ui_error(session, _remove_user_from_billing_project, db, billing_project, user)
+    errored = await handle_error_for_web(session, _remove_user_from_billing_project, db, billing_project, user)
     if not errored:
         set_message(session, f'Removed user {user} from billing project {billing_project}.', 'info')
     return web.HTTPFound(deploy_config.external_url('batch', '/billing_projects'))
@@ -1520,7 +1504,7 @@ async def api_get_billing_projects_remove_user(request, userdata):  # pylint: di
     db = request.app['db']
     billing_project = request.match_info['billing_project']
     user = request.match_info['user']
-    await _handle_api_error(_remove_user_from_billing_project, db, billing_project, user)
+    await handle_error_for_api(_remove_user_from_billing_project, db, billing_project, user)
     return web.json_response({'billing_project': billing_project, 'user': user})
 
 
@@ -1568,7 +1552,7 @@ async def post_billing_projects_add_user(request, userdata):  # pylint: disable=
 
     session = await aiohttp_session.get_session(request)
 
-    errored = await _handle_ui_error(session, _add_user_to_billing_project, db, billing_project, user)
+    errored = await handle_error_for_web(session, _add_user_to_billing_project, db, billing_project, user)
     if not errored:
         set_message(session, f'Added user {user} to billing project {billing_project}.', 'info')
     return web.HTTPFound(deploy_config.external_url('batch', '/billing_projects'))
@@ -1582,7 +1566,7 @@ async def api_billing_projects_add_user(request, userdata):  # pylint: disable=u
     user = request.match_info['user']
     billing_project = request.match_info['billing_project']
 
-    await _handle_api_error(_add_user_to_billing_project, db, billing_project, user)
+    await handle_error_for_api(_add_user_to_billing_project, db, billing_project, user)
     return web.json_response({'billing_project': billing_project, 'user': user})
 
 
@@ -1634,7 +1618,7 @@ async def post_create_billing_projects(request, userdata):  # pylint: disable=un
 async def api_get_create_billing_projects(request, userdata):  # pylint: disable=unused-argument
     db = request.app['db']
     billing_project = request.match_info['billing_project']
-    await _handle_api_error(_create_billing_project, db, billing_project)
+    await handle_error_for_api(_create_billing_project, db, billing_project)
     return web.json_response(billing_project)
 
 
@@ -1674,7 +1658,7 @@ async def post_close_billing_projects(request, userdata):  # pylint: disable=unu
     billing_project = request.match_info['billing_project']
 
     session = await aiohttp_session.get_session(request)
-    errored = await _handle_ui_error(session, _close_billing_project, db, billing_project)
+    errored = await handle_error_for_web(session, _close_billing_project, db, billing_project)
     if not errored:
         set_message(session, f'Closed billing project {billing_project}.', 'info')
     return web.HTTPFound(deploy_config.external_url('batch', '/billing_projects'))
@@ -1687,7 +1671,7 @@ async def api_close_billing_projects(request, userdata):  # pylint: disable=unus
     db = request.app['db']
     billing_project = request.match_info['billing_project']
 
-    await _handle_api_error(_close_billing_project, db, billing_project)
+    await handle_error_for_api(_close_billing_project, db, billing_project)
     return web.json_response(billing_project)
 
 
@@ -1720,7 +1704,7 @@ async def post_reopen_billing_projects(request, userdata):  # pylint: disable=un
     billing_project = request.match_info['billing_project']
 
     session = await aiohttp_session.get_session(request)
-    errored = await _handle_ui_error(session, _reopen_billing_project, db, billing_project)
+    errored = await handle_error_for_web(session, _reopen_billing_project, db, billing_project)
     if not errored:
         set_message(session, f'Re-opened billing project {billing_project}.', 'info')
     return web.HTTPFound(deploy_config.external_url('batch', '/billing_projects'))
@@ -1732,7 +1716,7 @@ async def post_reopen_billing_projects(request, userdata):  # pylint: disable=un
 async def api_reopen_billing_projects(request, userdata):  # pylint: disable=unused-argument
     db = request.app['db']
     billing_project = request.match_info['billing_project']
-    await _handle_api_error(_reopen_billing_project, db, billing_project)
+    await handle_error_for_api(_reopen_billing_project, db, billing_project)
     return web.json_response(billing_project)
 
 
@@ -1763,7 +1747,7 @@ async def api_delete_billing_projects(request, userdata):  # pylint: disable=unu
     db = request.app['db']
     billing_project = request.match_info['billing_project']
 
-    await _handle_api_error(_delete_billing_project, db, billing_project)
+    await handle_error_for_api(_delete_billing_project, db, billing_project)
     return web.json_response(billing_project)
 
 

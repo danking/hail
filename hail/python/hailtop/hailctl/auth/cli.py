@@ -6,6 +6,9 @@ from . import logout
 from . import auth_list
 from . import copy_paste_login
 from . import user
+from . import create_user
+from . import delete_user
+from . import create_session
 
 
 def parser():
@@ -35,6 +38,21 @@ def parser():
         help='Get Hail user information.',
         description='Get Hail user information'
     )
+    create_user_parser = subparsers.add_parser(
+        'create-user',
+        help='Create a Hail user.',
+        description='Create a Hail user'
+    )
+    delete_user_parser = subparsers.add_parser(
+        'delete-user',
+        help='Delete a Hail user.',
+        description='Delete a Hail user'
+    )
+    create_session_parser = subparsers.add_parser(
+        'create-session',
+        help='Create a Hail session.',
+        description='Create a Hail session'
+    )
 
     login_parser.set_defaults(module='login')
     login.init_parser(login_parser)
@@ -51,6 +69,15 @@ def parser():
     user_parser.set_defaults(module='user')
     user.init_parser(user_parser)
 
+    create_user_parser.set_defaults(module='create-user')
+    create_user.init_parser(create_user_parser)
+
+    delete_user_parser.set_defaults(module='delete-user')
+    delete_user.init_parser(delete_user_parser)
+
+    create_session_parser.set_defaults(module='create-session')
+    create_session.init_parser(create_session_parser)
+
     return main_parser
 
 
@@ -64,6 +91,9 @@ def main(args):
         'logout': logout,
         'list': auth_list,
         'user': user,
+        'create-user': create_user,
+        'delete-user': delete_user,
+        'create-session': create_session,
     }
 
     args, pass_through_args = parser().parse_known_args(args=args)

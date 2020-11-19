@@ -1,5 +1,10 @@
 from typing import Callable, TypeVar, Awaitable
+<<<<<<< HEAD
 import traceback
+=======
+from typing_extensions import Literal
+import sys
+>>>>>>> bc6edc7cbf... wip
 import os
 import errno
 import random
@@ -532,3 +537,38 @@ class LoggingTimer:
         if self.threshold_ms is None or total > self.threshold_ms:
             self.timing['total'] = total
             log.info(f'{self.description} timing {self.timing}')
+
+
+MessageSeverity = Literal['info', 'error']
+
+
+class HailHTTPUserError(Exception):
+    def __init__(self, message: str, severity: MessageSeverity):
+        super().__init__(message)
+        self.message = message
+        self.severity = severity
+
+    def http_response(self):
+        return web.HTTPForbidden(reason=self.message)
+
+
+async def handle_error_for_cli(session, f, *args, **kwargs):
+    ret = None
+    try:
+        ret = await f(*args, **kwargs)
+    except HailHTTPUserError as e:
+        if e.severity == 'error':
+            print(e.message, file=sys.stderr)
+        else:
+            assert e.severity == 'info'
+            print(e.message)
+        return 1, ret
+    else:
+        return 0, ret
+
+
+async def handle_error_for_api(f, *args, **kwargs):
+    try:
+        await f(*args, **kwargs)
+    except HailHTTPUserError as e:
+        raise e.http_response()

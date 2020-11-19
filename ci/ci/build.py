@@ -1,4 +1,5 @@
 import abc
+import base64
 import os.path
 import json
 import logging
@@ -6,6 +7,7 @@ from collections import defaultdict, Counter
 from shlex import quote as shq
 import yaml
 import jinja2
+from hailtop.auth import create_session
 from hailtop.utils import RETRY_FUNCTION_SCRIPT, flatten
 from .utils import generate_token
 from .environment import GCP_PROJECT, GCP_ZONE, DOMAIN, IP, CI_UTILS_IMAGE, \
@@ -636,6 +638,16 @@ echo {shq(config)} | kubectl apply -f -
             for s in self.secrets:
                 script += f'''
 kubectl -n {self.namespace_name} get -o json --export secret {s} | jq '.metadata.name = "{s}"' | kubectl -n {self._name} apply -f -
+'''
+
+        pr_test_user_tokens = create_session('pr-test-user')
+        script += f'''
+set +x
+cat >tokens.json <<EOF
+{ pr_test_user_tokens }
+EOF
+set -x
+kubectl create secret genetic pr-test-user-tokens --from-file=tokens.json
 '''
 
         script += '''

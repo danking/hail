@@ -5,6 +5,7 @@ import jinja2
 import aiohttp_jinja2
 import aiohttp_session
 from hailtop.config import get_deploy_config
+from hailtop.utils import MessageSeverity
 from gear import new_csrf_token
 
 deploy_config = get_deploy_config()
@@ -45,7 +46,7 @@ def setup_common_static_routes(routes):
     routes.static('/common_static', f'{WEB_COMMON_ROOT}/static')
 
 
-def set_message(session, text, type):
+def set_message(session, text: str, type: MessageSeverity):
     assert type in ('info', 'error')
     session['message'] = {
         'text': text,
@@ -53,7 +54,7 @@ def set_message(session, text, type):
     }
 
 
-def base_context(session, userdata, service):
+def base_context(session, userdata, service: str):
     context = {
         'base_path': deploy_config.base_path(service),
         'base_url': deploy_config.external_url(service, ''),
@@ -73,7 +74,7 @@ def base_context(session, userdata, service):
     return context
 
 
-async def render_template(service, request, userdata, file, page_context):
+async def render_template(service: str, request, userdata, file, page_context):
     if '_csrf' in request.cookies:
         csrf_token = request.cookies['_csrf']
     else:

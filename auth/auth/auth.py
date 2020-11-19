@@ -1,3 +1,5 @@
+from typing import Optional
+import os
 import logging
 import asyncio
 import aiohttp
@@ -10,16 +12,18 @@ import google_auth_oauthlib.flow
 from hailtop.config import get_deploy_config
 from hailtop.tls import get_in_cluster_server_ssl_context
 from hailtop.hail_logging import AccessLogger
-from hailtop.utils import secret_alnum_string
+from hailtop.utils import (secret_alnum_string, HailHTTPUserError,
+                           handle_error_for_api)
 from gear import (
     setup_aiohttp_session,
-    rest_authenticated_users_only, web_authenticated_developers_only,
-    web_maybe_authenticated_user, web_authenticated_users_only, create_session,
+    rest_authenticated_developers_only, rest_authenticated_users_only,
+    web_authenticated_developers_only, web_maybe_authenticated_user,
+    web_authenticated_users_only, create_session,
     check_csrf_token, transaction, Database
 )
 from web_common import (
     setup_aiohttp_jinja2, setup_common_static_routes, set_message,
-    render_template
+    render_template, handle_error_for_web
 )
 
 log = logging.getLogger('auth')
@@ -29,6 +33,8 @@ uvloop.install()
 deploy_config = get_deploy_config()
 
 routes = web.RouteTableDef()
+
+HAIL_DEFAULT_NAMESPACE = os.environ['HAIL_DEFAULT_NAMESPACE']
 
 
 def get_flow(redirect_uri, state=None):
@@ -46,6 +52,15 @@ def get_flow(redirect_uri, state=None):
 async def user_from_email(db, email):
     users = [x async for x in db.select_and_fetchall(
         "SELECT * FROM users WHERE email = %s;", email)]
+    if len(users) == 1:
+        return users[0]
+    assert len(users) == 0, users
+    return None
+
+
+async def user_from_username(db, username):
+    users = [x async for x in db.select_and_fetchall(
+        "SELECT * FROM users WHERE username = %s;", username)]
     if len(users) == 1:
         return users[0]
     assert len(users) == 0, users
@@ -428,20 +443,15 @@ VALUES (%s, %s, %s, %s, %s);
 @routes.post('/users/delete')
 @check_csrf_token
 @web_authenticated_developers_only()
-async def delete_user(request, userdata):  # pylint: disable=unused-argument
+async def web_delete_user(request, userdata):  # pylint: disable=unused-argument
     session = await aiohttp_session.get_session(request)
     db = request.app['db']
     post = await request.post()
     id = post['id']
     username = post['username']
 
-    n_rows = await db.execute_update(
-        '''
-UPDATE users
-SET state = 'deleting'
-WHERE id = %s AND username = %s;
-''',
-        (id, username))
+    n_rows = await delete_user(db, username=username, id=id)
+
     if n_rows != 1:
         assert n_rows == 0
         set_message(session, f'Delete failed, no such user {id} {username}.', 'error')
@@ -520,7 +530,7 @@ async def rest_logout(request, userdata):
 
 
 @routes.get('/api/v1alpha/userinfo')
-async def userinfo(request):
+async def rest_userinfo(request):
     if 'Authorization' not in request.headers:
         log.info('Authorization not in request.headers')
         raise web.HTTPUnauthorized()
@@ -550,6 +560,96 @@ WHERE users.state = 'active' AND (sessions.session_id = %s) AND (ISNULL(sessions
     user = users[0]
 
     return web.json_response(user)
+
+
+@routes.post('/api/v1alpha/users')
+@rest_authenticated_developers_only
+async def rest_create_user(request, userdata):  # pylint: disable=unused-argument
+    db = request.app['db']
+    data = await request.json()
+    username = data['username']
+    email = data.get('email')
+    is_developer = data.get('is_developer') == '1'
+    is_service_account = data.get('is_service_account') == '1'
+    await handle_error_for_api(create_user, db, username, email, is_developer, is_service_account)
+    return web.json_response({})
+
+
+async def create_user(db,
+                      username: str,
+                      email: str,
+                      is_developer: bool,
+                      is_service_account: bool):
+    if is_developer and is_service_account:
+        raise HailHTTPUserError('User cannot be both a developer and a service account.', 'error')
+
+    if not is_service_account and email is None:
+        raise HailHTTPUserError('Email is required for users that are not service accounts.', 'error')
+
+    user_id = await db.execute_insertone(
+        '''
+INSERT INTO users (state, username, email, is_developer, is_service_account)
+VALUES (%s, %s, %s, %s, %s);
+''',
+        ('creating', username, email, is_developer, is_service_account))
+
+    return user_id
+
+
+@routes.post('/api/v1alpha/users/delete')
+@rest_authenticated_developers_only
+async def rest_delete_user(request, userdata):  # pylint: disable=unused-argument
+    db = request.app['db']
+    data = await request.post()
+    n_affected = await delete_user(username=data['username'])
+    assert n_affected <= 1
+    return web.json_response({})
+
+
+async def delete_user(db, *, username: str, id: Optional[int] = None):
+    if id is not None:
+        return await db.execute_update('''UPDATE users
+SET state = 'deleting'
+WHERE id = %s AND username = %s;
+''', (id, username))
+
+    return await db.execute_update('''UPDATE users
+SET state = 'deleting'
+WHERE id = %s AND username = %s;
+''', (username,))
+
+
+@routes.post('/api/v1alpha/create_session')
+@rest_authenticated_developers_only
+async def rest_create_session(request, userdata):  # pylint: disable=unused-argument
+    db = request.app['db']
+    data = await request.json()
+    user = await user_from_username(data['username'])
+    one_hour = 60 * 60
+    thirty_days = 30 * 24 * 60 * 60
+    max_age_secs = min(data.get('max_age_secs', one_hour),
+                       thirty_days)
+
+    if user is None:
+        raise web.HTTPForbidden()
+    if user['is_service_account'] != 1:
+        raise web.HTTPForbidden()
+
+    session_id = await create_session(db, user['id'], max_age_secs=max_age_secs)
+
+    return web.json_response({HAIL_DEFAULT_NAMESPACE: session_id})
+
+
+@routes.post('/api/v1alpha/delete_session')
+@rest_authenticated_developers_only
+async def rest_delete_session(request, userdata):  # pylint: disable=unused-argument
+    db = request.app['db']
+    data = await request.json()
+    session_id = data['session_id']
+
+    await db.just_execute('DELETE FROM sessions WHERE session_id = %s;', session_id)
+
+    return web.json_response({})
 
 
 async def on_startup(app):
