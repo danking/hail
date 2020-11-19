@@ -419,24 +419,9 @@ async def post_create_user(request, userdata):  # pylint: disable=unused-argumen
     email = post.get('email')
     is_developer = post.get('is_developer') == '1'
     is_service_account = post.get('is_service_account') == '1'
-
-    if is_developer and is_service_account:
-        set_message(session, 'User cannot be both a developer and a service account.', 'error')
-        return web.HTTPFound(deploy_config.external_url('auth', '/users'))
-
-    if not is_service_account and email is None:
-        set_message(session, 'Email is required for users that are not service accounts.', 'error')
-        return web.HTTPFound(deploy_config.external_url('auth', '/users'))
-
-    user_id = await db.execute_insertone(
-        '''
-INSERT INTO users (state, username, email, is_developer, is_service_account)
-VALUES (%s, %s, %s, %s, %s);
-''',
-        ('creating', username, email, is_developer, is_service_account))
-
-    set_message(session, f'Created user {user_id} {username} {email}.', 'info')
-
+    errored, user_id = handle_error_for_web(create_user, db, username, email, is_developer, is_service_account)
+    if not errored:
+        set_message(session, f'Created user (or it already existed) {user_id} {username} {email}.', 'info')
     return web.HTTPFound(deploy_config.external_url('auth', '/users'))
 
 
@@ -595,16 +580,16 @@ WHERE username = %s OR email = %s""")
         if user is not None:
             if user['email'] != email:
                 raise HailHTTPUserError(
-                    'a user with the same username already exists')
+                    'a user with the same username already exists', 'error')
             if user['username'] != username:
                 raise HailHTTPUserError(
-                    'a user with the same email already exists')
+                    'a user with the same email already exists', 'error')
             if user['is_developer'] != is_developer:
                 raise HailHTTPUserError(
-                    'user already exists with different is_developer')
+                    'user already exists with different is_developer', 'error')
             if user['is_service_account'] != is_service_account:
                 raise HailHTTPUserError(
-                    'user already exists with different is_service_account')
+                    'user already exists with different is_service_account', 'error')
             return user['user_id']
 
         assert user is None

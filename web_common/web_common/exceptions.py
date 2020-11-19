@@ -4,10 +4,11 @@ from .web_common import set_message
 
 
 async def handle_error_for_web(session, f, *args, **kwargs):
+    ret = None
     try:
-        await f(*args, **kwargs)
+        ret = await f(*args, **kwargs)
     except HailHTTPUserError as e:
         set_message(session, e.message, e.severity)
-        return True
+        return True, ret
     else:
-        return False
+        return False, ret

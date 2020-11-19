@@ -1283,7 +1283,7 @@ async def post_edit_billing_limits_ui(request, userdata):  # pylint: disable=unu
     post = await request.post()
     limit = post['limit']
     session = await aiohttp_session.get_session(request)
-    errored = await handle_error_for_web(session, _edit_billing_limit, db, billing_project, limit)
+    errored, _ = await handle_error_for_web(session, _edit_billing_limit, db, billing_project, limit)
     if not errored:
         set_message(session, f'Modified limit {limit} for billing project {billing_project}.', 'info')
     return web.HTTPFound(deploy_config.external_url('batch', '/billing_limits'))
@@ -1491,7 +1491,7 @@ async def post_billing_projects_remove_user(request, userdata):  # pylint: disab
     user = request.match_info['user']
 
     session = await aiohttp_session.get_session(request)
-    errored = await handle_error_for_web(session, _remove_user_from_billing_project, db, billing_project, user)
+    errored, _ = await handle_error_for_web(session, _remove_user_from_billing_project, db, billing_project, user)
     if not errored:
         set_message(session, f'Removed user {user} from billing project {billing_project}.', 'info')
     return web.HTTPFound(deploy_config.external_url('batch', '/billing_projects'))
@@ -1552,7 +1552,7 @@ async def post_billing_projects_add_user(request, userdata):  # pylint: disable=
 
     session = await aiohttp_session.get_session(request)
 
-    errored = await handle_error_for_web(session, _add_user_to_billing_project, db, billing_project, user)
+    errored, _ = await handle_error_for_web(session, _add_user_to_billing_project, db, billing_project, user)
     if not errored:
         set_message(session, f'Added user {user} to billing project {billing_project}.', 'info')
     return web.HTTPFound(deploy_config.external_url('batch', '/billing_projects'))
@@ -1658,7 +1658,7 @@ async def post_close_billing_projects(request, userdata):  # pylint: disable=unu
     billing_project = request.match_info['billing_project']
 
     session = await aiohttp_session.get_session(request)
-    errored = await handle_error_for_web(session, _close_billing_project, db, billing_project)
+    errored, _ = await handle_error_for_web(session, _close_billing_project, db, billing_project)
     if not errored:
         set_message(session, f'Closed billing project {billing_project}.', 'info')
     return web.HTTPFound(deploy_config.external_url('batch', '/billing_projects'))
@@ -1704,7 +1704,7 @@ async def post_reopen_billing_projects(request, userdata):  # pylint: disable=un
     billing_project = request.match_info['billing_project']
 
     session = await aiohttp_session.get_session(request)
-    errored = await handle_error_for_web(session, _reopen_billing_project, db, billing_project)
+    errored, _ = await handle_error_for_web(session, _reopen_billing_project, db, billing_project)
     if not errored:
         set_message(session, f'Re-opened billing project {billing_project}.', 'info')
     return web.HTTPFound(deploy_config.external_url('batch', '/billing_projects'))
