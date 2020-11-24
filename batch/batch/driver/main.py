@@ -15,6 +15,7 @@ from gear import (Database, setup_aiohttp_session,
                   rest_authenticated_developers_only,
                   web_authenticated_developers_only, check_csrf_token,
                   transaction)
+from hailtop.auth import HailHTTPUserError
 from hailtop.hail_logging import AccessLogger
 from hailtop.config import get_deploy_config
 from hailtop.utils import time_msecs, RateLimit, serialization, retry_long_running
@@ -36,7 +37,6 @@ from .instance_pool import InstancePool
 from .scheduler import Scheduler
 from .k8s_cache import K8sCache
 from ..utils import query_billing_projects
-from ..exceptions import BatchUserError
 
 uvloop.install()
 
@@ -652,7 +652,7 @@ LOCK IN SHARE MODE;
 async def _cancel_batch(app, batch_id, user):
     try:
         await cancel_batch_in_db(app['db'], batch_id, user)
-    except BatchUserError as exc:
+    except HailHTTPUserError as exc:
         log.info(f'cannot cancel batch because {exc.message}')
         return
     set_cancel_state_changed(app)
