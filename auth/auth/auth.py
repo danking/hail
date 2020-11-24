@@ -554,8 +554,8 @@ async def rest_create_user(request, userdata):  # pylint: disable=unused-argumen
     data = await request.json()
     username = data['username']
     email = data.get('email')
-    is_developer = data.get('is_developer') == '1'
-    is_service_account = data.get('is_service_account') == '1'
+    is_developer = data.get('is_developer', False)
+    is_service_account = data.get('is_service_account', False)
     await handle_error_for_api(create_user, db, username, email, is_developer, is_service_account)
     return web.json_response({})
 
