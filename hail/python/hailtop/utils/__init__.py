@@ -8,7 +8,8 @@ from .utils import (
     WaitableSharedPool, RETRY_FUNCTION_SCRIPT, sync_retry_transient_errors,
     retry_response_returning_functions, first_extant_file, secret_alnum_string,
     flatten, partition, cost_str, external_requests_client_session,
-    handle_error_for_api, handle_error_for_cli, HailHTTPUserError)
+    handle_error_for_api, handle_error_for_cli, HailHTTPUserError,
+    MessageSeverity)
 from .process import (
     CalledProcessError, check_shell, check_shell_output, sync_check_shell,
     sync_check_shell_output)
@@ -67,5 +68,6 @@ __all__ = [
     'serialization',
     'HailHTTPUserError',
     'handle_error_for_api',
-    'handle_error_for_cli'
+    'handle_error_for_cli',
+    'MessageSeverity'
 ]
