@@ -2724,10 +2724,6 @@ steps:
     - name: test-dev-tokens
       namespace:
         valueFrom: default_ns.name
-      mountPath: /dev-tokens
-    - name: test-tokens
-      namespace:
-        valueFrom: default_ns.name
       mountPath: /user-tokens
     - name: ssl-config-services-tests
       namespace:
