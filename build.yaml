@@ -1645,11 +1645,10 @@ steps:
       mountPath: /deploy-config
     - name: test-dev-tokens
       namespace:
-        valueFrom: batch_pods_ns.name
+        valueFrom: default_ns.name
       mountPath: /user-tokens
    dependsOn:
     - default_ns
-    - batch_pods_ns
     - create_deploy_config
     - create_accounts
     - deploy_auth
@@ -2724,11 +2723,11 @@ steps:
       mountPath: /deploy-config
     - name: test-dev-tokens
       namespace:
-        valueFrom: batch_pods_ns.name
+        valueFrom: default_ns.name
       mountPath: /dev-tokens
     - name: test-tokens
       namespace:
-        valueFrom: batch_pods_ns.name
+        valueFrom: default_ns.name
       mountPath: /user-tokens
     - name: ssl-config-services-tests
       namespace:
@@ -2738,7 +2737,6 @@ steps:
     - create_deploy_config
     - create_accounts
     - default_ns
-    - batch_pods_ns
     - copy_files
     - service_base_image
     - deploy_auth
