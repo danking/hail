@@ -1,10 +1,7 @@
 from typing import Callable, TypeVar, Awaitable
-<<<<<<< HEAD
-import traceback
-=======
 from typing_extensions import Literal
+import traceback
 import sys
->>>>>>> bc6edc7cbf... wip
 import os
 import errno
 import random
