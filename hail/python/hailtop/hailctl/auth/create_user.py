@@ -9,7 +9,7 @@ def init_parser(parser):  # pylint: disable=unused-argument
                         help="Username.")
     parser.add_argument("--email", type=str, required=False,
                         help="Email.")
-    parser.add_argument("--service-acount",
+    parser.add_argument("--service-account",
                         action='store_true',
                         required=False,
                         help="Create a non-human user.")
@@ -17,7 +17,9 @@ def init_parser(parser):  # pylint: disable=unused-argument
 
 def main(args, pass_through_args):  # pylint: disable=unused-argument
     rc, _ = handle_error_for_cli(
-        create_user, args.username, args.email, False, args.service_account)
+        create_user, args.username, args.email,
+        is_developer=False,
+        is_service_account=args.service_account)
     if rc > 0:
         sys.exit(rc)
     print('success')
