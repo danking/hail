@@ -9,7 +9,7 @@ from .utils import (
     retry_response_returning_functions, first_extant_file, secret_alnum_string,
     flatten, partition, cost_str, external_requests_client_session,
     handle_error_for_api, handle_error_for_cli, HailHTTPUserError,
-    MessageSeverity)
+    MessageSeverity, sync_handle_error_for_api, sync_handle_error_for_cli)
 from .process import (
     CalledProcessError, check_shell, check_shell_output, sync_check_shell,
     sync_check_shell_output)
@@ -69,5 +69,7 @@ __all__ = [
     'HailHTTPUserError',
     'handle_error_for_api',
     'handle_error_for_cli',
-    'MessageSeverity'
+    'MessageSeverity',
+    'sync_handle_error_for_api',
+    'sync_handle_error_for_cli'
 ]

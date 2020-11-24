@@ -1,7 +1,7 @@
 import sys
 
 from hailtop.auth import create_user
-from hailtop.utils import handle_error_for_cli
+from hailtop.utils import sync_handle_error_for_cli
 
 
 def init_parser(parser):  # pylint: disable=unused-argument
@@ -16,7 +16,7 @@ def init_parser(parser):  # pylint: disable=unused-argument
 
 
 def main(args, pass_through_args):  # pylint: disable=unused-argument
-    rc, _ = handle_error_for_cli(
+    rc, _ = sync_handle_error_for_cli(
         create_user, args.username, args.email,
         is_developer=False,
         is_service_account=args.service_account)

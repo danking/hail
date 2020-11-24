@@ -564,8 +564,31 @@ async def handle_error_for_cli(f, *args, **kwargs):
         return 0, ret
 
 
+def sync_handle_error_for_cli(f, *args, **kwargs):
+    ret = None
+    try:
+        ret = f(*args, **kwargs)
+    except HailHTTPUserError as e:
+        if e.severity == 'error':
+            print(e.message, file=sys.stderr)
+        else:
+            assert e.severity == 'info'
+            print(e.message)
+        return 1, ret
+    else:
+        return 0, ret
+
+
 async def handle_error_for_api(f, *args, **kwargs):
     try:
         await f(*args, **kwargs)
     except HailHTTPUserError as e:
         raise e.http_response()
+
+
+def sync_handle_error_for_api(f, *args, **kwargs):
+    try:
+        f(*args, **kwargs)
+    except HailHTTPUserError as e:
+        raise e.http_response()
+
