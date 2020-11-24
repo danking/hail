@@ -679,7 +679,7 @@ date
                                     network='private')
 
     def cleanup(self, batch, scope, parents):
-        script = f'''
+        script = '''
 kubectl get secret tests-user-tokens -o json | jq '.data["tokens.json"]' | base64 -D > tokens.json
 kubectl delete secret tests-user-tokens
 cat >delete_session.py <<EOF
