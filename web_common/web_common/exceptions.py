@@ -1,4 +1,3 @@
-from aiohttp import web
 from hailtop.utils import HailHTTPUserError
 from .web_common import set_message
 

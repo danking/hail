@@ -6,7 +6,7 @@ default:
 	@false
 
 .PHONY: check-all
-check-all: check-hail check-services check-benchmark-service
+check-all: check-hail check-services
 
 .PHONY: check-hail
 check-hail:
@@ -15,7 +15,7 @@ check-hail:
 .PHONY: check-services
 check-services: check-auth check-batch check-ci check-gear check-memory \
   check-notebook check-query check-router-resolver check-scorecard check-web-common \
-  check-atgu
+  check-atgu check-benchmark-service
 
 .PHONY: check-auth
 check-auth:

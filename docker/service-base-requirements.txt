@@ -1,1 +1,2 @@
 google-cloud-profiler==1.0.9
+plotly==4.13.0

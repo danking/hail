@@ -1,5 +1,4 @@
 import abc
-import base64
 import os.path
 import json
 import logging
@@ -647,7 +646,7 @@ kubectl -n {self.namespace_name} get -o json --export secret {s} | jq '.metadata
 cat >create_user.py <<EOF
 from hailtop.auth import create_user, create_session
 import json
-username = '{{ username }}'
+username = '{username}'
 create_user(username, email=None, is_service_account=True)
 tokens = create_session(username, max_age_secs=60 * 60)
 with open('tokens.json', 'w') as f:
@@ -663,7 +662,6 @@ kubectl create secret generic \\
         -o yaml \\
     | kubectl apply -f -
 '''
-
 
         script += '''
 date

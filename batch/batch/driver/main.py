@@ -15,7 +15,7 @@ from gear import (Database, setup_aiohttp_session,
                   rest_authenticated_developers_only,
                   web_authenticated_developers_only, check_csrf_token,
                   transaction)
-from hailtop.auth import HailHTTPUserError
+from hailtop.utils import HailHTTPUserError
 from hailtop.hail_logging import AccessLogger
 from hailtop.config import get_deploy_config
 from hailtop.utils import time_msecs, RateLimit, serialization, retry_long_running
