@@ -7,7 +7,6 @@ from collections import defaultdict, Counter
 from shlex import quote as shq
 import yaml
 import jinja2
-from hailtop.auth import create_session
 from hailtop.utils import RETRY_FUNCTION_SCRIPT, flatten
 from .utils import generate_token
 from .environment import GCP_PROJECT, GCP_ZONE, DOMAIN, IP, CI_UTILS_IMAGE, \
@@ -640,15 +639,31 @@ echo {shq(config)} | kubectl apply -f -
 kubectl -n {self.namespace_name} get -o json --export secret {s} | jq '.metadata.name = "{s}"' | kubectl -n {self._name} apply -f -
 '''
 
-        pr_test_user_tokens = create_session('pr-test-user')
+        if scope == 'test':
+            username = f'tests-user-{self.token}'
+        else:
+            username = f'tests-user-{self._name}'
         script += f'''
-set +x
-cat >tokens.json <<EOF
-{ pr_test_user_tokens }
+cat >create_user.py <<EOF
+from hailtop.auth import create_user, create_session
+import json
+username = '{{ username }}'
+create_user(username, email=None, is_service_account=True)
+tokens = create_session(username, max_age_secs=60 * 60)
+with open('tokens.json', 'w') as f:
+    json.dump(tokens, f)
 EOF
-set -x
-kubectl create secret genetic pr-test-user-tokens --from-file=tokens.json
+python3 create_user.py
+
+kubectl create secret generic \\
+        tests-user-tokens \\
+        --namespace {{ self._name }} \\
+        --from-file=tokens.json \\
+        --dry-run \\
+        -o yaml \\
+    | kubectl apply -f -
 '''
+
 
         script += '''
 date
@@ -666,10 +681,19 @@ date
                                     network='private')
 
     def cleanup(self, batch, scope, parents):
-        if scope in ['deploy', 'dev'] or is_test_deployment:
-            return
-
         script = f'''
+kubectl get secret tests-user-tokens -o json | jq '.data["tokens.json"]' | base64 -D > tokens.json
+kubectl delete secret tests-user-tokens
+cat >delete_session.py <<EOF
+from hailtop.auth import delete_session
+with open('tokens.json') as f:
+    delete_session(f.read())
+EOF
+python3 delete_session.py
+'''
+
+        if scope == 'test' and not is_test_deployment:
+            script += f'''
 set -x
 date
 
@@ -678,10 +702,8 @@ do
     echo 'failed, will sleep 2 and retry'
     sleep 2
 done
-
-date
-true
 '''
+        script += '\ndate'
 
         self.job = batch.create_job(CI_UTILS_IMAGE,
                                     command=['bash', '-c', script],

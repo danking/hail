@@ -1,4 +1,4 @@
-from typing import Optional, Dict
+from typing import Optional
 import os
 import aiohttp
 from hailtop.config import get_deploy_config, DeployConfig
@@ -63,9 +63,10 @@ def delete_user(username: str):
 
 
 async def async_create_user(username: str,
-                            email: str,
-                            is_developer: bool,
-                            is_service_account: bool):
+                            email: Optional[str],
+                            *,
+                            is_developer: bool = False,
+                            is_service_account: bool = False):
     deploy_config = get_deploy_config()
     headers = service_auth_headers(deploy_config, 'auth')
     url = deploy_config.url('auth', '/api/v1alpha/users')
@@ -81,8 +82,12 @@ async def async_create_user(username: str,
         return await resp.json()
 
 
-def create_user(username: str, email: str, is_developer: bool, is_service_account: bool):
-    return async_to_blocking(async_create_user(username, email, is_developer, is_service_account))
+def create_user(username: str,
+                email: Optional[str],
+                is_developer: bool = False,
+                is_service_account: bool = False):
+    return async_to_blocking(async_create_user(
+        username, email, is_developer=is_developer, is_service_account=is_service_account))
 
 
 async def async_get_userinfo(*,

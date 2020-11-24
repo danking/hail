@@ -36,6 +36,6 @@ class NonExistentBatchError(HailHTTPUserError):
         super().__init__(f'Batch {batch_id} does not exist.', 'error')
 
 
-class OpenBatchError(BatchUserError):
+class OpenBatchError(HailHTTPUserError):
     def __init__(self, batch_id):
         super().__init__(f'Batch {batch_id} is open.', 'error')

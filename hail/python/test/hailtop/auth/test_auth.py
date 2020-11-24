@@ -7,9 +7,9 @@ def test_create_user_and_session():
         username = 'test-user-123'
         email = 'test-user-123@broadinstitute.org'
 
-        response = create_user(username, email, '--service-account')
+        response = create_user(username, email=None, is_service_account=True)
         assert response == {}
-        response = create_user(username, email, '--service-account')  # test idempotence
+        response = create_user(username, email=None, is_service_account=True)  # test idempotence
         assert response == {}
         tokens = create_session(username, max_age_secs=5 * 60)
         assert len(tokens) == 1

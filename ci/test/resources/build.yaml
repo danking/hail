@@ -52,6 +52,56 @@ steps:
    publishAs: service-base
    dependsOn:
     - base_image
+ - kind: runImage
+   name: create_account
+   image:
+     valueFrom: service_base_image.image
+   script: |
+     set -ex
+     cat >create_user.py <<EOF
+     from hailtop.auth import create_user, create_session
+     import json
+     username = 'ci-test-build-yaml-user-{{ token }}'
+     create_user(username, email=None, is_service_account=True)
+     namespaced_tokens = create_session(username)
+     with open("/tests-users-tokens/tokens.json") as f:
+         default_namespace_tokens = json.load(f)
+     with open("/tokens.json") as f:
+         json.dump({**namespaced_tokens, **default_namespace_tokens}, f)
+     EOF
+     kubectl create secret \\
+             ci-test-build-yaml-user \\
+             --namespace {{ default_ns.name }} \\
+             --from-file=/tokens.json
+   serviceAccount:
+     name: admin
+     namespace:
+       valueFrom: default_ns.name
+   secrets:
+    - name: tests-user-tokens
+      namespace:
+        valueFrom: default_ns.name
+      mountPath: /tests-user-tokens
+    - name: gce-deploy-config
+      namespace:
+        valueFrom: default_ns.name
+      mountPath: /deploy-config
+   dependsOn:
+    - default_ns
+    - service_base_image
+ - kind: runImage
+   name: test_user_can_auth_to_real_default
+   image:
+     valueFrom:
+       service_base_image.image
+   script: |
+     set -ex
+     hailctl auth user
+   secrets:
+     - name: ci-test-build-yaml-user
+       namespace:
+         valueFrom: default_ns.name
+       mountPath: /user-tokens/tokens.json
  - kind: buildImage
    name: hello_image
    dockerFile: ci/test/resources/Dockerfile
@@ -82,7 +132,7 @@ steps:
    namespace:
      valueFrom: default_ns.name
    shutdowns:
-    - kind: Deployment
+   - kind: Deployment
       namespace:
         valueFrom: default_ns.name
       name: hello
