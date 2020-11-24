@@ -607,7 +607,7 @@ VALUES (%s, %s, %s, %s, %s);
 @rest_authenticated_developers_only
 async def rest_delete_user(request, userdata):  # pylint: disable=unused-argument
     db = request.app['db']
-    data = await request.post()
+    data = await request.json()
     n_affected = await delete_user(db, username=data['username'])
     assert n_affected <= 1
     return web.json_response({})
