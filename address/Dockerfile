@@ -1,4 +1,4 @@
-FROM {{ service_base_image.image }}
+FROM {{ service_java_run_base_image.image }}
 
 COPY address/setup.py address/MANIFEST.in /address/
 COPY address/address /address/address/

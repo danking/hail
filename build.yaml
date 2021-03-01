@@ -698,7 +698,7 @@ steps:
    contextPath: .
    publishAs: memory
    dependsOn:
-     - service_base_image
+     - service_java_run_base_image
  - kind: deploy
    name: deploy_memory_sa
    namespace:
@@ -715,7 +715,7 @@ steps:
      - from: /just-jar/hail.jar
        to: /hail.jar
    dependsOn:
-     - service_base_image
+     - service_java_run_base_image
      - build_hail_jar_only_scala_2_12_13
  - kind: deploy
    name: deploy_shuffler
@@ -2136,7 +2136,7 @@ steps:
    contextPath: .
    publishAs: address
    dependsOn:
-     - service_base_image
+     - service_java_run_base_image
  - kind: runImage
    name: check_address
    image:
