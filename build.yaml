@@ -2343,6 +2343,7 @@ steps:
        namespace:
          valueFrom: default_ns.name
        mountPath: /test-gsa-key
+   timeout: 7200
    dependsOn:
      - default_ns
      - upload_test_resources_to_gcs
