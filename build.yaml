@@ -552,7 +552,7 @@ steps:
    dependsOn:
      - service_base_image
  - kind: runImage
-   name: build_hail_jar_only
+   name: build_hail_jar_only_scala_2_12_13
    image:
      valueFrom: hail_build_image.image
    resources:
@@ -567,7 +567,7 @@ steps:
      {{ code.checkout_script }}
      cd hail
      time retry ./gradlew --version
-     time retry make shadowJar
+     time retry make shadowJar SPARK_VERSION="3.0.2" SCALA_VERSION="2.12.13"
    outputs:
      - from: /io/repo/hail/build/libs/hail-all-spark.jar
        to: /just-jar/hail.jar
@@ -653,7 +653,7 @@ steps:
      {{ code.checkout_script }}
      cd hail
      time retry ./gradlew --version
-     export SPARK_VERSION="3.0.1" SCALA_VERSION="2.12.12"
+     export SPARK_VERSION="3.0.2" SCALA_VERSION="2.12.13"
      time retry make jars python-version-info wheel
    dependsOn:
      - hail_build_image
@@ -666,7 +666,7 @@ steps:
      - from: /just-jar/hail.jar
        to: /batch/hail.jar
    dependsOn:
-     - build_hail_jar_only
+     - build_hail_jar_only_scala_2_12_13
  - kind: buildImage
    name: service_java_run_base_image
    dockerFile: docker/Dockerfile.service-java-run-base
@@ -684,7 +684,7 @@ steps:
        to: /query/hail.jar
    dependsOn:
      - service_java_run_base_image
-     - build_hail_jar_only
+     - build_hail_jar_only_scala_2_12_13
  - kind: deploy
    name: deploy_query_sa
    namespace:
@@ -716,7 +716,7 @@ steps:
        to: /hail.jar
    dependsOn:
      - service_base_image
-     - build_hail_jar_only
+     - build_hail_jar_only_scala_2_12_13
  - kind: deploy
    name: deploy_shuffler
    namespace:
