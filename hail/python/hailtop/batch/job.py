@@ -1,9 +1,11 @@
 import re
 import dill
 import functools
+import hail as hl
 from io import BytesIO
-from typing import Union, Optional, Dict, List, Set, Tuple, Callable
+from typing import Union, Optional, Dict, List, Set, Tuple, Callable, Any
 # import hail as hl
+from hailtop.utils import secret_alnum_string
 
 from . import backend, resource as _resource, batch  # pylint: disable=cyclic-import
 from .exceptions import BatchException
@@ -601,7 +603,7 @@ class PythonJob(Job):
                  attributes: Optional[Dict[str, str]] = None,
                  shell: Optional[str] = None):
         super().__init__(batch, name, attributes, shell)
-        self._functions = []
+        self._functions: List[Tuple[_resource.PythonResult, Callable, Tuple[Any, ...], Dict[str, Any]]] = []
         self._image = batch._python_image
 
     def _get_resource(self, item: str) -> '_resource.Resource':
@@ -615,22 +617,7 @@ class PythonJob(Job):
         if not callable(unapplied):
             raise BatchException(f'unapplied must be a callable function. Found {type(unapplied)}.')
 
-        def wrapped():
-            def f(*args, **kwargs):
-                newargs = []
-                for arg in args:
-                    if isinstance(arg, _resource.PythonResult):
-                        arg = arg._load_value()
-                    newargs.append(arg)
-                newkwargs = dict()
-                for key, arg in kwargs:
-                    if isinstance(arg, _resource.PythonResult):
-                        arg = arg._load_value()
-                    newkwargs[key] = arg
-                return unapplied(*newargs, **newkwargs)
-            return f
-
-        self._functions.append((result, wrapped, args, kwargs))
+        self._functions.append((result, unapplied, args, kwargs))
 
         def handle_arg(r):
             if r._source != self:
@@ -658,20 +645,47 @@ class PythonJob(Job):
 
         return self
 
-    def _compile(self, tmpdir):
+    def _compile(self, remote_tmpdir, local_tmpdir):
         for result, unapplied, args, kwargs in self._functions:
             self._mentioned.add(result)
 
+            def prepare_argument_for_serialization(arg):
+                if isinstance(arg, _resource.PythonResult):
+                    return ('py_path', arg._get_path(local_tmpdir))
+                if isinstance(arg, _resource.Resource):
+                    return ('path', arg._get_path(local_tmpdir))
+                return ('value', arg)
+
+            def deserialize_argument(arg):
+                typ, val = arg
+                if typ == 'py_path':
+                    return dill.load(open(val))
+                if typ == 'path':
+                    return val
+                assert typ == 'value'
+                return val
+
+            args = [prepare_argument_for_serialization(arg) for arg in args]
+            kwargs = {kw: prepare_argument_for_serialization(arg) for kw, arg in kwargs.items()}
+
+            def wrap(f):
+                @functools.wraps(f)
+                def wrapped(*args, **kwargs):
+                    args = [deserialize_argument(arg) for arg in args]
+                    kwargs = {kw: deserialize_argument(arg) for kw, arg in kwargs.items()}
+                    return f(*args, **kwargs)
+                return wrapped
+
             pipe = BytesIO()
             # dill.dump(functools.partial(str, 5), pipe, recurse=True)  # this works
-            dill.dump(functools.partial(unapplied, *args, **kwargs), pipe, recurse=True)
+            dill.dump(functools.partial(wrap(unapplied), *args, **kwargs), pipe, recurse=True)
             pipe.seek(0)
 
-            code_path = f'{tmpdir}/code.p'
+            code_path = f'{remote_tmpdir}/{secret_alnum_string(n=5)}/code.p'
 
             # FIXME: replace with file system robust upload
             # hl.hadoop_open was getting pickle errors in pprint
-            with open(code_path, 'wb') as f:
+            with hl.hadoop_open(code_path, 'wb') as f:
                 f.write(pipe.getvalue())
 
             # self._batch.gcs.write_gs_file_from_file_like_object(code_path, pipe)
@@ -686,24 +700,24 @@ class PythonJob(Job):
             if result._json:
                 self._mentioned.add(result._json)
                 json_write = f'''
-with open(os.environ[\\"{result._json}\\"], \\"w\\") as out:
-   out.write(json.dumps(result))
+            with open(os.environ[\\"{result._json}\\"], \\"w\\") as out:
+               out.write(json.dumps(result))
 '''
 
             str_write = ''
             if result._str:
                 self._mentioned.add(result._str)
                 str_write = f'''
-with open(os.environ[\\"{result._str}\\"], \\"w\\") as out:
-   out.write(str(result))
+            with open(os.environ[\\"{result._str}\\"], \\"w\\") as out:
+               out.write(str(result))
 '''
 
             repr_write = ''
             if result._repr:
                 self._mentioned.add(result._repr)
                 repr_write = f'''
-with open(os.environ[\\"{result._repr}\\"], \\"w\\") as out:
-   out.write(repr(result))
+            with open(os.environ[\\"{result._repr}\\"], \\"w\\") as out:
+               out.write(repr(result))
 '''
 
             self._command.append(f'''python3 -c "
@@ -719,10 +733,10 @@ with open(os.environ[\\"{result}\\"], \\"wb\\") as dill_out:
             result = dill.load(f)()
             print(result)
             dill.dump(result, dill_out, recurse=True)
+            {json_write}
+            {str_write}
+            {repr_write}
     except Exception as e:
         traceback.print_exc()
         dill.dump((e, traceback.format_exception(type(e), e, e.__traceback__)), dill_out, recurse=True)
-{json_write}
-{str_write}
-{repr_write}
 "''')

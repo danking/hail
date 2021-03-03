@@ -195,7 +195,7 @@ class LocalBackend(Backend):
 
         for job in batch._jobs:
             if isinstance(job, _job.PythonJob):
-                job._compile(tmpdir)
+                job._compile(tmpdir, tmpdir)
 
             os.makedirs(f'{tmpdir}/{job._job_id}/', exist_ok=True)
 
@@ -452,7 +452,7 @@ class ServiceBackend(Backend):
 
         for job in batch._jobs:
             if isinstance(job, _job.PythonJob):
-                job._compile(remote_tmpdir)
+                job._compile(remote_tmpdir, local_tmpdir)
 
             inputs = [x for r in job._inputs for x in copy_input(r)]
 
