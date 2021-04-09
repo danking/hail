@@ -588,7 +588,7 @@ steps:
    image:
      valueFrom: hail_build_image.image
    resources:
-     cpu: "8"
+     cpu: "16"
    script: |
      set -ex
      cd /io
