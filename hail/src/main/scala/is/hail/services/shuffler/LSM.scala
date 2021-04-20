@@ -241,13 +241,22 @@ class LSM (
   def put(k: Long, v: Long): Unit = {
     maybeSample(k)
     var ls: ConcurrentLinkedQueue[Long] = null
-    store.synchronized {
-      ls = store.get(k)
-      if (ls == null) {
-        ls = new ConcurrentLinkedQueue[Long]()
-        store.put(ls)
+    ls = store.get(k)
+    if (ls == null) {
+      var lock = new Object()
+      val prev = keyLocks.putIfAbsent(k, lock)
+      if (prev != null) {
+        lock = prev
+      }
+      lock.synchronized {
+        ls = store.get(k)
+        if (ls == null) {
+          ls = new ConcurrentLinkedQueue[Long]()
+          store.put(k, ls)
+        }
       }
     }
+    assert(ls != null)
     ls.add(v)
   }
 
