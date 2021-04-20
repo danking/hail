@@ -3,6 +3,7 @@ package is.hail.services.shuffler
 import java.io._
 import java.util._
 import java.util.function._
+import java.util.concurrent._
 
 import com.indeed.util.serialization._
 import com.indeed.lsmtree.core._
@@ -148,6 +149,7 @@ class LSM (
     new RegionValueSerializer(keyDec _, keyEnc _),
     new RegionValueSerializer(dec _, enc _)
   ).setComparator(keyOrd).build()
+  private[this] val keyLocks = new ConcurrentSkipListMap[Long, Object](keyOrd)
   private[this] val rnd = new Random()
   private[this] var processed = 0L
   private[this] var least = -1L

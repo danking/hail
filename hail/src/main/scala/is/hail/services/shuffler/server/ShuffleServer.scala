@@ -194,8 +194,11 @@ class Shuffle (
       val v = kv.getValue
       continue = inRange(k)
       if (continue) {
-        encoder.writeByte(1)
-        encoder.writeRegionValue(v)
+        val kIt = v.iterator
+        while (kIt.hasNext()) {
+          encoder.writeByte(1)
+          encoder.writeRegionValue(kIt.next())
+        }
         continue = it.hasNext
       }
     }
