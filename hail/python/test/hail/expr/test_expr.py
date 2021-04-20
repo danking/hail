@@ -79,7 +79,6 @@ class Tests(unittest.TestCase):
             self.assertEqual(set(s1.idx.collect()), expected)
             self.assertEqual(set(s2.idx.collect()), expected)
 
-    @fails_service_backend()
     def test_order_by_head_optimization_with_randomness(self):
         ht = hl.utils.range_table(10, 6).annotate(x=hl.rand_unif(0, 1))
         expected = sorted(ht.collect(), key=lambda x: x['x'])[:5]
@@ -2829,7 +2828,6 @@ class Tests(unittest.TestCase):
             hl.eval(hl.contig_length('chr5', 'GRCh37'))
 
 
-    @fails_service_backend()
     def test_initop(self):
         t = (hl.utils.range_table(5, 3)
              .annotate(GT=hl.call(0, 1))

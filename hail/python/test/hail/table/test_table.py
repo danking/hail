@@ -130,7 +130,6 @@ class Tests(unittest.TestCase):
         self.assertEqual(set(results.q4), {"hello", "cat"})
         self.assertAlmostEqual(results.q5, 4)
 
-    @fails_service_backend()
     def test_aggregate2(self):
         schema = hl.tstruct(status=hl.tint32, GT=hl.tcall, qPheno=hl.tint32)
 
@@ -195,7 +194,6 @@ class Tests(unittest.TestCase):
         r = kt.aggregate(agg.filter(kt.idx % 2 != 0, agg.sum(kt.idx + 2)) + kt.g1)
         self.assertEqual(r, 40)
 
-    @fails_service_backend()
     def test_to_matrix_table(self):
         N, M = 50, 50
         mt = hl.utils.range_matrix_table(N, M)
@@ -235,14 +233,12 @@ class Tests(unittest.TestCase):
         self.assertRaises(ValueError, lambda: t.to_matrix_table_row_major(['d'], entry_field_name='c'))
         self.assertRaises(ValueError, lambda: t.to_matrix_table_row_major([]))
 
-    @fails_service_backend()
     def test_group_by_field_lifetimes(self):
         ht = hl.utils.range_table(3)
         ht2 = (ht.group_by(idx='100')
                .aggregate(x=hl.agg.collect_as_set(ht.idx + 5)))
         assert (ht2.all(ht2.x == hl.set({5, 6, 7})))
 
-    @fails_service_backend()
     def test_group_aggregate_by_key(self):
         ht = hl.utils.range_table(100, n_partitions=10)
 
@@ -574,6 +570,11 @@ class Tests(unittest.TestCase):
         ht = hl.utils.range_table(3)
         self.assertEqual(ht.group_by(ht.idx).aggregate().count(), 3)
 
+    @skip_when_service_backend('''The Shuffler does not guarantee the ordering of records that share a key. It can't really do that
+unless we send some preferred ordering of the values (like global index). I don't undrestand how
+this test passes in the Spark backend.
+
+https://hail.zulipchat.com/#narrow/stream/123011-Hail-Dev/topic/test_drop/near/235399459''')
     def test_drop(self):
         kt = hl.utils.range_table(10)
         kt = kt.annotate(sq=kt.idx ** 2, foo='foo', bar='bar').key_by('foo')
@@ -936,7 +937,6 @@ class Tests(unittest.TestCase):
             self.assertEqual(table.head(0).count(), 0)
             self.assertEqual(table.head(0)._force_count(), 0)
 
-    @fails_service_backend()
     def test_table_order_by_head_rewrite(self):
         rt = hl.utils.range_table(10, 2)
         rt = rt.annotate(x = 10 - rt.idx)
@@ -1042,7 +1042,6 @@ class Tests(unittest.TestCase):
         self.assertEqual(inner_join.collect(), inner_join_expected)
         self.assertEqual(outer_join.collect(), outer_join_expected)
 
-    @fails_service_backend()
     def test_joins_one_null(self):
         tr = hl.utils.range_table(7, 1)
         table1 = tr.key_by(new_key=tr.idx)
@@ -1117,7 +1116,6 @@ class Tests(unittest.TestCase):
         assert j.globals.dtype == hl.tstruct(glob1=hl.tint32, glob1_1=hl.tint32)
         j._force_count()
 
-    @fails_service_backend()
     def test_join_with_filter_intervals(self):
         ht = hl.utils.range_table(100, 5)
         ht = ht.key_by(idx2=ht.idx // 2)

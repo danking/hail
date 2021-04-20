@@ -306,7 +306,6 @@ class Tests(unittest.TestCase):
         with self.assertRaises(ValueError):
             mt.explode_rows('b')
 
-    @fails_service_backend()
     def test_group_by_field_lifetimes(self):
         mt = hl.utils.range_matrix_table(3, 3)
         mt2 = (mt.group_rows_by(row_idx='100')
@@ -346,7 +345,6 @@ class Tests(unittest.TestCase):
             mt.aggregate_cols(hl.agg.filter(False, hl.agg.sum(mt.GT.is_non_ref())))
         assert "scope violation" in str(exc.value)
 
-    @fails_service_backend()
     def test_aggregate_rows_by(self):
         mt = hl.utils.range_matrix_table(4, 2)
         mt = (mt.annotate_rows(group=mt.row_idx < 2)
@@ -721,6 +719,7 @@ class Tests(unittest.TestCase):
 
         self.assertTrue(mt_join_entries.all(mt_join_entries.x == mt_join_entries.x2))
 
+    @fails_service_backend
     def test_entry_join_const(self):
         mt1 = hl.utils.range_matrix_table(10, 10, n_partitions=4)
         mt1 = mt1.annotate_entries(x=mt1.row_idx + mt1.col_idx)
