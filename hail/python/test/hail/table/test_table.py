@@ -130,6 +130,10 @@ class Tests(unittest.TestCase):
         self.assertEqual(set(results.q4), {"hello", "cat"})
         self.assertAlmostEqual(results.q5, 4)
 
+    @skip_when_service_backend('''The Service and Shuffler have no way of knowing the order in which rows appear in the original
+dataset, as such it is impossible to guarantee the ordering in x2.
+
+https://hail.zulipchat.com/#narrow/stream/123011-Hail-Dev/topic/test_drop/near/235425714''')
     def test_aggregate2(self):
         schema = hl.tstruct(status=hl.tint32, GT=hl.tcall, qPheno=hl.tint32)
 
