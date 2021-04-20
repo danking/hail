@@ -9,6 +9,7 @@ import com.indeed.util.serialization._
 import com.indeed.lsmtree.core._
 import is.hail.annotations._
 import is.hail.utils._
+import is.hail.io._
 import org.apache.log4j.Logger
 
 class DataOutputIsOutputStream(
@@ -90,6 +91,40 @@ class RegionValueSerializer(
   }
 }
 
+class ConcurrentLinkedQueueOfRegionValueSerializer(
+  makeDec: InputStream => Decoder,
+  makeEnc: (OutputStream) => Encoder,
+  region: ThreadLocal[Region]
+) extends Serializer[ConcurrentLinkedQueue[Long]] {
+  def write(ls: ConcurrentLinkedQueue[Long], out: DataOutput): Unit = {
+    val enc = if (out.isInstanceOf[OutputStream]) {
+      makeEnc(out.asInstanceOf[OutputStream])
+    } else {
+      makeEnc(new DataOutputIsOutputStream(out))
+    }
+    val it = ls.iterator()
+    while (it.hasNext()) {
+      enc.writeByte(1)
+      enc.writeRegionValue(it.next())
+    }
+    enc.writeByte(0)
+    enc.flush()
+  }
+
+  def read(in: DataInput): ConcurrentLinkedQueue[Long] = {
+    val dec = if (in.isInstanceOf[InputStream]) {
+      makeDec(in.asInstanceOf[InputStream])
+    } else {
+      makeDec(new DataInputIsInputStream(in))
+    }
+    val q = new ConcurrentLinkedQueue[Long]()
+    while (dec.readByte() != 0) {
+      q.add(dec.readRegionValue(region.get))
+    }
+    q
+  }
+}
+
 object LSM {
   val nKeySamples = 10000
 }
@@ -129,25 +164,17 @@ class LSM (
     }
   }
   def dec(in: InputStream) = {
-    val dec = codecs.makeRowDecoder(
+    codecs.makeRowDecoder(
       shuffleBufferSpec.buildInputBuffer(in))
-
-    () => dec.readRegionValue(region.get)
   }
   def enc(out: OutputStream) = {
-    val enc = codecs.makeRowEncoder(
+    codecs.makeRowEncoder(
       shuffleBufferSpec.buildOutputBuffer(out))
-
-    { (x: Long) =>
-      // FIXME: leaky regions here, maybe?
-      enc.writeRegionValue(x)
-      enc.flush()
-    }
   }
 
-  private[this] val store = new StoreBuilder[Long, Long](new File(path),
+  private[this] val store = new StoreBuilder[Long, ConcurrentLinkedQueue[Long]](new File(path),
     new RegionValueSerializer(keyDec _, keyEnc _),
-    new RegionValueSerializer(dec _, enc _)
+    new ConcurrentLinkedQueueOfRegionValueSerializer(dec _, enc _, region)
   ).setComparator(keyOrd).build()
   private[this] val keyLocks = new ConcurrentSkipListMap[Long, Object](keyOrd)
   private[this] val rnd = new Random()
@@ -213,11 +240,19 @@ class LSM (
 
   def put(k: Long, v: Long): Unit = {
     maybeSample(k)
-    store.put(k, v)
+    var ls: ConcurrentLinkedQueue[Long] = null
+    store.synchronized {
+      ls = store.get(k)
+      if (ls == null) {
+        ls = new ConcurrentLinkedQueue[Long]()
+        store.put(ls)
+      }
+    }
+    ls.add(v)
   }
 
   def iterator(startKey: Long, inclusive: Boolean) = {
-    store.iterator(startKey, inclusive)
+    store.synchronized { store.iterator(startKey, inclusive) }
   }
 
   def size: Long = processed
