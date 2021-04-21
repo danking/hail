@@ -63,8 +63,7 @@ spec:
               cpu: "300m"
               memory: "1G"
             limits:
-              cpu: "1"
-              memory: "2.5G"
+              memory: "7.5G"
           readinessProbe:
             tcpSocket:
               port: 5000
