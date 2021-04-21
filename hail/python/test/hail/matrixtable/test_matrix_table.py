@@ -478,7 +478,10 @@ class Tests(unittest.TestCase):
         self.assertTrue(ds.union_cols(ds.drop(ds.info))
                         .count_rows(), 346)
 
-    @fails_service_backend()
+    @skip_when_service_backend('''The Service and Shuffler have no way of knowing the order in which rows appear in the original
+dataset, as such it is impossible to guarantee the ordering in `matches`.
+
+https://hail.zulipchat.com/#narrow/stream/123011-Hail-Dev/topic/test_drop/near/235425714''')
     def test_table_product_join(self):
         left = hl.utils.range_matrix_table(5, 1)
         right = hl.utils.range_table(5)
