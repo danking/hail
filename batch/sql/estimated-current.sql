@@ -1167,15 +1167,11 @@ BEGIN
       delta_cores_mcpu,
       'input attempt id does not match expected attempt id' as message;
   ELSEIF cur_job_state = 'Ready' OR cur_job_state = 'Creating' OR cur_job_state = 'Running' THEN
-    UPDATE jobs
-    SET state = new_state, status = new_status, attempt_id = in_attempt_id
-    WHERE batch_id = in_batch_id AND job_id = in_job_id;
-
-    UPDATE batches SET n_completed = n_completed + 1 WHERE id = in_batch_id;
     UPDATE batches
-      SET time_completed = new_timestamp,
-          `state` = 'complete'
-      WHERE id = in_batch_id AND n_completed = batches.n_jobs;
+    SET n_completed = n_completed + 1,
+        time_completed = IF(n_completed = batches.n_jobs, new_timestamp, time_completed),
+        `state` = IF(n_completed = batches.n_jobs, 'complete', `state`)
+    WHERE id = in_batch_id;
 
     IF new_state = 'Cancelled' THEN
       UPDATE batches SET n_cancelled = n_cancelled + 1 WHERE id = in_batch_id;
@@ -1186,15 +1182,21 @@ BEGIN
     END IF;
 
     UPDATE jobs
-      INNER JOIN `job_parents`
-        ON jobs.batch_id = `job_parents`.batch_id AND
-           jobs.job_id = `job_parents`.job_id
-      SET jobs.state = IF(jobs.n_pending_parents = 1, 'Ready', 'Pending'),
-          jobs.n_pending_parents = jobs.n_pending_parents - 1,
-          jobs.cancelled = IF(new_state = 'Success', jobs.cancelled, 1)
-      WHERE jobs.batch_id = in_batch_id AND
-            `job_parents`.batch_id = in_batch_id AND
-            `job_parents`.parent_id = in_job_id;
+    SET state = new_state,
+        status = new_status,
+        attempt_id = in_attempt_id
+    WHERE batch_id = in_batch_id AND job_id = in_job_id;
+
+    UPDATE jobs
+    INNER JOIN `job_parents`
+    ON jobs.batch_id = `job_parents`.batch_id AND
+       jobs.job_id = `job_parents`.job_id
+    SET jobs.state = IF(jobs.n_pending_parents = 1, 'Ready', 'Pending'),
+        jobs.n_pending_parents = jobs.n_pending_parents - 1,
+        jobs.cancelled = IF(new_state = 'Success', jobs.cancelled, 1)
+    WHERE jobs.batch_id = in_batch_id AND
+          `job_parents`.batch_id = in_batch_id AND
+          `job_parents`.parent_id = in_job_id;
 
     COMMIT;
     SELECT 0 as rc,

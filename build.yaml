@@ -2138,6 +2138,8 @@ steps:
         script: /io/sql/fix-provisioning-bug.sql
       - name: do-not-lock-entire-batch
         script: /io/sql/do-not-lock-entire-batch.sql
+      - name: do-not-lock-entire-batch-2
+        script: /io/sql/do-not-lock-entire-batch-2.sql
     inputs:
       - from: /repo/batch/sql
         to: /io/sql
