@@ -36,7 +36,6 @@ class LocalJob:
                  command: List[str],
                  *,
                  env: Optional[Dict[str, str]] = None,
-                 mount_docker_socket: bool = False,
                  secrets: Optional[List[Dict[str, str]]] = None,
                  service_account: Optional[str] = None,
                  attributes: Optional[Dict[str, str]] = None,
@@ -49,7 +48,6 @@ class LocalJob:
         self._command = command
 
         self._env = env
-        self._mount_docker_socket = mount_docker_socket
         self._parents = parents
         self._secrets = secrets
         self._service_account = service_account
@@ -226,9 +224,6 @@ users:
                         mount_options.extend([
                             '-v', f'{secret_host_path}:{secret["mount_path"]}'
                         ])
-
-                if j._mount_docker_socket:
-                    mount_options.extend(['-v', '/var/run/docker.sock:/var/run/docker.sock'])
 
                 main_cid, main_ok = await docker_run(
                     'docker', 'run', '-d',

@@ -895,9 +895,6 @@ class DockerJob(Job):
 
         requester_pays_project = job_spec.get('requester_pays_project')
 
-        if job_spec['process'].get('mount_docker_socket'):
-            self.main_volume_mounts.append('/var/run/docker.sock:/var/run/docker.sock')
-
         if self.secrets:
             for secret in self.secrets:
                 volume_mount = f'{self.secret_host_path(secret)}:{secret["mount_path"]}'

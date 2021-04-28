@@ -415,7 +415,7 @@ class BatchBuilder:
             token = secrets.token_urlsafe(32)
         self.token = token
 
-    def create_job(self, image, command, env=None, mount_docker_socket=False,
+    def create_job(self, image, command, env=None,
                    port=None, resources=None, secrets=None,
                    service_account=None, attributes=None, parents=None,
                    input_files=None, output_files=None, always_run=False,
