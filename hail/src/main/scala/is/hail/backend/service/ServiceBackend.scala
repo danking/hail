@@ -34,12 +34,14 @@ import org.newsclub.net.unix.{AFUNIXServerSocket, AFUNIXSocketAddress}
 
 import scala.annotation.switch
 import scala.reflect.ClassTag
+import scala.collection.mutable
 
 class ServiceBackendContext(
   val username: String,
   @transient val sessionID: String,
   val billingProject: String,
-  val bucket: String
+  val bucket: String,
+  val batchAttributes: mutable.Map[String, String]
 ) extends BackendContext {
   def tokens(): Tokens =
     new Tokens(Map((DeployConfig.get.defaultNamespace, sessionID)))
@@ -139,11 +141,14 @@ class ServiceBackend(
     log.info(s"parallelizeAndComputeWithIndex: token $token: running job")
 
     val batchClient = BatchClient.fromSessionID(backendContext.sessionID)
+    val batchAttributes = JObject(
+      backendContext.batchAttributes.map { case (k, v) => JField(k, JString(v)) }.toList)
     val batch = batchClient.run(
       JObject(
         "billing_project" -> JString(backendContext.billingProject),
         "n_jobs" -> JInt(n),
-        "token" -> JString(token)),
+        "token" -> JString(token),
+        "attributes" -> batchAttributes),
       jobs)
     implicit val formats: Formats = DefaultFormats
     val batchID = (batch \ "id").extract[Int]
@@ -248,11 +253,11 @@ class ServiceBackend(
     }
   }
 
-  def execute(username: String, sessionID: String, billingProject: String, bucket: String, code: String, token: String): String = {
+  def execute(username: String, sessionID: String, billingProject: String, bucket: String, code: String, token: String, batchAttributes: mutable.Map[String, String]): String = {
     ExecutionTimer.logTime("ServiceBackend.execute") { timer =>
       userContext(username, timer) { ctx =>
         log.info(s"executing: ${token}")
-        ctx.backendContext = new ServiceBackendContext(username, sessionID, billingProject, bucket)
+        ctx.backendContext = new ServiceBackendContext(username, sessionID, billingProject, bucket, batchAttributes)
 
         execute(ctx, IRParser.parse_value_ir(ctx, code)) match {
           case Some((v, t)) =>
@@ -548,8 +553,16 @@ class ServiceBackendSocketAPI(backend: ServiceBackend, socket: Socket) extends T
           val bucket = readString()
           val code = readString()
           val token = readString()
+          var nBatchAttributes = readInt()
+          val batchAttributes = mutable.Map[String, String]()
+          while (nBatchAttributes > 0) {
+            val k = readString()
+            val v = readString()
+            batchAttributes.put(k, v)
+            nBatchAttributes -= 1
+          }
           try {
-            val result = backend.execute(username, sessionId, billingProject, bucket, code, token)
+            val result = backend.execute(username, sessionId, billingProject, bucket, code, token, batchAttributes)
             writeBool(true)
             writeString(result)
           } catch {
