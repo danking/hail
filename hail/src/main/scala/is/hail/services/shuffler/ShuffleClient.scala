@@ -42,7 +42,7 @@ object CompileTimeShuffleClient {
       Code.invokeScalaObject0[Socket](CompileTimeShuffleClient.getClass, "getSocketOnWorker"))
 
     val in: Value[InputBuffer] = cb.newField[InputBuffer]("ib", shuffleBufferSpec.buildCodeInputBuffer(socket.invoke[InputStream]("getInputStream")))
-    val out: Value[OutputBuffer] = cb.newField[OutputBuffer]("ib", shuffleBufferSpec.buildCodeOutputBuffer(socket.invoke[OutputStream]("getOuputStream")))
+    val out: Value[OutputBuffer] = cb.newField[OutputBuffer]("ib", shuffleBufferSpec.buildCodeOutputBuffer(socket.invoke[OutputStream]("getOutputStream")))
 
     new CompileTimeShuffleClient(shuffle, socket, in, out)
   }
