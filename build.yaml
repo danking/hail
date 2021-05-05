@@ -893,8 +893,7 @@ steps:
       - hail_repl_image
   - kind: runImage
     name: upload_test_resources_to_gcs
-    image:
-      valueFrom: base_image.image
+    image: gcr.io/google.com/cloudsdktool/cloud-sdk:334.0.0
     script: |
       set -ex
       cd /io/repo/hail/
@@ -913,7 +912,6 @@ steps:
         to: /io/repo/hail/python/hail/docs/data
     dependsOn:
       - default_ns
-      - base_image
       - merge_code
   - kind: runImage
     name: test_hail_java_0
@@ -2280,6 +2278,12 @@ steps:
         script: /io/sql/do-not-lock-entire-batch.sql
       - name: add-fail-fast
         script: /io/sql/add-fail-fast.sql
+      - name: kill-more-deadlocks
+        script: /io/sql/kill-more-deadlocks.sql
+      - name: kill-more-deadlocks2
+        script: /io/sql/kill-more-deadlocks2.sql
+      - name: no-locks-add-attempt
+        script: /io/sql/no-locks-add-attempt.sql
     inputs:
       - from: /repo/batch/sql
         to: /io/sql
@@ -2469,8 +2473,7 @@ steps:
       - create_certs
   - kind: runImage
     name: upload_query_jar
-    image:
-      valueFrom: base_image.image
+    image: gcr.io/google.com/cloudsdktool/cloud-sdk:334.0.0
     script: |
       set -ex
       gcloud -q auth activate-service-account --key-file=/query-gsa-key/key.json
@@ -2498,7 +2501,6 @@ steps:
         to: /io/git_version
     dependsOn:
       - default_ns
-      - base_image
       - build_hail_jar_only
       - merge_code
       - create_test_gsa_keys
@@ -3482,6 +3484,7 @@ steps:
       - test_ci
   - kind: runImage
     name: deploy_hail
+    image: gcr.io/google.com/cloudsdktool/cloud-sdk:334.0.0
     script: |
       set -ex
       gcloud auth activate-service-account --key-file=/secrets/ci-deploy-0-1--hail-is-hail.json
@@ -3494,8 +3497,6 @@ steps:
       GS_HAIL_ZIP=gs://hail-common/builds/${BRANCH}/python/hail-${BRANCH}-${SHA}.zip
       gsutil cp /io/hail.zip ${GS_HAIL_ZIP}
       gsutil acl set public-read ${GS_HAIL_ZIP}
-    image:
-      valueFrom: base_image.image
     secrets:
       - name: ci-deploy-0-1--hail-is-hail
         namespace:
@@ -3510,7 +3511,6 @@ steps:
       - deploy
     dependsOn:
       - default_ns
-      - base_image
       - build_hail
   - kind: buildImage2
     name: blog_nginx_image
@@ -3873,7 +3873,7 @@ steps:
   - kind: runImage
     name: delete_batch_instances
     image:
-      valueFrom: base_image.image
+      valueFrom: ci_utils_image.image
     alwaysRun: true
     script: |
       set -ex
@@ -3899,7 +3899,7 @@ steps:
       - test
     dependsOn:
       - default_ns
-      - base_image
+      - ci_utils_image
       - test_batch_invariants
       - test_batch_0
       - test_batch_1
