@@ -266,7 +266,8 @@ def init(sc=None, app_name='Hail', master=None, local='local[*]',
     local_tmpdir=nullable(str),
     default_reference=enumeration('GRCh37', 'GRCh38', 'GRCm38', 'CanFam3'),
     global_seed=nullable(int),
-    skip_logging_configuration=bool)
+    skip_logging_configuration=bool,
+    disable_progress_bar=bool)
 def init_service(
         billing_project: str = None,
         bucket: str = None,
@@ -277,9 +278,14 @@ def init_service(
         local_tmpdir=None,
         default_reference='GRCh37',
         global_seed=6348563392232659379,
-        skip_logging_configuration=False):
+        skip_logging_configuration=False,
+        *,
+        disable_progress_bar=True):
     from hail.backend.service_backend import ServiceBackend
-    backend = ServiceBackend(billing_project, bucket, skip_logging_configuration=skip_logging_configuration)
+    backend = ServiceBackend(billing_project,
+                             bucket,
+                             skip_logging_configuration=skip_logging_configuration,
+                             disable_progress_bar=disable_progress_bar)
 
     log = _get_log(log)
     if tmpdir is None:

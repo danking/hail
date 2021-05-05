@@ -166,8 +166,8 @@ class Batch:
     def get_job_log(self, job_id: int) -> Optional[Dict[str, Any]]:
         return async_to_blocking(self._async_batch.get_job_log(job_id))
 
-    def wait(self):
-        return async_to_blocking(self._async_batch.wait())
+    def wait(self, *args, **kwargs):
+        return async_to_blocking(self._async_batch.wait(*args, **kwargs))
 
     def delete(self):
         async_to_blocking(self._async_batch.delete())

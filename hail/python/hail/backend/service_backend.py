@@ -101,7 +101,8 @@ class ServiceBackend(Backend):
                  bucket: str = None,
                  *,
                  deploy_config=None,
-                 skip_logging_configuration=None):
+                 skip_logging_configuration=None,
+                 disable_progress_bar: bool = True):
         if billing_project is None:
             billing_project = get_user_config().get('batch', 'billing_project', fallback=None)
         if billing_project is None:
@@ -132,6 +133,7 @@ class ServiceBackend(Backend):
         deploy_config = deploy_config or get_deploy_config()
         self.session_id = tokens.namespace_token_or_error(deploy_config.service_ns('batch'))
         self.bc = hb.BatchClient(self.billing_project)
+        self.disable_progress_bar = disable_progress_bar
 
     @property
     def fs(self) -> GoogleCloudStorageFS:
@@ -177,7 +179,7 @@ class ServiceBackend(Backend):
                 dir + '/out',
             ], mount_tokens=True)
             b = bb.submit()
-            status = b.wait()
+            status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
                 raise ValueError(f'batch failed {status} {b.log()}')
 
@@ -216,7 +218,7 @@ class ServiceBackend(Backend):
                 dir + '/out',
             ], mount_tokens=True)
             b = bb.submit()
-            status = b.wait()
+            status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
                 raise ValueError(f'batch failed {status} {b.log()}')
 
@@ -250,7 +252,7 @@ class ServiceBackend(Backend):
                 dir + '/out',
             ], mount_tokens=True)
             b = bb.submit()
-            status = b.wait()
+            status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
                 raise ValueError(f'batch failed {status} {b.log()}')
 
@@ -284,7 +286,7 @@ class ServiceBackend(Backend):
                 dir + '/out',
             ], mount_tokens=True)
             b = bb.submit()
-            status = b.wait()
+            status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
                 raise ValueError(f'batch failed {status} {b.log()}')
 
@@ -318,7 +320,7 @@ class ServiceBackend(Backend):
                 dir + '/out',
             ], mount_tokens=True)
             b = bb.submit()
-            status = b.wait()
+            status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
                 raise ValueError(f'batch failed {status} {b.log()}')
 
@@ -361,7 +363,7 @@ class ServiceBackend(Backend):
                 dir + '/out',
             ], mount_tokens=True)
             b = bb.submit()
-            status = b.wait()
+            status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
                 raise ValueError(f'batch failed {status} {b.log()}')
 
@@ -397,7 +399,7 @@ class ServiceBackend(Backend):
                 dir + '/out',
             ], mount_tokens=True)
             b = bb.submit()
-            status = b.wait()
+            status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
                 raise ValueError(f'batch failed {status} {b.log()}')
 
