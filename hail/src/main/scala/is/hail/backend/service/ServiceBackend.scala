@@ -37,10 +37,10 @@ import scala.annotation.switch
 import scala.reflect.ClassTag
 
 class ServiceBackendContext(
-  val username: String,
   @transient val sessionID: String,
   val billingProject: String,
-  val bucket: String
+  val bucket: String,
+  val fs: GoogleStorageFS
 ) extends BackendContext {
   def tokens(): Tokens =
     new Tokens(Map((DeployConfig.get.defaultNamespace, sessionID)))
@@ -56,10 +56,12 @@ class User(
   val fs: GoogleStorageFS)
 
 class ServiceBackend(
-  private[this] val queryGCSJarPath: String
+  private[this] val revision: String,
+  private[this] val jarLocation: String
 ) extends Backend {
   import ServiceBackend.log
 
+  private[this] val scratchDir = sys.env.get("HAIL_WORKER_SCRATCH_DIR").getOrElse("")
   private[this] val users = new ConcurrentHashMap[String, User]()
 
   def addUser(username: String, key: String): Unit = synchronized {
@@ -82,9 +84,7 @@ class ServiceBackend(
   def parallelizeAndComputeWithIndex(_backendContext: BackendContext, collection: Array[Array[Byte]], dependency: Option[TableStageDependency] = None)(f: (Array[Byte], HailTaskContext, FS) => Array[Byte]): Array[Array[Byte]] = {
     val backendContext = _backendContext.asInstanceOf[ServiceBackendContext]
 
-    val user = users.get(backendContext.username)
-    assert(user != null, backendContext.username)
-    val fs = user.fs.asCacheable(backendContext.sessionID)
+    val fs = backendContext.fs.asCacheable(backendContext.sessionID)
 
     val n = collection.length
 
@@ -128,8 +128,8 @@ class ServiceBackend(
           "process" -> JObject(
             "command" -> JArray(List(
               JString("is.hail.backend.service.Worker"),
-              JString(HAIL_REVISION),
-              JString(queryGCSJarPath + HAIL_REVISION + ".jar"),
+              JString(revision),
+              JString(jarLocation),
               JString(root),
               JString(s"$i"))),
             "type" -> JString("jvm")),
@@ -168,18 +168,28 @@ class ServiceBackend(
 
   def stop(): Unit = ()
 
-  def valueType(username: String, s: String): String = {
+  def valueType(tmpdir: String, s: String): String = {
     ExecutionTimer.logTime("ServiceBackend.valueType") { timer =>
-      userContext(username, timer) { ctx =>
+      val fs = retryTransientErrors {
+        using(new FileInputStream(s"$scratchDir/gsa-key/key.json")) { is =>
+          new GoogleStorageFS(IOUtils.toString(is, Charset.defaultCharset().toString())).asCacheable()
+        }
+      }
+      ExecuteContext.scoped(tmpdir, "file:///tmp", this, fs, timer, null) { ctx =>
         val x = IRParser.parse_value_ir(ctx, s)
         x.typ.toString
       }
     }
   }
 
-  def tableType(username: String, s: String): String = {
+  def tableType(tmpdir: String, s: String): String = {
     ExecutionTimer.logTime("ServiceBackend.tableType") { timer =>
-      userContext(username, timer) { ctx =>
+      val fs = retryTransientErrors {
+        using(new FileInputStream(s"$scratchDir/gsa-key/key.json")) { is =>
+          new GoogleStorageFS(IOUtils.toString(is, Charset.defaultCharset().toString())).asCacheable()
+        }
+      }
+      ExecuteContext.scoped(tmpdir, "file:///tmp", this, fs, timer, null) { ctx =>
         val x = IRParser.parse_table_ir(ctx, s)
         val t = x.typ
         val jv = JObject("global" -> JString(t.globalType.toString),
@@ -190,9 +200,14 @@ class ServiceBackend(
     }
   }
 
-  def matrixTableType(username: String, s: String): String = {
+  def matrixTableType(tmpdir: String, s: String): String = {
     ExecutionTimer.logTime("ServiceBackend.matrixTableType") { timer =>
-      userContext(username, timer) { ctx =>
+      val fs = retryTransientErrors {
+        using(new FileInputStream(s"$scratchDir/gsa-key/key.json")) { is =>
+          new GoogleStorageFS(IOUtils.toString(is, Charset.defaultCharset().toString())).asCacheable()
+        }
+      }
+      ExecuteContext.scoped(tmpdir, "file:///tmp", this, fs, timer, null) { ctx =>
         val x = IRParser.parse_matrix_ir(ctx, s)
         val t = x.typ
         val jv = JObject("global" -> JString(t.globalType.toString),
@@ -206,9 +221,14 @@ class ServiceBackend(
     }
   }
 
-  def blockMatrixType(username: String, s: String): String = {
+  def blockMatrixType(tmpdir: String, s: String): String = {
     ExecutionTimer.logTime("ServiceBackend.blockMatrixType") { timer =>
-      userContext(username, timer) { ctx =>
+      val fs = retryTransientErrors {
+        using(new FileInputStream(s"$scratchDir/gsa-key/key.json")) { is =>
+          new GoogleStorageFS(IOUtils.toString(is, Charset.defaultCharset().toString())).asCacheable()
+        }
+      }
+      ExecuteContext.scoped(tmpdir, "file:///tmp", this, fs, timer, null) { ctx =>
         val x = IRParser.parse_blockmatrix_ir(ctx, s)
         val t = x.typ
         val jv = JObject("element_type" -> JString(t.elementType.toString),
@@ -220,7 +240,7 @@ class ServiceBackend(
     }
   }
 
-  def referenceGenome(username: String, name: String): String = {
+  def referenceGenome(tmpdir: String, name: String): String = {
     ReferenceGenome.getReference(name).toJSONString
   }
 
@@ -249,11 +269,16 @@ class ServiceBackend(
     }
   }
 
-  def execute(username: String, sessionID: String, billingProject: String, bucket: String, code: String, token: String): String = {
+  def execute(tmpdir: String, sessionID: String, billingProject: String, bucket: String, code: String, token: String): String = {
     ExecutionTimer.logTime("ServiceBackend.execute") { timer =>
-      userContext(username, timer) { ctx =>
+      val fs = retryTransientErrors {
+        using(new FileInputStream(s"$scratchDir/gsa-key/key.json")) { is =>
+          new GoogleStorageFS(IOUtils.toString(is, Charset.defaultCharset().toString())).asCacheable()
+        }
+      }
+      ExecuteContext.scoped(tmpdir, "file:///tmp", this, fs, timer, null) { ctx =>
         log.info(s"executing: ${token}")
-        ctx.backendContext = new ServiceBackendContext(username, sessionID, billingProject, bucket)
+        ctx.backendContext = new ServiceBackendContext(sessionID, billingProject, bucket, fs)
 
         execute(ctx, IRParser.parse_value_ir(ctx, code)) match {
           case Some((v, t)) =>
@@ -362,13 +387,18 @@ class ServiceBackend(
   def getPersistedBlockMatrixType(backendContext: BackendContext, id: String): BlockMatrixType = ???
 
   def loadReferencesFromDataset(
-    username: String,
+    tmpdir: String,
     billingProject: String,
     bucket: String,
     path: String
   ): String = {
     ExecutionTimer.logTime("ServiceBackend.loadReferencesFromDataset") { timer =>
-      userContext(username, timer) { ctx =>
+      val fs = retryTransientErrors {
+        using(new FileInputStream(s"$scratchDir/gsa-key/key.json")) { is =>
+          new GoogleStorageFS(IOUtils.toString(is, Charset.defaultCharset().toString())).asCacheable()
+        }
+      }
+      ExecuteContext.scoped(tmpdir, "file:///tmp", this, fs, timer, null) { ctx =>
         ReferenceGenome.fromHailDataset(ctx.fs, path)
       }
     }
@@ -543,14 +573,14 @@ class ServiceBackendSocketAPI(backend: ServiceBackend, socket: Socket) extends T
           }
 
         case EXECUTE =>
-          val username = readString()
+          val tmpdir = readString()
           val sessionId = readString()
           val billingProject = readString()
           val bucket = readString()
           val code = readString()
           val token = readString()
           try {
-            val result = backend.execute(username, sessionId, billingProject, bucket, code, token)
+            val result = backend.execute(tmpdir, sessionId, billingProject, bucket, code, token)
             writeBool(true)
             writeString(result)
           } catch {
@@ -640,6 +670,7 @@ class ServiceBackendSocketAPI(backend: ServiceBackend, socket: Socket) extends T
 
 object ServiceBackendSocketAPI2 {
   def main(argv: Array[String]): Unit = {
+    val backend = new ServiceBackend(argv(0), argv(1))
     assert(argv.length == 4, argv.toFastIndexedSeq)
     HailContext(backend, "hail.log", false, false, 50, skipLoggingConfiguration = true, 3)
     val scratchDir = sys.env.get("HAIL_WORKER_SCRATCH_DIR").getOrElse("")
@@ -648,9 +679,10 @@ object ServiceBackendSocketAPI2 {
         new GoogleStorageFS(IOUtils.toString(is, Charset.defaultCharset().toString())).asCacheable()
       }
     }
-    using(fs.openCachedNoCompression(argv(2))) { in =>
-      using(fs.createCachedNoCompression(argv(3))) { out =>
+    using(fs.openNoCompression(argv(2))) { in =>
+      using(fs.createNoCompression(argv(3))) { out =>
         new ServiceBackendSocketAPI2(backend, in, out).executeOneCommand()
+        out.flush()
       }
     }
   }
@@ -737,12 +769,12 @@ class ServiceBackendSocketAPI2(
 
     (cmd: @switch) match {
       case LOAD_REFERENCES_FROM_DATASET =>
-        val username = readString()
+        val tmpdir = readString()
         val billingProject = readString()
         val bucket = readString()
         val path = readString()
         try {
-          val result = backend.loadReferencesFromDataset(username, billingProject, bucket, path)
+          val result = backend.loadReferencesFromDataset(tmpdir, billingProject, bucket, path)
           writeBool(true)
           writeString(result)
         } catch {
@@ -752,10 +784,10 @@ class ServiceBackendSocketAPI2(
         }
 
       case VALUE_TYPE =>
-        val username = readString()
+        val tmpdir = readString()
         val s = readString()
         try {
-          val result = backend.valueType(username, s)
+          val result = backend.valueType(tmpdir, s)
           writeBool(true)
           writeString(result)
         } catch {
@@ -765,10 +797,10 @@ class ServiceBackendSocketAPI2(
         }
 
       case TABLE_TYPE =>
-        val username = readString()
+        val tmpdir = readString()
         val s = readString()
         try {
-          val result = backend.tableType(username, s)
+          val result = backend.tableType(tmpdir, s)
           writeBool(true)
           writeString(result)
         } catch {
@@ -778,10 +810,10 @@ class ServiceBackendSocketAPI2(
         }
 
       case MATRIX_TABLE_TYPE =>
-        val username = readString()
+        val tmpdir = readString()
         val s = readString()
         try {
-          val result = backend.matrixTableType(username, s)
+          val result = backend.matrixTableType(tmpdir, s)
           writeBool(true)
           writeString(result)
         } catch {
@@ -791,10 +823,10 @@ class ServiceBackendSocketAPI2(
         }
 
       case BLOCK_MATRIX_TYPE =>
-        val username = readString()
+        val tmpdir = readString()
         val s = readString()
         try {
-          val result = backend.blockMatrixType(username, s)
+          val result = backend.blockMatrixType(tmpdir, s)
           writeBool(true)
           writeString(result)
         } catch {
@@ -804,10 +836,10 @@ class ServiceBackendSocketAPI2(
         }
 
       case REFERENCE_GENOME =>
-        val username = readString()
+        val tmpdir = readString()
         val name = readString()
         try {
-          val result = backend.referenceGenome(username, name)
+          val result = backend.referenceGenome(tmpdir, name)
           writeBool(true)
           writeString(result)
         } catch {
@@ -817,14 +849,14 @@ class ServiceBackendSocketAPI2(
         }
 
       case EXECUTE =>
-        val username = readString()
+        val tmpdir = readString()
         val sessionId = readString()
         val billingProject = readString()
         val bucket = readString()
         val code = readString()
         val token = readString()
         try {
-          val result = backend.execute(username, sessionId, billingProject, bucket, code, token)
+          val result = backend.execute(tmpdir, sessionId, billingProject, bucket, code, token)
           writeBool(true)
           writeString(result)
         } catch {
@@ -910,7 +942,7 @@ object ServiceBackendMain {
     assert(queryGCSPathEnvVar != null)
     val queryGCSJarPath = queryGCSPathEnvVar + "/jars/"
     val executor = Executors.newCachedThreadPool()
-    val backend = new ServiceBackend(queryGCSJarPath)
+    val backend = new ServiceBackend(HAIL_REVISION, queryGCSJarPath + HAIL_REVISION + ".jar")
     HailContext(backend, "hail.log", false, false, 50, skipLoggingConfiguration = true, 3)
 
     val ss = AFUNIXServerSocket.newInstance()

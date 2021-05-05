@@ -1,11 +1,13 @@
-from typing import Optional
+from typing import Optional, BinaryIO
+import struct
 import os
 import uuid
 import aiohttp
 import json
 import warnings
+import logging
 
-from hail.context import TemporaryDirectory
+from hail.context import TemporaryDirectory, tmp_dir
 from hail.utils import FatalError
 from hail.expr.types import dtype, tvoid
 from hail.expr.table_type import ttable
@@ -25,62 +27,82 @@ from ..hail_logging import PythonOnlyLogger
 from ..fs.google_fs import GoogleCloudStorageFS
 
 
-class ServiceSocket:
-    def __init__(self, *, deploy_config: Optional[DeployConfig] = None):
-        if not deploy_config:
-            deploy_config = get_deploy_config()
-        self.deploy_config = deploy_config
-        self.url = deploy_config.base_url('query')
-        self._session: Optional[aiohttp.ClientSession] = None
+log = logging.getLogger('backend.service_backend')
 
-    async def session(self) -> aiohttp.ClientSession:
-        if self._session is None:
-            self._session = aiohttp.ClientSession(headers=service_auth_headers(self.deploy_config, 'query'))
-        return self._session
 
-    def close(self):
-        if self._session is not None:
-            async_to_blocking(self._session.close())
-            self._session = None
+def write_int(io: BinaryIO, v: int):
+    io.write(struct.pack('<i', v))
 
-    def handle_response(self, resp):
-        if resp.type == aiohttp.WSMsgType.CLOSE:
-            raise aiohttp.ServerDisconnectedError('Socket was closed by server. (code={resp.data})')
-        if resp.type == aiohttp.WSMsgType.ERROR:
-            raise FatalError(f'Error raised while waiting for response from server: {resp}.')
-        assert resp.type == aiohttp.WSMsgType.TEXT, resp.type
-        return resp.data
+def write_long(io: BinaryIO, v: int):
+    io.write(struct.pack('<q', v))
 
-    async def async_request(self, endpoint, **data):
-        data['token'] = secret_alnum_string()
-        session = await self.session()
-        async with session.ws_connect(f'{self.url}/api/v1alpha/{endpoint}') as socket:
-            await socket.send_str(json.dumps(data))
-            response = await socket.receive()
-            await socket.send_str('bye')
-            if response.type == aiohttp.WSMsgType.ERROR:
-                raise ValueError(f'bad response: {endpoint}; {data}; {response}')
-            if response.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED):
-                warnings.warn(f'retrying after losing connection {endpoint}; {data}; {response}')
-                raise TransientError()
-            assert response.type == aiohttp.WSMsgType.TEXT
-            result = json.loads(response.data)
-            if result['status'] != 200:
-                raise FatalError(f'Error from server: {result["value"]}')
-            return result['value']
+def write_bytes(io: BinaryIO, b: bytes):
+    n = len(b)
+    write_int(io, n)
+    io.write(b)
 
-    def request(self, endpoint, **data):
-        return async_to_blocking(retry_transient_errors(self.async_request, endpoint, **data))
+def write_str(io: BinaryIO, s: str):
+    write_bytes(io, s.encode('utf-8'))
 
+class EndOfStream(TransientError):
+    pass
+
+def read(io: BinaryIO, n: int) -> bytes:
+    b = bytearray()
+    left = n
+    while left > 0:
+        t = io.read(left)
+        if not t:
+            log.warning(f'unexpected EOS, Java violated protocol ({b})')
+            raise EndOfStream()
+        left -= len(t)
+        b.extend(t)
+    return b
+
+def read_byte(io: BinaryIO) -> int:
+    b = read(io, 1)
+    return b[0]
+
+def read_bool(io: BinaryIO) -> bool:
+    return read_byte(io) != 0
+
+def read_int(io: BinaryIO) -> int:
+    b = read(io, 4)
+    return struct.unpack('<i', b)[0]
+
+def read_long(io: BinaryIO) -> int:
+    b = read(io, 8)
+    return struct.unpack('<q', b)[0]
+
+def read_bytes(io: BinaryIO) -> bytes:
+    n = read_int(io)
+    return read(io, n)
+
+def read_str(io: BinaryIO) -> str:
+    b = read_bytes(io)
+    return b.decode('utf-8')
 
 class ServiceBackend(Backend):
+    LOAD_REFERENCES_FROM_DATASET = 1
+    VALUE_TYPE = 2
+    TABLE_TYPE = 3
+    MATRIX_TABLE_TYPE = 4
+    BLOCK_MATRIX_TYPE = 5
+    REFERENCE_GENOME = 6
+    EXECUTE = 7
+    FLAGS = 8
+    GET_FLAG = 9
+    UNSET_FLAG = 10
+    SET_FLAG = 11
+    ADD_USER = 12
+    GOODBYE = 254
+
     def __init__(
         self,
         billing_project: str = None,
         bucket: str = None,
         *,
-        deploy_config=None,
-        skip_logging_configuration: bool = False,
+        deploy_config=None
     ):
         if billing_project is None:
             billing_project = get_user_config().get('batch', 'billing_project', fallback=None)
@@ -93,7 +115,6 @@ class ServiceBackend(Backend):
                 "or run 'hailctl config set batch/billing_project "
                 "MY_BILLING_PROJECT'"
             )
-        self._billing_project = billing_project
 
         if bucket is None:
             bucket = get_user_config().get('batch', 'bucket', fallback=None)
@@ -105,48 +126,35 @@ class ServiceBackend(Backend):
                 'or run `hailctl config set batch/bucket '
                 'MY_BUCKET`'
             )
-        self._bucket = bucket
 
-        self._fs = None
-        self._logger = PythonOnlyLogger(skip_logging_configuration)
-
-        self.socket = ServiceSocket(deploy_config=deploy_config)
+        self.billing_project = billing_project
+        self.bucket = bucket
+        self._fs = GoogleCloudStorageFS()
         tokens = get_tokens()
         deploy_config = deploy_config or get_deploy_config()
         self.session_id = tokens.namespace_token_or_error(deploy_config.service_ns('batch'))
-        self.bc = hb.BatchClient(self._billing_project)
-
-    @property
-    def logger(self):
-        return self._logger
+        self.bc = hb.BatchClient(self.billing_project)
 
     @property
     def fs(self) -> GoogleCloudStorageFS:
-        if self._fs is None:
-            from hail.fs.google_fs import GoogleCloudStorageFS
-
-            self._fs = GoogleCloudStorageFS()
         return self._fs
 
-    def stop(self):
-        self.socket.close()
-
-    def _render(self, ir):
+    def render(self, ir):
         r = CSERenderer()
         assert len(r.jirs) == 0
         return r(ir)
 
-    def execute(self, ir, timed=False):
+    def execute(self, ir):
         token = secret_alnum_string()
         with TemporaryDirectory(ensure_exists=False) as dir:
-            binary_protocol = BinaryProtocol(self._fs, dir + '/in', dir + '/out')
-            binary_protocol.write_int(BinaryProtocol.EXECUTE)
-            binary_protocol.write_str('fake_username')
-            binary_protocol.write_str(self.session_id)
-            binary_protocol.write_str(self._billing_project)
-            binary_protocol.write_str(self._bucket)
-            binary_protocol.write_str(self._render(ir))
-            binary_protocol.write_str(token)
+            with self.fs.open(dir + '/in', 'wb') as infile:
+                write_int(infile, ServiceBackend.EXECUTE)
+                write_str(infile, tmp_dir())
+                write_str(infile, self.session_id)
+                write_str(infile, self.billing_project)
+                write_str(infile, self.bucket)
+                write_str(infile, self.render(ir))
+                write_str(infile, token)
 
             bb = self.bc.create_batch(token=token)
             bb.create_jvm_job([
@@ -155,48 +163,150 @@ class ServiceBackend(Backend):
                 os.environ['HAIL_JAR_URL'],
                 dir + '/in',
                 dir + '/out',
-            ])
+            ], mount_tokens=True)
             b = bb.submit()
             print(b.wait())
 
-            success = binary_protocol.read_bool()
-            if success:
-                s = binary_protocol.read_str()
-                try:
-                    resp = json.loads(s)
-                except json.decoder.JSONDecodeError as err:
-                    raise ValueError(f'could not decode {s}') from err
-            jstacktrace = binary_protocol.read_str()
-            raise ValueError(jstacktrace)
+            with self.fs.open(dir + '/out', 'rb') as outfile:
+                success = read_bool(outfile)
+                if success:
+                    s = read_str(outfile)
+                    try:
+                        resp = json.loads(s)
+                    except json.decoder.JSONDecodeError as err:
+                        raise ValueError(f'could not decode {s}') from err
+                else:
+                    jstacktrace = read_str(outfile)
+                    raise ValueError(jstacktrace)
 
         typ = dtype(resp['type'])
         if typ == tvoid:
-            value = None
-        else:
-            value = typ._convert_from_json_na(resp['value'])
-        # FIXME put back timings
-
-        return (value, None) if timed else value
-
-    def _request_type(self, ir, kind):
-        code = self._render(ir)
-        return self.socket.request(f'type/{kind}', code=code)
+            return None
+        return typ._convert_from_json_na(resp['value'])
 
     def value_type(self, ir):
-        resp = self._request_type(ir, 'value')
-        return dtype(resp)
+        token = secret_alnum_string()
+        with TemporaryDirectory(ensure_exists=False) as dir:
+            with self.fs.open(dir + '/in', 'wb') as infile:
+                write_int(infile, BinaryProtocol.VALUE_TYPE)
+                write_str(infile, tmp_dir())
+                write_str(infile, self.render(ir))
+
+            bb = self.bc.create_batch(token=token)
+            bb.create_jvm_job([
+                'is.hail.backend.service.ServiceBackendSocketAPI2',
+                os.environ['HAIL_SHA'],
+                os.environ['HAIL_JAR_URL'],
+                dir + '/in',
+                dir + '/out',
+            ], mount_tokens=True)
+            b = bb.submit()
+            print(b.wait())
+
+            with self.fs.open(dir + '/out', 'rb') as outfile:
+                success = read_bool(outfile)
+                if success:
+                    s = read_str(outfile)
+                    try:
+                        return dtype(json.loads(s))
+                    except json.decoder.JSONDecodeError as err:
+                        raise ValueError(f'could not decode {s}') from err
+                else:
+                    jstacktrace = read_str(outfile)
+                    raise ValueError(jstacktrace)
 
     def table_type(self, tir):
-        resp = self._request_type(tir, 'table')
-        return ttable._from_json(resp)
+        token = secret_alnum_string()
+        with TemporaryDirectory(ensure_exists=False) as dir:
+            with self.fs.open(dir + '/in', 'wb') as infile:
+                write_int(infile, BinaryProtocol.TABLE_TYPE)
+                write_str(infile, tmp_dir())
+                write_str(infile, self.render(tir))
+
+            bb = self.bc.create_batch(token=token)
+            bb.create_jvm_job([
+                'is.hail.backend.service.ServiceBackendSocketAPI2',
+                os.environ['HAIL_SHA'],
+                os.environ['HAIL_JAR_URL'],
+                dir + '/in',
+                dir + '/out',
+            ], mount_tokens=True)
+            b = bb.submit()
+            print(b.wait())
+
+            with self.fs.open(dir + '/out', 'rb') as outfile:
+                success = read_bool(outfile)
+                if success:
+                    s = read_str(outfile)
+                    try:
+                        return ttable._from_json(json.loads(s))
+                    except json.decoder.JSONDecodeError as err:
+                        raise ValueError(f'could not decode {s}') from err
+                else:
+                    jstacktrace = read_str(outfile)
+                    raise ValueError(jstacktrace)
 
     def matrix_type(self, mir):
-        resp = self._request_type(mir, 'matrix')
-        return tmatrix._from_json(resp)
+        token = secret_alnum_string()
+        with TemporaryDirectory(ensure_exists=False) as dir:
+            with self.fs.open(dir + '/in', 'wb') as infile:
+                write_int(infile, BinaryProtocol.MATRIX_TABLE_TYPE)
+                write_str(infile, tmp_dir())
+                write_str(infile, self.render(mir))
+
+            bb = self.bc.create_batch(token=token)
+            bb.create_jvm_job([
+                'is.hail.backend.service.ServiceBackendSocketAPI2',
+                os.environ['HAIL_SHA'],
+                os.environ['HAIL_JAR_URL'],
+                dir + '/in',
+                dir + '/out',
+            ], mount_tokens=True)
+            b = bb.submit()
+            print(b.wait())
+
+            with self.fs.open(dir + '/out', 'rb') as outfile:
+                success = read_bool(outfile)
+                if success:
+                    s = read_str(outfile)
+                    try:
+                        return tmatrix._from_json(json.loads(s))
+                    except json.decoder.JSONDecodeError as err:
+                        raise ValueError(f'could not decode {s}') from err
+                else:
+                    jstacktrace = read_str(outfile)
+                    raise ValueError(jstacktrace)
 
     def blockmatrix_type(self, bmir):
-        resp = self._request_type(bmir, 'blockmatrix')
-        return tblockmatrix._from_json(resp)
+        token = secret_alnum_string()
+        with TemporaryDirectory(ensure_exists=False) as dir:
+            with self.fs.open(dir + '/in', 'wb') as infile:
+                write_int(infile, BinaryProtocol.BLOCK_MATRIX_TYPE)
+                write_str(infile, tmp_dir())
+                write_str(infile, self.render(bmir))
+
+            bb = self.bc.create_batch(token=token)
+            bb.create_jvm_job([
+                'is.hail.backend.service.ServiceBackendSocketAPI2',
+                os.environ['HAIL_SHA'],
+                os.environ['HAIL_JAR_URL'],
+                dir + '/in',
+                dir + '/out',
+            ], mount_tokens=True)
+            b = bb.submit()
+            print(b.wait())
+
+            with self.fs.open(dir + '/out', 'rb') as outfile:
+                success = read_bool(outfile)
+                if success:
+                    s = read_str(outfile)
+                    try:
+                        return tblockmatrix._from_json(json.loads(s))
+                    except json.decoder.JSONDecodeError as err:
+                        raise ValueError(f'could not decode {s}') from err
+                else:
+                    jstacktrace = read_str(outfile)
+                    raise ValueError(jstacktrace)
 
     def add_reference(self, config):
         raise NotImplementedError("ServiceBackend does not support 'add_reference'")
@@ -211,9 +321,38 @@ class ServiceBackend(Backend):
         return self.socket.request('references/get', name=name)
 
     def load_references_from_dataset(self, path):
-        return self.socket.request(
-            'load_references_from_dataset', path=path, billing_project=self._billing_project, bucket=self._bucket
-        )
+        token = secret_alnum_string()
+        with TemporaryDirectory(ensure_exists=False) as dir:
+            with self.fs.open(dir + '/in', 'wb') as infile:
+                write_int(infile, BinaryProtocol.LOAD_REFERENCES_FROM_DATASET)
+                write_str(infile, tmp_dir())
+                write_str(infile, self.billing_project)
+                write_str(infile, self.bucket)
+                write_str(infile, path)
+
+            bb = self.bc.create_batch(token=token)
+            bb.create_jvm_job([
+                'is.hail.backend.service.ServiceBackendSocketAPI2',
+                os.environ['HAIL_SHA'],
+                os.environ['HAIL_JAR_URL'],
+                dir + '/in',
+                dir + '/out',
+            ], mount_tokens=True)
+            b = bb.submit()
+            print(b.wait())
+
+            with self.fs.open(dir + '/out', 'rb') as outfile:
+                success = read_bool(outfile)
+                if success:
+                    s = read_str(outfile)
+                    try:
+                        # FIXME: do we not have to parse the result?
+                        return json.loads(s)
+                    except json.decoder.JSONDecodeError as err:
+                        raise ValueError(f'could not decode {s}') from err
+                else:
+                    jstacktrace = read_str(outfile)
+                    raise ValueError(jstacktrace)
 
     def add_sequence(self, name, fasta_file, index_file):
         raise NotImplementedError("ServiceBackend does not support 'add_sequence'")

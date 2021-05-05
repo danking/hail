@@ -100,7 +100,7 @@ object Worker {
 
     val hailContext = HailContext(
       // FIXME: workers should not have backends, but some things do need hail contexts
-      new ServiceBackend(null), skipLoggingConfiguration = true, quiet = true)
+      new ServiceBackend(null, null), skipLoggingConfiguration = true, quiet = true)
     val htc = new ServiceTaskContext(i)
     val result = f(context, htc, fs)
     htc.finish()
