@@ -149,13 +149,13 @@ class ServiceBackend(Backend):
             binary_protocol.write_str(token)
 
             bb = self.bc.create_batch(token=token)
-            bb.create_jvm_job(
+            bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
                 os.environ['HAIL_JAR_URL'],
                 dir + '/in',
                 dir + '/out',
-            )
+            ])
             b = bb.submit()
             print(b.wait())
 

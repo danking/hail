@@ -638,6 +638,24 @@ class ServiceBackendSocketAPI(backend: ServiceBackend, socket: Socket) extends T
   }
 }
 
+object ServiceBackendSocketAPI2 {
+  def main(argv: Array[String]): Unit = {
+    assert(argv.length == 4, argv.toFastIndexedSeq)
+    HailContext(backend, "hail.log", false, false, 50, skipLoggingConfiguration = true, 3)
+    val scratchDir = sys.env.get("HAIL_WORKER_SCRATCH_DIR").getOrElse("")
+    val fs = retryTransientErrors {
+      using(new FileInputStream(s"$scratchDir/gsa-key/key.json")) { is =>
+        new GoogleStorageFS(IOUtils.toString(is, Charset.defaultCharset().toString())).asCacheable()
+      }
+    }
+    using(fs.openCachedNoCompression(argv(2))) { in =>
+      using(fs.createCachedNoCompression(argv(3))) { out =>
+        new ServiceBackendSocketAPI2(backend, in, out).executeOneCommand()
+      }
+    }
+  }
+}
+
 class ServiceBackendSocketAPI2(
   private[this] val backend: ServiceBackend,
   private[this] val in: InputStream,
@@ -877,22 +895,6 @@ class ServiceBackendSocketAPI2(
 
       case GOODBYE =>
         writeInt(GOODBYE)
-    }
-  }
-
-  def main(argv: Array[String]): Unit = {
-    assert(argv.length == 4, argv.toFastIndexedSeq)
-    HailContext(backend, "hail.log", false, false, 50, skipLoggingConfiguration = true, 3)
-    val scratchDir = sys.env.get("HAIL_WORKER_SCRATCH_DIR").getOrElse("")
-    val fs = retryTransientErrors {
-      using(new FileInputStream(s"$scratchDir/gsa-key/key.json")) { is =>
-        new GoogleStorageFS(IOUtils.toString(is, Charset.defaultCharset().toString())).asCacheable()
-      }
-    }
-    using(fs.openCachedNoCompression(argv(2))) { in =>
-      using(fs.createCachedNoCompression(argv(3))) { out =>
-        new ServiceBackendSocketAPI2(backend, in, out).executeOneCommand()
-      }
     }
   }
 }

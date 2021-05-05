@@ -218,6 +218,14 @@ class BatchBuilder:
 
         return Job.from_async_job(async_job)
 
+    def create_jvm_job(self, command, parents=None, **kwargs) -> Job:
+        if parents:
+            parents = [parent._async_job for parent in parents]
+
+        async_job = self._async_builder.create_jvm_job(command, **kwargs)
+
+        return Job.from_async_job(async_job)
+
     def _create(self):
         async_batch = async_to_blocking(self._async_builder._create())
         return Batch.from_async_batch(async_batch)
