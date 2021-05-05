@@ -1,9 +1,11 @@
 from typing import Optional
 import os
+import uuid
 import aiohttp
 import json
 import warnings
 
+from hail.context import TemporaryDirectory
 from hail.utils import FatalError
 from hail.expr.types import dtype, tvoid
 from hail.expr.table_type import ttable
@@ -11,11 +13,14 @@ from hail.expr.matrix_type import tmatrix
 from hail.expr.blockmatrix_type import tblockmatrix
 
 from hailtop.config import get_deploy_config, get_user_config, DeployConfig
-from hailtop.auth import service_auth_headers
+from hailtop.auth import service_auth_headers, get_tokens
 from hailtop.utils import async_to_blocking, retry_transient_errors, secret_alnum_string, TransientError
 from hail.ir.renderer import CSERenderer
 
+from hailtop.batch_client import client as hb
+
 from .backend import Backend
+from .binary_protocol import BinaryProtocol
 from ..hail_logging import PythonOnlyLogger
 from ..fs.google_fs import GoogleCloudStorageFS
 
@@ -30,8 +35,7 @@ class ServiceSocket:
 
     async def session(self) -> aiohttp.ClientSession:
         if self._session is None:
-            self._session = aiohttp.ClientSession(
-                headers=service_auth_headers(self.deploy_config, 'query'))
+            self._session = aiohttp.ClientSession(headers=service_auth_headers(self.deploy_config, 'query'))
         return self._session
 
     def close(self):
@@ -56,8 +60,7 @@ class ServiceSocket:
             await socket.send_str('bye')
             if response.type == aiohttp.WSMsgType.ERROR:
                 raise ValueError(f'bad response: {endpoint}; {data}; {response}')
-            if response.type in (aiohttp.WSMsgType.CLOSE,
-                                 aiohttp.WSMsgType.CLOSED):
+            if response.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED):
                 warnings.warn(f'retrying after losing connection {endpoint}; {data}; {response}')
                 raise TransientError()
             assert response.type == aiohttp.WSMsgType.TEXT
@@ -71,8 +74,14 @@ class ServiceSocket:
 
 
 class ServiceBackend(Backend):
-    def __init__(self, billing_project: str = None, bucket: str = None, *, deploy_config=None,
-                 skip_logging_configuration: bool = False):
+    def __init__(
+        self,
+        billing_project: str = None,
+        bucket: str = None,
+        *,
+        deploy_config=None,
+        skip_logging_configuration: bool = False,
+    ):
         if billing_project is None:
             billing_project = get_user_config().get('batch', 'billing_project', fallback=None)
         if billing_project is None:
@@ -82,7 +91,8 @@ class ServiceBackend(Backend):
                 "No billing project.  Call 'init_service' with the billing "
                 "project, set the HAIL_BILLING_PROJECT environment variable, "
                 "or run 'hailctl config set batch/billing_project "
-                "MY_BILLING_PROJECT'")
+                "MY_BILLING_PROJECT'"
+            )
         self._billing_project = billing_project
 
         if bucket is None:
@@ -93,13 +103,18 @@ class ServiceBackend(Backend):
             raise ValueError(
                 'the bucket parameter of ServiceBackend must be set '
                 'or run `hailctl config set batch/bucket '
-                'MY_BUCKET`')
+                'MY_BUCKET`'
+            )
         self._bucket = bucket
 
         self._fs = None
         self._logger = PythonOnlyLogger(skip_logging_configuration)
 
         self.socket = ServiceSocket(deploy_config=deploy_config)
+        tokens = get_tokens()
+        deploy_config = deploy_config or get_deploy_config()
+        self.session_id = tokens.namespace_token_or_error(deploy_config.service_ns('batch'))
+        self.bc = hb.BatchClient(self._billing_project)
 
     @property
     def logger(self):
@@ -109,6 +124,7 @@ class ServiceBackend(Backend):
     def fs(self) -> GoogleCloudStorageFS:
         if self._fs is None:
             from hail.fs.google_fs import GoogleCloudStorageFS
+
             self._fs = GoogleCloudStorageFS()
         return self._fs
 
@@ -121,10 +137,38 @@ class ServiceBackend(Backend):
         return r(ir)
 
     def execute(self, ir, timed=False):
-        resp = self.socket.request('execute',
-                                   code=self._render(ir),
-                                   billing_project=self._billing_project,
-                                   bucket=self._bucket)
+        token = secret_alnum_string()
+        with TemporaryDirectory(ensure_exists=False) as dir:
+            binary_protocol = BinaryProtocol(self._fs, dir + '/in', dir + '/out')
+            binary_protocol.write_int(BinaryProtocol.EXECUTE)
+            binary_protocol.write_str('fake_username')
+            binary_protocol.write_str(self.session_id)
+            binary_protocol.write_str(self._billing_project)
+            binary_protocol.write_str(self._bucket)
+            binary_protocol.write_str(self._render(ir))
+            binary_protocol.write_str(token)
+
+            bb = self.bc.create_batch(token=token)
+            bb.create_jvm_job(
+                'is.hail.backend.service.ServiceBackendSocketAPI2',
+                os.environ['HAIL_SHA'],
+                os.environ['HAIL_JAR_URL'],
+                dir + '/in',
+                dir + '/out',
+            )
+            b = bb.submit()
+            print(b.wait())
+
+            success = binary_protocol.read_bool()
+            if success:
+                s = binary_protocol.read_str()
+                try:
+                    resp = json.loads(s)
+                except json.decoder.JSONDecodeError as err:
+                    raise ValueError(f'could not decode {s}') from err
+            jstacktrace = binary_protocol.read_str()
+            raise ValueError(jstacktrace)
+
         typ = dtype(resp['type'])
         if typ == tvoid:
             value = None
@@ -167,10 +211,9 @@ class ServiceBackend(Backend):
         return self.socket.request('references/get', name=name)
 
     def load_references_from_dataset(self, path):
-        return self.socket.request('load_references_from_dataset',
-                                   path=path,
-                                   billing_project=self._billing_project,
-                                   bucket=self._bucket)
+        return self.socket.request(
+            'load_references_from_dataset', path=path, billing_project=self._billing_project, bucket=self._bucket
+        )
 
     def add_sequence(self, name, fasta_file, index_file):
         raise NotImplementedError("ServiceBackend does not support 'add_sequence'")

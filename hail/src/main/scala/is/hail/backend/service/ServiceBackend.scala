@@ -1,6 +1,7 @@
 package is.hail.backend.service
 
 import java.io._
+import java.nio.charset._
 import java.net._
 import java.nio.charset.StandardCharsets
 import java.util.concurrent._
@@ -636,6 +637,266 @@ class ServiceBackendSocketAPI(backend: ServiceBackend, socket: Socket) extends T
     }
   }
 }
+
+class ServiceBackendSocketAPI2(
+  private[this] val backend: ServiceBackend,
+  private[this] val in: InputStream,
+  private[this] val out: OutputStream
+) extends Thread {
+  import ServiceBackendSocketAPI._
+
+  private[this] val LOAD_REFERENCES_FROM_DATASET = 1
+  private[this] val VALUE_TYPE = 2
+  private[this] val TABLE_TYPE = 3
+  private[this] val MATRIX_TABLE_TYPE = 4
+  private[this] val BLOCK_MATRIX_TYPE = 5
+  private[this] val REFERENCE_GENOME = 6
+  private[this] val EXECUTE = 7
+  private[this] val FLAGS = 8
+  private[this] val GET_FLAG = 9
+  private[this] val UNSET_FLAG = 10
+  private[this] val SET_FLAG = 11
+  private[this] val ADD_USER = 12
+  private[this] val GOODBYE = 254
+
+  private[this] val dummy = new Array[Byte](8)
+
+  def read(bytes: Array[Byte], off: Int, n: Int): Unit = {
+    assert(off + n <= bytes.length)
+    var read = 0
+    while (read < n) {
+      val r = in.read(bytes, off + read, n - read)
+      if (r < 0) {
+        throw new EndOfInputException
+      } else {
+        read += r
+      }
+    }
+  }
+
+  def readInt(): Int = {
+    read(dummy, 0, 4)
+    Memory.loadInt(dummy, 0)
+  }
+
+  def readLong(): Long = {
+    read(dummy, 0, 8)
+    Memory.loadLong(dummy, 0)
+  }
+
+  def readBytes(): Array[Byte] = {
+    val n = readInt()
+    val bytes = new Array[Byte](n)
+    read(bytes, 0, n)
+    bytes
+  }
+
+  def readString(): String = new String(readBytes(), StandardCharsets.UTF_8)
+
+  def writeBool(b: Boolean): Unit = {
+    out.write(if (b) 1 else 0)
+  }
+
+  def writeInt(v: Int): Unit = {
+    Memory.storeInt(dummy, 0, v)
+    out.write(dummy, 0, 4)
+  }
+
+  def writeLong(v: Long): Unit = {
+    Memory.storeLong(dummy, 0, v)
+    out.write(dummy)
+  }
+
+  def writeBytes(bytes: Array[Byte]): Unit = {
+    writeInt(bytes.length)
+    out.write(bytes)
+  }
+
+  def writeString(s: String): Unit = writeBytes(s.getBytes(StandardCharsets.UTF_8))
+
+  def executeOneCommand(): Unit = {
+    val cmd = readInt()
+
+    (cmd: @switch) match {
+      case LOAD_REFERENCES_FROM_DATASET =>
+        val username = readString()
+        val billingProject = readString()
+        val bucket = readString()
+        val path = readString()
+        try {
+          val result = backend.loadReferencesFromDataset(username, billingProject, bucket, path)
+          writeBool(true)
+          writeString(result)
+        } catch {
+          case t: Throwable =>
+            writeBool(false)
+            writeString(formatException(t))
+        }
+
+      case VALUE_TYPE =>
+        val username = readString()
+        val s = readString()
+        try {
+          val result = backend.valueType(username, s)
+          writeBool(true)
+          writeString(result)
+        } catch {
+          case t: Throwable =>
+            writeBool(false)
+            writeString(formatException(t))
+        }
+
+      case TABLE_TYPE =>
+        val username = readString()
+        val s = readString()
+        try {
+          val result = backend.tableType(username, s)
+          writeBool(true)
+          writeString(result)
+        } catch {
+          case t: Throwable =>
+            writeBool(false)
+            writeString(formatException(t))
+        }
+
+      case MATRIX_TABLE_TYPE =>
+        val username = readString()
+        val s = readString()
+        try {
+          val result = backend.matrixTableType(username, s)
+          writeBool(true)
+          writeString(result)
+        } catch {
+          case t: Throwable =>
+            writeBool(false)
+            writeString(formatException(t))
+        }
+
+      case BLOCK_MATRIX_TYPE =>
+        val username = readString()
+        val s = readString()
+        try {
+          val result = backend.blockMatrixType(username, s)
+          writeBool(true)
+          writeString(result)
+        } catch {
+          case t: Throwable =>
+            writeBool(false)
+            writeString(formatException(t))
+        }
+
+      case REFERENCE_GENOME =>
+        val username = readString()
+        val name = readString()
+        try {
+          val result = backend.referenceGenome(username, name)
+          writeBool(true)
+          writeString(result)
+        } catch {
+          case t: Throwable =>
+            writeBool(false)
+            writeString(formatException(t))
+        }
+
+      case EXECUTE =>
+        val username = readString()
+        val sessionId = readString()
+        val billingProject = readString()
+        val bucket = readString()
+        val code = readString()
+        val token = readString()
+        try {
+          val result = backend.execute(username, sessionId, billingProject, bucket, code, token)
+          writeBool(true)
+          writeString(result)
+        } catch {
+          case t: Throwable =>
+            writeBool(false)
+            writeString(formatException(t))
+        }
+
+      case FLAGS =>
+        try {
+          val result = backend.flags()
+          writeBool(true)
+          writeString(result)
+        } catch {
+          case t: Throwable =>
+            writeBool(false)
+            writeString(formatException(t))
+        }
+
+      case GET_FLAG =>
+        val name = readString()
+        try {
+          val result = backend.getFlag(name)
+          writeBool(true)
+          writeString(result)
+        } catch {
+          case t: Throwable =>
+            writeBool(false)
+            writeString(formatException(t))
+        }
+
+      case SET_FLAG =>
+        val name = readString()
+        val value = readString()
+        try {
+          val result = backend.setFlag(name, value)
+          writeBool(true)
+          writeString(result)
+        } catch {
+          case t: Throwable =>
+            writeBool(false)
+            writeString(formatException(t))
+        }
+
+      case UNSET_FLAG =>
+        val name = readString()
+        try {
+          val result = backend.unsetFlag(name)
+          writeBool(true)
+          writeString(result)
+        } catch {
+          case t: Throwable =>
+            writeBool(false)
+            writeString(formatException(t))
+        }
+
+      case ADD_USER =>
+        val name = readString()
+        val gsaKey = readString()
+        try {
+          val result = backend.addUser(name, gsaKey)
+          writeBool(true)
+        } catch {
+          case t: Throwable =>
+            writeBool(false)
+            writeString(formatException(t))
+        }
+
+      case GOODBYE =>
+        writeInt(GOODBYE)
+    }
+  }
+
+  def main(argv: Array[String]): Unit = {
+    assert(argv.length == 4, argv.toFastIndexedSeq)
+    HailContext(backend, "hail.log", false, false, 50, skipLoggingConfiguration = true, 3)
+    val scratchDir = sys.env.get("HAIL_WORKER_SCRATCH_DIR").getOrElse("")
+    val fs = retryTransientErrors {
+      using(new FileInputStream(s"$scratchDir/gsa-key/key.json")) { is =>
+        new GoogleStorageFS(IOUtils.toString(is, Charset.defaultCharset().toString())).asCacheable()
+      }
+    }
+    using(fs.openCachedNoCompression(argv(2))) { in =>
+      using(fs.createCachedNoCompression(argv(3))) { out =>
+        new ServiceBackendSocketAPI2(backend, in, out).executeOneCommand()
+      }
+    }
+  }
+}
+
 
 object ServiceBackendMain {
   private val log = Logger.getLogger(getClass.getName())
