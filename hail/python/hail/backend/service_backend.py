@@ -22,7 +22,6 @@ from hail.ir.renderer import CSERenderer
 from hailtop.batch_client import client as hb
 
 from .backend import Backend
-from .binary_protocol import BinaryProtocol
 from ..hail_logging import PythonOnlyLogger
 from ..fs.google_fs import GoogleCloudStorageFS
 
@@ -97,13 +96,12 @@ class ServiceBackend(Backend):
     ADD_USER = 12
     GOODBYE = 254
 
-    def __init__(
-        self,
-        billing_project: str = None,
-        bucket: str = None,
-        *,
-        deploy_config=None
-    ):
+    def __init__(self,
+                 billing_project: str = None,
+                 bucket: str = None,
+                 *,
+                 deploy_config=None,
+                 skip_logging_configuration=None):
         if billing_project is None:
             billing_project = get_user_config().get('batch', 'billing_project', fallback=None)
         if billing_project is None:
@@ -139,12 +137,26 @@ class ServiceBackend(Backend):
     def fs(self) -> GoogleCloudStorageFS:
         return self._fs
 
+    @property
+    def logger(self):
+        return log
+
+    @property
+    def stop(self):
+        pass
+
     def render(self, ir):
         r = CSERenderer()
         assert len(r.jirs) == 0
         return r(ir)
 
-    def execute(self, ir):
+    def execute(self, ir, timed=False):
+        result = self._execute(ir)
+        if timed:
+            return result, dict()
+        return result
+
+    def _execute(self, ir):
         token = secret_alnum_string()
         with TemporaryDirectory(ensure_exists=False) as dir:
             with self.fs.open(dir + '/in', 'wb') as infile:
@@ -165,7 +177,10 @@ class ServiceBackend(Backend):
                 dir + '/out',
             ], mount_tokens=True)
             b = bb.submit()
-            print(b.wait())
+            status = b.wait()
+            if status['n_succeeded'] != 1:
+                raise ValueError(f'batch failed {status} {b.log()}')
+
 
             with self.fs.open(dir + '/out', 'rb') as outfile:
                 success = read_bool(outfile)
@@ -188,7 +203,7 @@ class ServiceBackend(Backend):
         token = secret_alnum_string()
         with TemporaryDirectory(ensure_exists=False) as dir:
             with self.fs.open(dir + '/in', 'wb') as infile:
-                write_int(infile, BinaryProtocol.VALUE_TYPE)
+                write_int(infile, ServiceBackend.VALUE_TYPE)
                 write_str(infile, tmp_dir())
                 write_str(infile, self.render(ir))
 
@@ -201,7 +216,10 @@ class ServiceBackend(Backend):
                 dir + '/out',
             ], mount_tokens=True)
             b = bb.submit()
-            print(b.wait())
+            status = b.wait()
+            if status['n_succeeded'] != 1:
+                raise ValueError(f'batch failed {status} {b.log()}')
+
 
             with self.fs.open(dir + '/out', 'rb') as outfile:
                 success = read_bool(outfile)
@@ -219,7 +237,7 @@ class ServiceBackend(Backend):
         token = secret_alnum_string()
         with TemporaryDirectory(ensure_exists=False) as dir:
             with self.fs.open(dir + '/in', 'wb') as infile:
-                write_int(infile, BinaryProtocol.TABLE_TYPE)
+                write_int(infile, ServiceBackend.TABLE_TYPE)
                 write_str(infile, tmp_dir())
                 write_str(infile, self.render(tir))
 
@@ -232,7 +250,10 @@ class ServiceBackend(Backend):
                 dir + '/out',
             ], mount_tokens=True)
             b = bb.submit()
-            print(b.wait())
+            status = b.wait()
+            if status['n_succeeded'] != 1:
+                raise ValueError(f'batch failed {status} {b.log()}')
+
 
             with self.fs.open(dir + '/out', 'rb') as outfile:
                 success = read_bool(outfile)
@@ -250,7 +271,7 @@ class ServiceBackend(Backend):
         token = secret_alnum_string()
         with TemporaryDirectory(ensure_exists=False) as dir:
             with self.fs.open(dir + '/in', 'wb') as infile:
-                write_int(infile, BinaryProtocol.MATRIX_TABLE_TYPE)
+                write_int(infile, ServiceBackend.MATRIX_TABLE_TYPE)
                 write_str(infile, tmp_dir())
                 write_str(infile, self.render(mir))
 
@@ -263,7 +284,10 @@ class ServiceBackend(Backend):
                 dir + '/out',
             ], mount_tokens=True)
             b = bb.submit()
-            print(b.wait())
+            status = b.wait()
+            if status['n_succeeded'] != 1:
+                raise ValueError(f'batch failed {status} {b.log()}')
+
 
             with self.fs.open(dir + '/out', 'rb') as outfile:
                 success = read_bool(outfile)
@@ -281,7 +305,7 @@ class ServiceBackend(Backend):
         token = secret_alnum_string()
         with TemporaryDirectory(ensure_exists=False) as dir:
             with self.fs.open(dir + '/in', 'wb') as infile:
-                write_int(infile, BinaryProtocol.BLOCK_MATRIX_TYPE)
+                write_int(infile, ServiceBackend.BLOCK_MATRIX_TYPE)
                 write_str(infile, tmp_dir())
                 write_str(infile, self.render(bmir))
 
@@ -294,7 +318,10 @@ class ServiceBackend(Backend):
                 dir + '/out',
             ], mount_tokens=True)
             b = bb.submit()
-            print(b.wait())
+            status = b.wait()
+            if status['n_succeeded'] != 1:
+                raise ValueError(f'batch failed {status} {b.log()}')
+
 
             with self.fs.open(dir + '/out', 'rb') as outfile:
                 success = read_bool(outfile)
@@ -318,13 +345,44 @@ class ServiceBackend(Backend):
         raise NotImplementedError("ServiceBackend does not support 'remove_reference'")
 
     def get_reference(self, name):
-        return self.socket.request('references/get', name=name)
+        token = secret_alnum_string()
+        with TemporaryDirectory(ensure_exists=False) as dir:
+            with self.fs.open(dir + '/in', 'wb') as infile:
+                write_int(infile, ServiceBackend.REFERENCE_GENOME)
+                write_str(infile, tmp_dir())
+                write_str(infile, name)
+
+            bb = self.bc.create_batch(token=token)
+            bb.create_jvm_job([
+                'is.hail.backend.service.ServiceBackendSocketAPI2',
+                os.environ['HAIL_SHA'],
+                os.environ['HAIL_JAR_URL'],
+                dir + '/in',
+                dir + '/out',
+            ], mount_tokens=True)
+            b = bb.submit()
+            status = b.wait()
+            if status['n_succeeded'] != 1:
+                raise ValueError(f'batch failed {status} {b.log()}')
+
+            with self.fs.open(dir + '/out', 'rb') as outfile:
+                success = read_bool(outfile)
+                if success:
+                    s = read_str(outfile)
+                    try:
+                        # FIXME: do we not have to parse the result?
+                        return json.loads(s)
+                    except json.decoder.JSONDecodeError as err:
+                        raise ValueError(f'could not decode {s}') from err
+                else:
+                    jstacktrace = read_str(outfile)
+                    raise ValueError(jstacktrace)
 
     def load_references_from_dataset(self, path):
         token = secret_alnum_string()
         with TemporaryDirectory(ensure_exists=False) as dir:
             with self.fs.open(dir + '/in', 'wb') as infile:
-                write_int(infile, BinaryProtocol.LOAD_REFERENCES_FROM_DATASET)
+                write_int(infile, ServiceBackend.LOAD_REFERENCES_FROM_DATASET)
                 write_str(infile, tmp_dir())
                 write_str(infile, self.billing_project)
                 write_str(infile, self.bucket)
@@ -339,7 +397,10 @@ class ServiceBackend(Backend):
                 dir + '/out',
             ], mount_tokens=True)
             b = bb.submit()
-            print(b.wait())
+            status = b.wait()
+            if status['n_succeeded'] != 1:
+                raise ValueError(f'batch failed {status} {b.log()}')
+
 
             with self.fs.open(dir + '/out', 'rb') as outfile:
                 success = read_bool(outfile)
