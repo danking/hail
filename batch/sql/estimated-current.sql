@@ -154,6 +154,12 @@ CREATE INDEX `batches_token` ON `batches` (`token`);
 CREATE INDEX `batches_time_completed` ON `batches` (`time_completed`);
 CREATE INDEX `batches_billing_project_state` ON `batches` (`billing_project`, `state`);
 
+CREATE TABLE IF NOT EXISTS `batches_cancelled` (
+  `id` BIGINT NOT NULL,
+  PRIMARY KEY (`id`),
+  FOREIGN KEY (`id`) REFERENCES billing_projects(id)
+) ENGINE = InnoDB;
+
 CREATE TABLE IF NOT EXISTS `batches_inst_coll_staging` (
   `batch_id` BIGINT NOT NULL,
   `inst_coll` VARCHAR(255),
@@ -387,9 +393,12 @@ BEGIN
   DECLARE cur_n_tokens INT;
   DECLARE rand_token INT;
 
-  SELECT user, cancelled INTO cur_user, cur_batch_cancelled FROM batches
-  WHERE id = NEW.batch_id
-  LOCK IN SHARE MODE;
+  SELECT user INTO cur_user FROM batches WHERE id = NEW.batch_id
+
+  SET cur_batch_cancelled = EXISTS (SELECT TRUE
+                                    FROM batches_cancelled
+                                    WHERE id = NEW.batch_id
+                                    LOCK IN SHARE MODE)
 
   SELECT n_tokens INTO cur_n_tokens FROM globals LOCK IN SHARE MODE;
   SET rand_token = FLOOR(RAND() * cur_n_tokens);
@@ -826,9 +835,14 @@ BEGIN
 
   START TRANSACTION;
 
-  SELECT user, `state`, cancelled INTO cur_user, cur_batch_state, cur_cancelled FROM batches
+  SELECT user, `state` INTO cur_user, cur_batch_state FROM batches
   WHERE id = in_batch_id
   FOR UPDATE;
+
+  SET cur_cancelled = EXISTS (SELECT TRUE
+                              FROM batches_cancelled
+                              WHERE id = NEW.batch_id
+                              FOR UPDATE)
 
   IF cur_batch_state = 'running' AND NOT cur_cancelled THEN
     INSERT INTO user_inst_coll_resources (user, inst_coll, token,
@@ -862,7 +876,7 @@ BEGIN
     # there are no cancellable jobs left, they have been cancelled
     DELETE FROM batch_inst_coll_cancellable_resources WHERE batch_id = in_batch_id;
 
-    UPDATE batches SET cancelled = 1 WHERE id = in_batch_id;
+    INSERT INTO batches_cancelled VALUES (in_batch_id);
   END IF;
 
   COMMIT;
@@ -922,10 +936,10 @@ BEGIN
   WHERE batch_id = in_batch_id AND job_id = in_job_id
   FOR UPDATE;
 
-  SELECT (jobs.cancelled OR batches.cancelled) AND NOT jobs.always_run
+  SELECT (jobs.cancelled OR batches_cancelled.id IS NOT NULL) AND NOT jobs.always_run
   INTO cur_job_cancel
   FROM jobs
-  INNER JOIN batches ON batches.id = jobs.batch_id
+  LEFT JOIN batches_cancelled ON batches_cancelled.id = jobs.batch_id
   WHERE batch_id = in_batch_id AND job_id = in_job_id
   LOCK IN SHARE MODE;
 
@@ -1042,10 +1056,10 @@ BEGIN
   WHERE batch_id = in_batch_id AND job_id = in_job_id
   FOR UPDATE;
 
-  SELECT (jobs.cancelled OR batches.cancelled) AND NOT jobs.always_run
+  SELECT (jobs.cancelled OR batches_cancelled.id IS NOT NULL) AND NOT jobs.always_run
   INTO cur_job_cancel
   FROM jobs
-  INNER JOIN batches ON batches.id = jobs.batch_id
+  LEFT JOIN batches_cancelled ON batches_cancelled.id = jobs.batch_id
   WHERE batch_id = in_batch_id AND job_id = in_job_id
   LOCK IN SHARE MODE;
 
@@ -1087,10 +1101,10 @@ BEGIN
   WHERE batch_id = in_batch_id AND job_id = in_job_id
   FOR UPDATE;
 
-  SELECT (jobs.cancelled OR batches.cancelled) AND NOT jobs.always_run
+  SELECT (jobs.cancelled OR batches_cancelled.id IS NOT NULL) AND NOT jobs.always_run
   INTO cur_job_cancel
   FROM jobs
-  INNER JOIN batches ON batches.id = jobs.batch_id
+  LEFT JOIN batches_cancelled ON batches_cancelled.id = jobs.batch_id
   WHERE batch_id = in_batch_id AND job_id = in_job_id
   LOCK IN SHARE MODE;
 
