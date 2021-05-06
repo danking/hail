@@ -134,6 +134,7 @@ class ServiceBackend(Backend):
         self.session_id = tokens.namespace_token_or_error(deploy_config.service_ns('batch'))
         self.bc = hb.BatchClient(self.billing_project)
         self.disable_progress_bar = disable_progress_bar
+        self.batch_attributes: Dict[str, str] = dict()
 
     @property
     def fs(self) -> GoogleCloudStorageFS:
@@ -170,7 +171,7 @@ class ServiceBackend(Backend):
                 write_str(infile, self.render(ir))
                 write_str(infile, token)
 
-            bb = self.bc.create_batch(token=token)
+            bb = self.bc.create_batch(token=token, attributes=self.batch_attributes)
             j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
@@ -209,7 +210,7 @@ class ServiceBackend(Backend):
                 write_str(infile, tmp_dir())
                 write_str(infile, self.render(ir))
 
-            bb = self.bc.create_batch(token=token)
+            bb = self.bc.create_batch(token=token, attributes=self.batch_attributes)
             j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
@@ -243,7 +244,7 @@ class ServiceBackend(Backend):
                 write_str(infile, tmp_dir())
                 write_str(infile, self.render(tir))
 
-            bb = self.bc.create_batch(token=token)
+            bb = self.bc.create_batch(token=token, attributes=self.batch_attributes)
             j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
@@ -277,7 +278,7 @@ class ServiceBackend(Backend):
                 write_str(infile, tmp_dir())
                 write_str(infile, self.render(mir))
 
-            bb = self.bc.create_batch(token=token)
+            bb = self.bc.create_batch(token=token, attributes=self.batch_attributes)
             j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
@@ -311,7 +312,7 @@ class ServiceBackend(Backend):
                 write_str(infile, tmp_dir())
                 write_str(infile, self.render(bmir))
 
-            bb = self.bc.create_batch(token=token)
+            bb = self.bc.create_batch(token=token, attributes=self.batch_attributes)
             j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
@@ -354,7 +355,7 @@ class ServiceBackend(Backend):
                 write_str(infile, tmp_dir())
                 write_str(infile, name)
 
-            bb = self.bc.create_batch(token=token)
+            bb = self.bc.create_batch(token=token, attributes=self.batch_attributes)
             j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
@@ -390,7 +391,7 @@ class ServiceBackend(Backend):
                 write_str(infile, self.bucket)
                 write_str(infile, path)
 
-            bb = self.bc.create_batch(token=token)
+            bb = self.bc.create_batch(token=token, attributes=self.batch_attributes)
             j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
