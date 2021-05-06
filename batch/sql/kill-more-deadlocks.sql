@@ -22,12 +22,12 @@ BEGIN
   DECLARE cur_n_tokens INT;
   DECLARE rand_token INT;
 
-  SELECT user INTO cur_user FROM batches WHERE id = NEW.batch_id
+  SELECT user INTO cur_user FROM batches WHERE id = NEW.batch_id;
 
   SET cur_batch_cancelled = EXISTS (SELECT TRUE
                                     FROM batches_cancelled
                                     WHERE id = NEW.batch_id
-                                    LOCK IN SHARE MODE)
+                                    LOCK IN SHARE MODE);
 
   SELECT n_tokens INTO cur_n_tokens FROM globals LOCK IN SHARE MODE;
   SET rand_token = FLOOR(RAND() * cur_n_tokens);
@@ -205,7 +205,7 @@ BEGIN
   SET cur_cancelled = EXISTS (SELECT TRUE
                               FROM batches_cancelled
                               WHERE id = NEW.batch_id
-                              FOR UPDATE)
+                              FOR UPDATE);
 
   IF cur_batch_state = 'running' AND NOT cur_cancelled THEN
     INSERT INTO user_inst_coll_resources (user, inst_coll, token,
