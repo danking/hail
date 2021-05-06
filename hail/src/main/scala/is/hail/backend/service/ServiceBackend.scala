@@ -693,7 +693,7 @@ class ServiceBackendSocketAPI2(
   private[this] val in: InputStream,
   private[this] val out: OutputStream
 ) extends Thread {
-  import ServiceBackendSocketAPI._
+  import ServiceBackendSocketAPI2._
 
   private[this] val LOAD_REFERENCES_FROM_DATASET = 1
   private[this] val VALUE_TYPE = 2

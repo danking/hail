@@ -194,7 +194,7 @@ class ServiceBackend(Backend):
                         raise ValueError(f'could not decode {s}') from err
                 else:
                     jstacktrace = read_str(outfile)
-                    raise ValueError(jstacktrace)
+                    raise FatalError(jstacktrace)
 
         typ = dtype(resp['type'])
         if typ == tvoid:
@@ -233,7 +233,7 @@ class ServiceBackend(Backend):
                         raise ValueError(f'could not decode {s}') from err
                 else:
                     jstacktrace = read_str(outfile)
-                    raise ValueError(jstacktrace)
+                    raise FatalError(jstacktrace)
 
     def table_type(self, tir):
         token = secret_alnum_string()
@@ -267,7 +267,7 @@ class ServiceBackend(Backend):
                         raise ValueError(f'could not decode {s}') from err
                 else:
                     jstacktrace = read_str(outfile)
-                    raise ValueError(jstacktrace)
+                    raise FatalError(jstacktrace)
 
     def matrix_type(self, mir):
         token = secret_alnum_string()
@@ -301,7 +301,7 @@ class ServiceBackend(Backend):
                         raise ValueError(f'could not decode {s}') from err
                 else:
                     jstacktrace = read_str(outfile)
-                    raise ValueError(jstacktrace)
+                    raise FatalError(jstacktrace)
 
     def blockmatrix_type(self, bmir):
         token = secret_alnum_string()
@@ -335,7 +335,7 @@ class ServiceBackend(Backend):
                         raise ValueError(f'could not decode {s}') from err
                 else:
                     jstacktrace = read_str(outfile)
-                    raise ValueError(jstacktrace)
+                    raise FatalError(jstacktrace)
 
     def add_reference(self, config):
         raise NotImplementedError("ServiceBackend does not support 'add_reference'")
@@ -378,7 +378,7 @@ class ServiceBackend(Backend):
                         raise ValueError(f'could not decode {s}') from err
                 else:
                     jstacktrace = read_str(outfile)
-                    raise ValueError(jstacktrace)
+                    raise FatalError(jstacktrace)
 
     def load_references_from_dataset(self, path):
         token = secret_alnum_string()
@@ -415,7 +415,7 @@ class ServiceBackend(Backend):
                         raise ValueError(f'could not decode {s}') from err
                 else:
                     jstacktrace = read_str(outfile)
-                    raise ValueError(jstacktrace)
+                    raise FatalError(jstacktrace)
 
     def add_sequence(self, name, fasta_file, index_file):
         raise NotImplementedError("ServiceBackend does not support 'add_sequence'")
