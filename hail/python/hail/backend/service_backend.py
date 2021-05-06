@@ -171,7 +171,7 @@ class ServiceBackend(Backend):
                 write_str(infile, token)
 
             bb = self.bc.create_batch(token=token)
-            bb.create_jvm_job([
+            j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
                 os.environ['HAIL_JAR_URL'],
@@ -181,7 +181,7 @@ class ServiceBackend(Backend):
             b = bb.submit()
             status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
-                raise ValueError(f'batch failed {status} {b.log()}')
+                raise ValueError(f'batch failed {status} {j.log()}')
 
 
             with self.fs.open(dir + '/out', 'rb') as outfile:
@@ -210,7 +210,7 @@ class ServiceBackend(Backend):
                 write_str(infile, self.render(ir))
 
             bb = self.bc.create_batch(token=token)
-            bb.create_jvm_job([
+            j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
                 os.environ['HAIL_JAR_URL'],
@@ -220,7 +220,7 @@ class ServiceBackend(Backend):
             b = bb.submit()
             status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
-                raise ValueError(f'batch failed {status} {b.log()}')
+                raise ValueError(f'batch failed {status} {j.log()}')
 
 
             with self.fs.open(dir + '/out', 'rb') as outfile:
@@ -244,7 +244,7 @@ class ServiceBackend(Backend):
                 write_str(infile, self.render(tir))
 
             bb = self.bc.create_batch(token=token)
-            bb.create_jvm_job([
+            j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
                 os.environ['HAIL_JAR_URL'],
@@ -254,7 +254,7 @@ class ServiceBackend(Backend):
             b = bb.submit()
             status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
-                raise ValueError(f'batch failed {status} {b.log()}')
+                raise ValueError(f'batch failed {status} {j.log()}')
 
 
             with self.fs.open(dir + '/out', 'rb') as outfile:
@@ -278,7 +278,7 @@ class ServiceBackend(Backend):
                 write_str(infile, self.render(mir))
 
             bb = self.bc.create_batch(token=token)
-            bb.create_jvm_job([
+            j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
                 os.environ['HAIL_JAR_URL'],
@@ -288,7 +288,7 @@ class ServiceBackend(Backend):
             b = bb.submit()
             status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
-                raise ValueError(f'batch failed {status} {b.log()}')
+                raise ValueError(f'batch failed {status} {j.log()}')
 
 
             with self.fs.open(dir + '/out', 'rb') as outfile:
@@ -312,7 +312,7 @@ class ServiceBackend(Backend):
                 write_str(infile, self.render(bmir))
 
             bb = self.bc.create_batch(token=token)
-            bb.create_jvm_job([
+            j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
                 os.environ['HAIL_JAR_URL'],
@@ -322,7 +322,7 @@ class ServiceBackend(Backend):
             b = bb.submit()
             status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
-                raise ValueError(f'batch failed {status} {b.log()}')
+                raise ValueError(f'batch failed {status} {j.log()}')
 
 
             with self.fs.open(dir + '/out', 'rb') as outfile:
@@ -355,7 +355,7 @@ class ServiceBackend(Backend):
                 write_str(infile, name)
 
             bb = self.bc.create_batch(token=token)
-            bb.create_jvm_job([
+            j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
                 os.environ['HAIL_JAR_URL'],
@@ -365,7 +365,7 @@ class ServiceBackend(Backend):
             b = bb.submit()
             status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
-                raise ValueError(f'batch failed {status} {b.log()}')
+                raise ValueError(f'batch failed {status} {j.log()}')
 
             with self.fs.open(dir + '/out', 'rb') as outfile:
                 success = read_bool(outfile)
@@ -391,7 +391,7 @@ class ServiceBackend(Backend):
                 write_str(infile, path)
 
             bb = self.bc.create_batch(token=token)
-            bb.create_jvm_job([
+            j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
                 os.environ['HAIL_JAR_URL'],
@@ -401,7 +401,7 @@ class ServiceBackend(Backend):
             b = bb.submit()
             status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
-                raise ValueError(f'batch failed {status} {b.log()}')
+                raise ValueError(f'batch failed {status} {j.log()}')
 
 
             with self.fs.open(dir + '/out', 'rb') as outfile:
