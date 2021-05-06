@@ -2245,6 +2245,8 @@ steps:
         script: /io/sql/add-fail-fast.sql
       - name: kill-more-deadlocks
         script: /io/sql/kill-more-deadlocks.sql
+      - name: kill-more-deadlocks2
+        script: /io/sql/kill-more-deadlocks2.sql
     inputs:
       - from: /repo/batch/sql
         to: /io/sql
