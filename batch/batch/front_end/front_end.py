@@ -1070,7 +1070,8 @@ async def _get_batch(app, batch_id):
 
     record = await db.select_and_fetchone(
         '''
-SELECT batches.*, SUM(`usage` * rate) AS cost, batches_cancelled.id IS NOT NULL as cancelled FROM batches
+SELECT batches.*, SUM(`usage` * rate) AS cost, batches_cancelled.id IS NOT NULL as cancelled
+FROM batches
 LEFT JOIN aggregated_batch_resources
        ON batches.id = aggregated_batch_resources.batch_id
 LEFT JOIN resources
