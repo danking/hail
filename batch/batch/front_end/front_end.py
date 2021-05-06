@@ -1002,21 +1002,30 @@ async def create_batch(request, userdata):
 
     @transaction(db)
     async def insert(tx):
-        billing_projects = await query_billing_projects(tx, user=user, billing_project=billing_project)
+        bp = tx.execute_and_fetchone('''
+select billing_projects.status, billing_projects.limit
+from billing_project_users
+inner join billing_projects
+where billing_project = %s and user = %s
+lock in share mode''', (billing_project, user))
 
-        if len(billing_projects) != 1:
-            assert len(billing_projects) == 0
+        if bp is None:
             raise web.HTTPForbidden(reason=f'unknown billing project {billing_project}')
-        assert billing_projects[0]['status'] is not None
-        if billing_projects[0]['status'] in {'closed', 'deleted'}:
+        if bp['status'] in {'closed', 'deleted'}:
             raise web.HTTPForbidden(reason=f'Billing project {billing_project} is closed or deleted.')
 
-        bp = billing_projects[0]
+        cost = tx.execute_and_fetchone('''
+SELECT SUM(`usage` * rate) as cost
+FROM aggregated_billing_project_resources
+  ON aggregated_billing_project_resources.billing_project = %s
+INNER JOIN resources
+  ON resources.resource = aggregated_billing_project_resources.resource
+''', (billing_project,))
         limit = bp['limit']
-        accrued_cost = bp['accrued_cost']
-        if limit is not None and accrued_cost >= limit:
+        cost = cost['cost']
+        if limit is not None and cost >= limit:
             raise web.HTTPForbidden(
-                reason=f'billing project {billing_project} has exceeded the budget; accrued={cost_str(accrued_cost)} limit={cost_str(limit)}'
+                reason=f'billing project {billing_project} has exceeded the budget; accrued={cost_str(cost)} limit={cost_str(limit)}'
             )
 
         maybe_batch = await tx.execute_and_fetchone(

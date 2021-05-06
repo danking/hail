@@ -903,11 +903,13 @@ BEGIN
 
   IF NOT attempt_exists AND in_attempt_id IS NOT NULL THEN
     INSERT INTO attempts (batch_id, job_id, attempt_id, instance_name) VALUES (in_batch_id, in_job_id, in_attempt_id, in_instance_name);
-    SELECT state INTO cur_instance_state FROM instances WHERE name = in_instance_name LOCK IN SHARE MODE;
-    # instance pending when attempt is from a job private instance
-    IF cur_instance_state = 'pending' OR cur_instance_state = 'active' THEN
-      UPDATE instances SET free_cores_mcpu = free_cores_mcpu - in_cores_mcpu WHERE name = in_instance_name;
-      SET delta_cores_mcpu = -1 * in_cores_mcpu;
+
+    UPDATE instances
+    SET free_cores_mcpu = free_cores_mcpu - in_cores_mcpu
+    WHERE name = in_instance_name
+      AND (cur_instance_state = 'pending' OR cur_instance_state = 'active');
+
+    SET delta_cores_mcpu = -1 * in_cores_mcpu;
     END IF;
   END IF;
 END $$
