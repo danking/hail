@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS `batches_cancelled` (
   `id` BIGINT NOT NULL,
   PRIMARY KEY (`id`),
-  FOREIGN KEY (`id`) REFERENCES billing_projects(id)
+  FOREIGN KEY (`id`) REFERENCES batches(id)
 ) ENGINE = InnoDB;
 
 INSERT INTO batches_cancelled
