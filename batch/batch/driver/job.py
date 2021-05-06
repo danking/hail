@@ -38,7 +38,7 @@ LEFT JOIN resources
   ON aggregated_batch_resources.resource = resources.resource
 LEFT JOIN batches_cancelled
   ON batches.id = batches_cancelled.id
-WHERE id = %s AND NOT deleted AND callback IS NOT NULL AND
+WHERE batches.id = %s AND NOT deleted AND callback IS NOT NULL AND
    batches.`state` = 'complete'
 GROUP BY batches.id;
 ''',

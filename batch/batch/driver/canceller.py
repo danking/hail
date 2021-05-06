@@ -90,7 +90,7 @@ HAVING n_cancelled_ready_jobs > 0;
         async def user_cancelled_ready_jobs(user, remaining):
             async for batch in self.db.select_and_fetchall(
                 '''
-SELECT id, batches_cancelled.id IS NOT NULL as cancelled
+SELECT batches.id, batches_cancelled.id IS NOT NULL as cancelled
 FROM batches
 LEFT JOIN batches_cancelled
        ON batches.id = batches_cancelled.id

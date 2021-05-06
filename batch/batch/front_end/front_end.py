@@ -542,7 +542,7 @@ async def _query_batches(request, user, q):
         where_args.extend(args)
 
     sql = f'''
-SELECT batches.*, SUM(`usage` * rate), batches_cancelled.id IS NOT NULL as cancelled AS cost
+SELECT batches.*, SUM(`usage` * rate) AS cost, batches_cancelled.id IS NOT NULL as cancelled
 FROM batches
 LEFT JOIN aggregated_batch_resources
   ON batches.id = aggregated_batch_resources.batch_id
@@ -1077,7 +1077,7 @@ LEFT JOIN resources
        ON aggregated_batch_resources.resource = resources.resource
 LEFT JOIN batches_cancelled
        ON batches.id = batches_cancelled.id
-WHERE id = %s AND NOT deleted
+WHERE batches.id = %s AND NOT deleted
 GROUP BY batches.id;
 ''',
         (batch_id),

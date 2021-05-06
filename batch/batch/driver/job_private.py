@@ -296,7 +296,7 @@ HAVING n_ready_jobs + n_creating_jobs + n_running_jobs > 0;
         async def user_runnable_jobs(user, remaining):
             async for batch in self.db.select_and_fetchall(
                 '''
-SELECT id, batches_cancelled.id IS NOT NULL as cancelled, userdata, user, format_version
+SELECT batches.id, batches_cancelled.id IS NOT NULL as cancelled, userdata, user, format_version
 FROM batches
 LEFT JOIN batches_cancelled
        ON batches.id = batches_cancelled.id
