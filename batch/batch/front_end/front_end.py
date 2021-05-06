@@ -521,7 +521,7 @@ async def _query_batches(request, user, q):
             condition = "(`state` = 'running')"
             args = []
         elif t == 'cancelled':
-            condition = '(cancelled)'
+            condition = '(batches_cancelled.id IS NOT NULL)'
             args = []
         elif t == 'failure':
             condition = '(n_failed > 0)'
@@ -542,12 +542,14 @@ async def _query_batches(request, user, q):
         where_args.extend(args)
 
     sql = f'''
-SELECT batches.*, SUM(`usage` * rate) AS cost
+SELECT batches.*, SUM(`usage` * rate), batches_cancelled.id IS NOT NULL as cancelled AS cost
 FROM batches
 LEFT JOIN aggregated_batch_resources
   ON batches.id = aggregated_batch_resources.batch_id
 LEFT JOIN resources
   ON aggregated_batch_resources.resource = resources.resource
+LEFT JOIN batches_cancelled
+  ON batches.id = batches_cancelled.id
 WHERE {' AND '.join(where_conditions)}
 GROUP BY batches.id
 ORDER BY batches.id DESC
@@ -1068,11 +1070,13 @@ async def _get_batch(app, batch_id):
 
     record = await db.select_and_fetchone(
         '''
-SELECT batches.*, SUM(`usage` * rate) AS cost FROM batches
+SELECT batches.*, SUM(`usage` * rate) AS cost, batches_cancelled.id IS NOT NULL as cancelled FROM batches
 LEFT JOIN aggregated_batch_resources
        ON batches.id = aggregated_batch_resources.batch_id
 LEFT JOIN resources
        ON aggregated_batch_resources.resource = resources.resource
+LEFT JOIN batches_cancelled
+       ON batches.id = batches_cancelled.id
 WHERE id = %s AND NOT deleted
 GROUP BY batches.id;
 ''',

@@ -30,12 +30,14 @@ log = logging.getLogger('job')
 async def notify_batch_job_complete(db, batch_id):
     record = await db.select_and_fetchone(
         '''
-SELECT batches.*, SUM(`usage` * rate) AS cost
+SELECT batches.*, SUM(`usage` * rate), batches_cancelled.id IS NOT NULL as cancelled AS cost
 FROM batches
 LEFT JOIN aggregated_batch_resources
   ON batches.id = aggregated_batch_resources.batch_id
 LEFT JOIN resources
   ON aggregated_batch_resources.resource = resources.resource
+LEFT JOIN batches_cancelled
+  ON batches.id = batches_cancelled.id
 WHERE id = %s AND NOT deleted AND callback IS NOT NULL AND
    batches.`state` = 'complete'
 GROUP BY batches.id;
