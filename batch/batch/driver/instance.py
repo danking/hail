@@ -66,10 +66,10 @@ VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
             )
             await tx.just_execute(
                 '''
-INSERT INTO instances_free_cores_mcpu (free_cores_mcpu)
-VALUES (%s);
+INSERT INTO instances_free_cores_mcpu (name, free_cores_mcpu)
+VALUES (%s, %s);
 ''',
-                (worker_cores_mcpu,),
+                (name, worker_cores_mcpu,),
             )
         await insert()
 

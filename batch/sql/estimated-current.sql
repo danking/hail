@@ -571,7 +571,7 @@ BEGIN
   DECLARE rand_token INT;
 
   SELECT n_tokens INTO cur_n_tokens FROM globals LOCK IN SHARE MODE;
-worker.py  SET rand_token = FLOOR(RAND() * cur_n_tokens);
+  SET rand_token = FLOOR(RAND() * cur_n_tokens);
 
   SELECT billing_project INTO cur_billing_project FROM batches WHERE id = NEW.batch_id;
 
@@ -923,7 +923,7 @@ BEGIN
     END IF;
   END IF;
 END $$
-4
+
 DROP PROCEDURE IF EXISTS schedule_job $$
 CREATE PROCEDURE schedule_job(
   IN in_batch_id BIGINT,
