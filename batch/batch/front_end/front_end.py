@@ -1002,7 +1002,7 @@ async def create_batch(request, userdata):
 
     @transaction(db)
     async def insert(tx):
-        bp = tx.execute_and_fetchone('''
+        bp = await tx.execute_and_fetchone('''
 select billing_projects.status, billing_projects.limit
 from billing_project_users
 inner join billing_projects
@@ -1014,7 +1014,7 @@ lock in share mode''', (billing_project, user))
         if bp['status'] in {'closed', 'deleted'}:
             raise web.HTTPForbidden(reason=f'Billing project {billing_project} is closed or deleted.')
 
-        cost = tx.execute_and_fetchone('''
+        cost = await tx.execute_and_fetchone('''
 SELECT SUM(`usage` * rate) as cost
 FROM aggregated_billing_project_resources
   ON aggregated_billing_project_resources.billing_project = %s
