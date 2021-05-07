@@ -42,7 +42,6 @@ BEGIN
       AND (instances.state = 'pending' OR instances.state = 'active');
 
     SET delta_cores_mcpu = -1 * in_cores_mcpu;
-    END IF;
   END IF;
 END $$
 
