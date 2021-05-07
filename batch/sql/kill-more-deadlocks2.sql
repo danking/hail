@@ -45,7 +45,7 @@ BEGIN
     SET state = 'inactive',
         free_cores_mcpu = cores_mcpu
     WHERE instances.name = in_instance_name
-      AND instances.name = instances_free_cores_mcpu.name
+      AND instances.name = instances_free_cores_mcpu.name;
 
     COMMIT;
     SELECT 0 as rc;
