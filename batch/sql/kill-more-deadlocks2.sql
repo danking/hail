@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS `instances_free_cores_mcpu` (
   FOREIGN KEY (`name`) REFERENCES instances(`name`)
 ) ENGINE = InnoDB;
 
-INSERT INTO `instance_free_cores_mcpu`
+INSERT INTO `instances_free_cores_mcpu`
 SELECT `name`, free_cores_mcpu
 FROM instances;
 
@@ -38,7 +38,7 @@ BEGIN
     UPDATE instances, instances_free_cores_mcpu
     SET free_cores_mcpu = free_cores_mcpu - in_cores_mcpu
     WHERE instances.name = in_instance_name
-      AND instances.name = instance_free_cores_mcpu.name
+      AND instances.name = instances_free_cores_mcpu.name
       AND (instances.state = 'pending' OR instances.state = 'active');
 
     SET delta_cores_mcpu = -1 * in_cores_mcpu;

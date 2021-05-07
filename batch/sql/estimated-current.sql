@@ -738,7 +738,7 @@ BEGIN
     SET state = 'inactive',
         free_cores_mcpu = cores_mcpu
     WHERE instances.name = in_instance_name
-      AND instances.name = instance_free_cores_mcpu.name
+      AND instances.name = instances_free_cores_mcpu.name
 
     COMMIT;
     SELECT 0 as rc;
@@ -916,7 +916,7 @@ BEGIN
     UPDATE instances, instances_free_cores_mcpu
     SET free_cores_mcpu = free_cores_mcpu - in_cores_mcpu
     WHERE instances.name = in_instance_name
-      AND instances.name = instance_free_cores_mcpu.name
+      AND instances.name = instances_free_cores_mcpu.name
       AND (instances.state = 'pending' OR instances.state = 'active');
 
     SET delta_cores_mcpu = -1 * in_cores_mcpu;
