@@ -1017,9 +1017,9 @@ lock in share mode''', (billing_project, user))
         cost = await tx.execute_and_fetchone('''
 SELECT SUM(`usage` * rate) as cost
 FROM aggregated_billing_project_resources
-  ON aggregated_billing_project_resources.billing_project = %s
 INNER JOIN resources
   ON resources.resource = aggregated_billing_project_resources.resource
+WHERE aggregated_billing_project_resources.billing_project = %s
 ''', (billing_project,))
         limit = bp['limit']
         cost = cost['cost']
