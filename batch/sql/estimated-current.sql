@@ -86,7 +86,6 @@ CREATE TABLE IF NOT EXISTS `instances` (
   `activation_token` VARCHAR(100),
   `token` VARCHAR(100) NOT NULL,
   `cores_mcpu` INT NOT NULL,
-  `free_cores_mcpu` INT NOT NULL,
   `time_created` BIGINT NOT NULL,
   `failed_request_count` INT NOT NULL DEFAULT 0,
   `last_updated` BIGINT NOT NULL,
@@ -105,6 +104,13 @@ CREATE INDEX `instances_removed` ON `instances` (`removed`);
 CREATE INDEX `instances_inst_coll` ON `instances` (`inst_coll`);
 CREATE INDEX `instances_removed_inst_coll` ON `instances` (`removed`, `inst_coll`);
 CREATE INDEX `instances_time_activated` ON `instances` (`time_activated`);
+
+CREATE TABLE IF NOT EXISTS `instances_free_cores_mcpu` (
+  `name` VARCHAR(100) NOT NULL,
+  `free_cores_mcpu` INT NOT NULL,
+  PRIMARY KEY (`name`),
+  FOREIGN KEY (`name`) REFERENCES instances(`name`)
+) ENGINE = InnoDB;
 
 CREATE TABLE IF NOT EXISTS `user_inst_coll_resources` (
   `user` VARCHAR(100) NOT NULL,
@@ -565,7 +571,7 @@ BEGIN
   DECLARE rand_token INT;
 
   SELECT n_tokens INTO cur_n_tokens FROM globals LOCK IN SHARE MODE;
-  SET rand_token = FLOOR(RAND() * cur_n_tokens);
+worker.py  SET rand_token = FLOOR(RAND() * cur_n_tokens);
 
   SELECT billing_project INTO cur_billing_project FROM batches WHERE id = NEW.batch_id;
 
@@ -728,7 +734,11 @@ BEGIN
         jobs.attempt_id = NULL
     WHERE instance_name = in_instance_name AND (state = 'Running' OR state = 'Creating');
 
-    UPDATE instances SET state = 'inactive', free_cores_mcpu = cores_mcpu WHERE name = in_instance_name;
+    UPDATE instances, instances_free_cores_mcpu
+    SET state = 'inactive',
+        free_cores_mcpu = cores_mcpu
+    WHERE instances.name = in_instance_name
+      AND instances.name = instance_free_cores_mcpu.name
 
     COMMIT;
     SELECT 0 as rc;
@@ -893,7 +903,6 @@ CREATE PROCEDURE add_attempt(
 )
 BEGIN
   DECLARE attempt_exists BOOLEAN;
-  DECLARE cur_instance_state VARCHAR(40);
   SET delta_cores_mcpu = IFNULL(delta_cores_mcpu, 0);
 
   SET attempt_exists = EXISTS (SELECT * FROM attempts
@@ -904,16 +913,17 @@ BEGIN
   IF NOT attempt_exists AND in_attempt_id IS NOT NULL THEN
     INSERT INTO attempts (batch_id, job_id, attempt_id, instance_name) VALUES (in_batch_id, in_job_id, in_attempt_id, in_instance_name);
 
-    UPDATE instances
+    UPDATE instances, instances_free_cores_mcpu
     SET free_cores_mcpu = free_cores_mcpu - in_cores_mcpu
-    WHERE name = in_instance_name
-      AND (cur_instance_state = 'pending' OR cur_instance_state = 'active');
+    WHERE instances.name = in_instance_name
+      AND instances.name = instance_free_cores_mcpu.name
+      AND (instances.state = 'pending' OR instances.state = 'active');
 
     SET delta_cores_mcpu = -1 * in_cores_mcpu;
     END IF;
   END IF;
 END $$
-
+4
 DROP PROCEDURE IF EXISTS schedule_job $$
 CREATE PROCEDURE schedule_job(
   IN in_batch_id BIGINT,
@@ -1017,9 +1027,9 @@ BEGIN
   SELECT state INTO cur_instance_state FROM instances WHERE name = in_instance_name LOCK IN SHARE MODE;
 
   IF cur_instance_state = 'active' AND cur_end_time IS NULL THEN
-    UPDATE instances
+    UPDATE instances_free_cores_mcpu
     SET free_cores_mcpu = free_cores_mcpu + cur_cores_mcpu
-    WHERE name = in_instance_name;
+    WHERE instances_free_cores_mcpu.name = in_instance_name;
 
     SET delta_cores_mcpu = cur_cores_mcpu;
   END IF;
@@ -1166,9 +1176,9 @@ BEGIN
 
   SELECT state INTO cur_instance_state FROM instances WHERE name = in_instance_name LOCK IN SHARE MODE;
   IF cur_instance_state = 'active' AND cur_end_time IS NULL THEN
-    UPDATE instances
+    UPDATE instances_free_cores_mcpu
     SET free_cores_mcpu = free_cores_mcpu + cur_cores_mcpu
-    WHERE name = in_instance_name;
+    WHERE instances_free_cores_mcpu.name = in_instance_name;
 
     SET delta_cores_mcpu = delta_cores_mcpu + cur_cores_mcpu;
   END IF;

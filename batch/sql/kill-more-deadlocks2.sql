@@ -1,3 +1,18 @@
+CREATE TABLE IF NOT EXISTS `instances_free_cores_mcpu` (
+  `name` VARCHAR(100) NOT NULL,
+  `free_cores_mcpu` INT NOT NULL,
+  PRIMARY KEY (`name`),
+  FOREIGN KEY (`name`) REFERENCES instances(`name`)
+) ENGINE = InnoDB;
+
+INSERT INTO `instance_free_cores_mcpu`
+SELECT `name`, free_cores_mcpu
+FROM instances;
+
+ALTER TABLE instances DROP COLUMN free_cores_mcpu;
+
+DELIMITER $$
+
 DROP PROCEDURE IF EXISTS add_attempt $$
 CREATE PROCEDURE add_attempt(
   IN in_batch_id BIGINT,
@@ -20,12 +35,15 @@ BEGIN
   IF NOT attempt_exists AND in_attempt_id IS NOT NULL THEN
     INSERT INTO attempts (batch_id, job_id, attempt_id, instance_name) VALUES (in_batch_id, in_job_id, in_attempt_id, in_instance_name);
 
-    UPDATE instances
+    UPDATE instances, instances_free_cores_mcpu
     SET free_cores_mcpu = free_cores_mcpu - in_cores_mcpu
-    WHERE name = in_instance_name
-      AND (cur_instance_state = 'pending' OR cur_instance_state = 'active');
+    WHERE instances.name = in_instance_name
+      AND instances.name = instance_free_cores_mcpu.name
+      AND (instances.state = 'pending' OR instances.state = 'active');
 
     SET delta_cores_mcpu = -1 * in_cores_mcpu;
     END IF;
   END IF;
 END $$
+
+DELIMITER ;
