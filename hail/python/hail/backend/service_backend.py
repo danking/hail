@@ -153,12 +153,15 @@ class ServiceBackend(Backend):
         return r(ir)
 
     def execute(self, ir, timed=False):
-        result = self._execute(ir)
+        return async_to_blocking(self._async_execute(ir, timed=timed))
+
+    async def _async_execute(self, ir, timed=False):
+        result = await self._async_execute_untimed(ir)
         if timed:
             return result, dict()
         return result
 
-    def _execute(self, ir):
+    async def _async_execute_untimed(self, ir):
         token = secret_alnum_string()
         with TemporaryDirectory(ensure_exists=False) as dir:
             with self.fs.open(dir + '/in', 'wb') as infile:
@@ -170,20 +173,21 @@ class ServiceBackend(Backend):
                 write_str(infile, self.render(ir))
                 write_str(infile, token)
 
-            if 'name' not in self.batch_attributes:
-                self.batch_attributes['name'] = 'execute(...)'
-            bb = self.async_bc.create_batch(token=token, attributes=self.batch_attributes)
-            del self.batch_attributes['name']
+            batch_attributes = self.batch_attributes
+            if 'name' not in batch_attributes:
+                batch_attributes = {**batch_attributes, 'name': 'execute(...)'}
+            bb = self.async_bc.create_batch(token=token, attributes=batch_attributes)
 
             j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
                 os.environ['HAIL_JAR_URL'],
+                batch_attributes['name'],
                 dir + '/in',
                 dir + '/out',
             ], mount_tokens=True)
-            b = bb.submit(disable_progress_bar=self.disable_progress_bar)
-            status = b.wait(disable_progress_bar=self.disable_progress_bar)
+            b = await bb.submit(disable_progress_bar=self.disable_progress_bar)
+            status = await b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
                 raise ValueError(f'batch failed {status} {j.log()}')
 
@@ -205,6 +209,12 @@ class ServiceBackend(Backend):
             return None
         return typ._convert_from_json_na(resp['value'])
 
+    def execute_many(self, *irs, timed=False):
+        return async_to_blocking(self._async_execute_many(*irs, timed=timed))
+
+    async def _async_execute_many(self, *irs, timed=False):
+        return await asyncio.gather(*[self._async_execute(ir, timed=timed) for ir in irs])
+
     def value_type(self, ir):
         token = secret_alnum_string()
         with TemporaryDirectory(ensure_exists=False) as dir:
@@ -213,10 +223,10 @@ class ServiceBackend(Backend):
                 write_str(infile, tmp_dir())
                 write_str(infile, self.render(ir))
 
-            if 'name' not in self.batch_attributes:
-                self.batch_attributes['name'] = 'value_type(...)'
-            bb = self.async_bc.create_batch(token=token, attributes=self.batch_attributes)
-            del self.batch_attributes['name']
+            batch_attributes = self.batch_attributes
+            if 'name' not in batch_attributes:
+                batch_attributes = {**batch_attributes, 'name': 'value_type(...)'}
+            bb = self.bc.create_batch(token=token, attributes=batch_attributes)
 
             j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
@@ -225,7 +235,7 @@ class ServiceBackend(Backend):
                 dir + '/in',
                 dir + '/out',
             ], mount_tokens=True)
-            b = bb.submit()
+            b = bb.submit(disable_progress_bar=self.disable_progress_bar)
             status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
                 raise ValueError(f'batch failed {status} {j.log()}')
@@ -251,10 +261,10 @@ class ServiceBackend(Backend):
                 write_str(infile, tmp_dir())
                 write_str(infile, self.render(tir))
 
-            if 'name' not in self.batch_attributes:
-                self.batch_attributes['name'] = 'table_type(...)'
-            bb = self.async_bc.create_batch(token=token, attributes=self.batch_attributes)
-            del self.batch_attributes['name']
+            batch_attributes = self.batch_attributes
+            if 'name' not in batch_attributes:
+                batch_attributes = {**batch_attributes, 'name': 'table_type(...)'}
+            bb = self.bc.create_batch(token=token, attributes=batch_attributes)
 
             j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
@@ -263,7 +273,7 @@ class ServiceBackend(Backend):
                 dir + '/in',
                 dir + '/out',
             ], mount_tokens=True)
-            b = bb.submit()
+            b = bb.submit(disable_progress_bar=self.disable_progress_bar)
             status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
                 raise ValueError(f'batch failed {status} {j.log()}')
@@ -289,10 +299,10 @@ class ServiceBackend(Backend):
                 write_str(infile, tmp_dir())
                 write_str(infile, self.render(mir))
 
-            if 'name' not in self.batch_attributes:
-                self.batch_attributes['name'] = 'matrix_type(...)'
-            bb = self.async_bc.create_batch(token=token, attributes=self.batch_attributes)
-            del self.batch_attributes['name']
+            batch_attributes = self.batch_attributes
+            if 'name' not in batch_attributes:
+                batch_attributes = {**batch_attributes, 'name': 'matrix_type(...)'}
+            bb = self.bc.create_batch(token=token, attributes=batch_attributes)
 
             j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
@@ -301,7 +311,7 @@ class ServiceBackend(Backend):
                 dir + '/in',
                 dir + '/out',
             ], mount_tokens=True)
-            b = bb.submit()
+            b = bb.submit(disable_progress_bar=self.disable_progress_bar)
             status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
                 raise ValueError(f'batch failed {status} {j.log()}')
@@ -327,10 +337,10 @@ class ServiceBackend(Backend):
                 write_str(infile, tmp_dir())
                 write_str(infile, self.render(bmir))
 
-            if 'name' not in self.batch_attributes:
-                self.batch_attributes['name'] = 'blockmatrix_type(...)'
-            bb = self.async_bc.create_batch(token=token, attributes=self.batch_attributes)
-            del self.batch_attributes['name']
+            batch_attributes = self.batch_attributes
+            if 'name' not in batch_attributes:
+                batch_attributes = {**batch_attributes, 'name': 'blockmatrix_type(...)'}
+            bb = self.bc.create_batch(token=token, attributes=batch_attributes)
 
             j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
@@ -339,7 +349,7 @@ class ServiceBackend(Backend):
                 dir + '/in',
                 dir + '/out',
             ], mount_tokens=True)
-            b = bb.submit()
+            b = bb.submit(disable_progress_bar=self.disable_progress_bar)
             status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
                 raise ValueError(f'batch failed {status} {j.log()}')
@@ -377,10 +387,10 @@ class ServiceBackend(Backend):
                 write_str(infile, tmp_dir())
                 write_str(infile, name)
 
-            if 'name' not in self.batch_attributes:
-                self.batch_attributes['name'] = f'get_reference({name})'
-            bb = self.async_bc.create_batch(token=token, attributes=self.batch_attributes)
-            del self.batch_attributes['name']
+            batch_attributes = self.batch_attributes
+            if 'name' not in batch_attributes:
+                batch_attributes = {**batch_attributes, 'name': f'get_reference({name})'}
+            bb = self.async_bc.create_batch(token=token, attributes=batch_attributes)
 
             j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
@@ -389,7 +399,7 @@ class ServiceBackend(Backend):
                 dir + '/in',
                 dir + '/out',
             ], mount_tokens=True)
-            b = await bb.submit()
+            b = await bb.submit(disable_progress_bar=self.disable_progress_bar)
             status = await b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
                 raise ValueError(f'batch failed {status} {j.log()}')
@@ -410,8 +420,8 @@ class ServiceBackend(Backend):
     def get_references(self, names):
         return async_to_blocking(self._async_get_references(names))
 
-    def _async_get_references(self, names):
-        return asyncio.gather(*[self._async_get_reference(name) for name in names])
+    async def _async_get_references(self, names):
+        return await asyncio.gather(*[self._async_get_reference(name) for name in names])
 
     def load_references_from_dataset(self, path):
         token = secret_alnum_string()
@@ -423,10 +433,10 @@ class ServiceBackend(Backend):
                 write_str(infile, self.bucket)
                 write_str(infile, path)
 
-            if 'name' not in self.batch_attributes:
-                self.batch_attributes['name'] = 'load_references_from_dataset(...)'
-            bb = self.async_bc.create_batch(token=token, attributes=self.batch_attributes)
-            del self.batch_attributes['name']
+            batch_attributes = self.batch_attributes
+            if 'name' not in batch_attributes:
+                batch_attributes = {**batch_attributes, 'name': 'load_references_from_dataset(...)'}
+            bb = self.bc.create_batch(token=token, attributes=batch_attributes)
 
             j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
@@ -435,7 +445,7 @@ class ServiceBackend(Backend):
                 dir + '/in',
                 dir + '/out',
             ], mount_tokens=True)
-            b = bb.submit()
+            b = bb.submit(disable_progress_bar=self.disable_progress_bar)
             status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
                 raise ValueError(f'batch failed {status} {j.log()}')

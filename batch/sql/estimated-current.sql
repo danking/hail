@@ -851,7 +851,7 @@ BEGIN
 
   SET cur_cancelled = EXISTS (SELECT TRUE
                               FROM batches_cancelled
-                              WHERE id = NEW.batch_id
+                              WHERE id = in_batch_id
                               FOR UPDATE)
 
   IF cur_batch_state = 'running' AND NOT cur_cancelled THEN

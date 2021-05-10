@@ -57,10 +57,12 @@ class User(
 
 class ServiceBackend(
   private[this] val revision: String,
-  private[this] val jarLocation: String
+  private[this] val jarLocation: String,
+  private[this] val name: String
 ) extends Backend {
   import ServiceBackend.log
 
+  private[this] var batchCount = 0
   private[this] val scratchDir = sys.env.get("HAIL_WORKER_SCRATCH_DIR").getOrElse("")
   private[this] val users = new ConcurrentHashMap[String, User]()
 
@@ -144,8 +146,10 @@ class ServiceBackend(
       JObject(
         "billing_project" -> JString(backendContext.billingProject),
         "n_jobs" -> JInt(n),
-        "token" -> JString(token)),
+        "token" -> JString(token),
+        "name" -> JString(name + "_" + batchCount)),
       jobs)
+    batchCount += 1
     implicit val formats: Formats = DefaultFormats
     val batchID = (batch \ "id").extract[Int]
     val batchState = (batch \ "state").extract[String]
@@ -670,8 +674,8 @@ class ServiceBackendSocketAPI(backend: ServiceBackend, socket: Socket) extends T
 
 object ServiceBackendSocketAPI2 {
   def main(argv: Array[String]): Unit = {
-    val backend = new ServiceBackend(argv(0), argv(1))
-    assert(argv.length == 4, argv.toFastIndexedSeq)
+    val backend = new ServiceBackend(argv(0), argv(1), argv(2))
+    assert(argv.length == 5, argv.toFastIndexedSeq)
     HailContext(backend, "hail.log", false, false, 50, skipLoggingConfiguration = true, 3)
     val scratchDir = sys.env.get("HAIL_WORKER_SCRATCH_DIR").getOrElse("")
     val fs = retryTransientErrors {
@@ -942,7 +946,7 @@ object ServiceBackendMain {
     assert(queryGCSPathEnvVar != null)
     val queryGCSJarPath = queryGCSPathEnvVar + "/jars/"
     val executor = Executors.newCachedThreadPool()
-    val backend = new ServiceBackend(HAIL_REVISION, queryGCSJarPath + HAIL_REVISION + ".jar")
+    val backend = new ServiceBackend(HAIL_REVISION, queryGCSJarPath + HAIL_REVISION + ".jar", "server")
     HailContext(backend, "hail.log", false, false, 50, skipLoggingConfiguration = true, 3)
 
     val ss = AFUNIXServerSocket.newInstance()

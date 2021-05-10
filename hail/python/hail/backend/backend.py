@@ -11,6 +11,9 @@ class Backend(abc.ABC):
     def execute(self, ir, timed=False):
         pass
 
+    def execute_many(self, *irs, timed=False):
+        return [self.execute(ir) for ir in irs]
+
     @abc.abstractmethod
     def value_type(self, ir):
         pass
