@@ -1339,6 +1339,26 @@ class JVMJob(Job):
         return f'job {self.id}'
 
 
+class JVM:
+    def __init__(self):
+        self.process: Optional[asyncio.Process] = None
+        self.socket_file = '/' + uuid.uuid4().hex
+
+    def execute(self, command_string, env):
+        # FIXME: env
+        if self.process is None:
+            self.process = await asyncio.create_subprocess_exec(
+                'java',
+                '-cp',
+                '/JVMEntryway.class:/junixsocket-selftest-2.3.3-jar-with-dependencies.jar',
+                'is.hail.JVMEntryway',
+                self.socket_file,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+        
+
+
 class Worker:
     def __init__(self):
         self.cores_mcpu = CORES * 1000
@@ -1350,6 +1370,7 @@ class Worker:
         self.stop_event = asyncio.Event()
         self.task_manager = aiotools.BackgroundTaskManager()
         self.jar_download_locks = defaultdict(asyncio.Lock)
+        self.jvm_processes = defaultdict(asyncio.Lock)
 
         # filled in during activation
         self.log_store = None

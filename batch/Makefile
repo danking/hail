@@ -26,8 +26,15 @@ build-batch: build-prereqs
 	python3 ../ci/jinja2_render.py '{"service_base_image":{"image":"service-base"}}' Dockerfile Dockerfile.out
 	docker build -t batch -f Dockerfile.out --cache-from batch,$(BATCH_LATEST),service-base .
 
+jars/junixsocket-selftest-2.3.3-jar-with-dependencies.jar:
+	mkdir jars
+	cd jars && curl -LO https://github.com/kohlschutter/junixsocket/releases/download/junixsocket-parent-2.3.3/junixsocket-selftest-2.3.3-jar-with-dependencies.jar
+
+src/main/java/is/hail/JVMEntryway.class: src/main/java/is/hail/JVMEntryway.java jars/junixsocket-selftest-2.3.3-jar-with-dependencies.jar
+	javac -cp jars/junixsocket-selftest-2.3.3-jar-with-dependencies.jar $<
+
 .PHONY: build-worker
-build-worker: build-prereqs
+build-worker: build-prereqs src/main/java/is/hail/JVMEntryway.class
 	-docker pull $(BATCH_WORKER_LATEST)
 	python3 ../ci/jinja2_render.py '{"global":{"docker_prefix":"$(DOCKER_PREFIX)"}}' Dockerfile.worker Dockerfile.worker.out
 	docker build -t batch-worker -f Dockerfile.worker.out --cache-from batch-worker,$(BATCH_WORKER_LATEST),service-base ..
