@@ -28,19 +28,24 @@ log = logging.getLogger('backend.service_backend')
 def write_int(io: BinaryIO, v: int):
     io.write(struct.pack('<i', v))
 
+
 def write_long(io: BinaryIO, v: int):
     io.write(struct.pack('<q', v))
+
 
 def write_bytes(io: BinaryIO, b: bytes):
     n = len(b)
     write_int(io, n)
     io.write(b)
 
+
 def write_str(io: BinaryIO, s: str):
     write_bytes(io, s.encode('utf-8'))
 
+
 class EndOfStream(TransientError):
     pass
+
 
 def read(io: BinaryIO, n: int) -> bytes:
     b = bytearray()
@@ -54,24 +59,30 @@ def read(io: BinaryIO, n: int) -> bytes:
         b.extend(t)
     return b
 
+
 def read_byte(io: BinaryIO) -> int:
     b = read(io, 1)
     return b[0]
 
+
 def read_bool(io: BinaryIO) -> bool:
     return read_byte(io) != 0
+
 
 def read_int(io: BinaryIO) -> int:
     b = read(io, 4)
     return struct.unpack('<i', b)[0]
 
+
 def read_long(io: BinaryIO) -> int:
     b = read(io, 8)
     return struct.unpack('<q', b)[0]
 
+
 def read_bytes(io: BinaryIO) -> bytes:
     n = read_int(io)
     return read(io, n)
+
 
 def read_str(io: BinaryIO) -> str:
     b = read_bytes(io)

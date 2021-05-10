@@ -1,5 +1,7 @@
-from typing import Optional, Dict, Callable
+from typing import Optional, Dict, Callable, List
 import os
+import ctypes
+import ctypes.util
 import json
 import sys
 import re
@@ -14,6 +16,7 @@ import signal
 import aiohttp
 import aiohttp.client_exceptions
 from aiohttp import web
+import struct
 import async_timeout
 import concurrent
 import aiodocker
@@ -39,6 +42,7 @@ from hailtop.batch_client.parse import parse_cpu_in_mcpu, parse_memory_in_bytes,
 from hailtop.batch.hail_genetics_images import HAIL_GENETICS_IMAGES
 from hailtop import aiotools
 from hailtop.aiotools.fs import RouterAsyncFS, LocalAsyncFS
+from hailtop.utils import retry_transient_errors, TransientError
 import hailtop.aiogoogle as aiogoogle
 
 # import uvloop
@@ -1111,7 +1115,7 @@ class JVMJob(Job):
     stack_size = 512 * 1024
 
     def secret_host_path(self, secret):
-        return f'{self.scratch}/secrets{secret["mount_path"]}'
+        return f'{self.scratch}/{secret["mount_path"][1:]}'
 
     def __init__(
         self,
@@ -1125,67 +1129,31 @@ class JVMJob(Job):
     ):
         super().__init__(batch_id, user, gsa_key, job_spec, format_version, task_manager, pool)
         assert job_spec['process']['type'] == 'jvm'
+        assert worker is not None
+
+        self.jvm = worker.jvms.pop()
+        self.scratch = self.jvm.root_dir
 
         input_files = job_spec.get('input_files')
         output_files = job_spec.get('output_files')
         if input_files or output_files:
             raise Exception("i/o not supported")
 
-        for envvar in self.env:
-            assert envvar['name'] not in {
-                'HAIL_DEPLOY_CONFIG_FILE',
-                'HAIL_TOKENS_FILE',
-                'HAIL_SSL_CONFIG_DIR',
-                'HAIL_GSA_KEY_FILE',
-                'HAIL_WORKER_SCRATCH_DIR',
-            }, envvar
-
-        self.env.append(
-            {'name': 'HAIL_DEPLOY_CONFIG_FILE', 'value': f'{self.scratch}/secrets/deploy-config/deploy-config.json'}
-        )
-        self.env.append({'name': 'HAIL_TOKENS_FILE', 'value': f'{self.scratch}/secrets/user-tokens/tokens.json'})
-        self.env.append({'name': 'HAIL_SSL_CONFIG_DIR', 'value': f'{self.scratch}/secrets/ssl-config'})
-        self.env.append({'name': 'HAIL_GSA_KEY_FILE', 'value': f'{self.scratch}/secrets/gsa-key/key.json'})
-        self.env.append({'name': 'HAIL_WORKER_SCRATCH_DIR', 'value': self.scratch})
-
-        # main container
-        self.main_spec = {
-            'command': job_spec['process']['command'],  # ['is.hail.backend.service.Worker', $root, $i]
-            'name': 'main',
-            'env': self.env,
-            'cpu': self.cpu_in_mcpu,
-            'memory': self.memory_in_bytes,
-        }
-
-        self.heap_size = self.memory_in_bytes - self.stack_size
+        assert not self.env
 
         user_command_string = job_spec['process']['command']
         assert len(user_command_string) >= 3, user_command_string
         self.revision = user_command_string[1]
         self.jar_url = user_command_string[2]
-        classpath = f'{find_spark_home()}/jars/*:/hail-jars/{self.revision}.jar:/log4j.properties'
 
-        self.command_string = [
-            'java',
-            '-classpath',
-            classpath,
-            f'-Xmx{self.heap_size}',
-            f'-Xss{self.stack_size}',
-            *user_command_string,
-        ]
-
-        self.process = None
         self.deleted = False
         self.timings = Timings(lambda: self.deleted)
         self.state = 'pending'
         self.logbuffer = bytearray()
 
+
     def step(self, name):
         return self.timings.step(name)
-
-    async def pipe_to_log(self, strm: asyncio.StreamReader):
-        while not strm.at_eof():
-            self.logbuffer.extend(await strm.readline())
 
     async def run(self, worker):
         async with worker.cpu_sem(self.cpu_in_mcpu):
@@ -1196,8 +1164,6 @@ class JVMJob(Job):
 
                 log.info(f'{self}: initializing')
                 self.state = 'initializing'
-
-                os.makedirs(f'{self.scratch}/')
 
                 async with Flock('/xfsquota/projid', pool=worker.pool):
                     with open('/xfsquota/projid', 'a') as f:
@@ -1247,26 +1213,12 @@ class JVMJob(Job):
 
                 log.info(f'{self}: running jvm process')
                 with self.step('running'):
-                    self.process = await asyncio.create_subprocess_exec(
-                        *self.command_string,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                        env={envvar['name']: envvar['value'] for envvar in self.env},
-                    )
-
-                    await asyncio.gather(self.pipe_to_log(self.process.stdout), self.pipe_to_log(self.process.stderr))
-                    await self.process.wait()
-
-                log.info(f'finished {self} with return code {self.process.returncode}')
+                    await self.jvm.execute(self.command_string, output=self.logbuffer)
+                log.info(f'finished {self}')
 
                 await worker.log_store.write_log_file(
                     self.format_version, self.batch_id, self.job_id, self.attempt_id, 'main', self.logbuffer.decode()
                 )
-
-                if self.process.returncode == 0:
-                    self.state = 'succeeded'
-                else:
-                    self.state = 'failed'
                 log.info(f'{self} main: {self.state}')
             except asyncio.CancelledError:
                 raise
@@ -1279,6 +1231,8 @@ class JVMJob(Job):
             await self.cleanup()
 
     async def cleanup(self):
+        worker.jvms.append(self.jvm)
+        del self.jvm
         self.end_time = time_msecs()
 
         if not self.deleted:
@@ -1339,24 +1293,150 @@ class JVMJob(Job):
         return f'job {self.id}'
 
 
+def write_int(writer: asyncio.StreamWriter, v: int):
+    writer.write(struct.pack('<i', v))
+
+
+def write_long(writer: asyncio.StreamWriter, v: int):
+    writer.write(struct.pack('<q', v))
+
+
+def write_bytes(writer: asyncio.StreamWriter, b: bytes):
+    n = len(b)
+    write_int(writer, n)
+    writer.write(b)
+
+def write_str(writer: asyncio.StreamWriter, s: str):
+    write_bytes(writer, s.encode('utf-8'))
+
+
+class EndOfStream(TransientError):
+    pass
+
+
+async def read(reader: asyncio.StreamReader, n: int) -> bytes:
+    b = bytearray()
+    left = n
+    while left > 0:
+        t = await reader.read(left)
+        if not t:
+            log.warning(f'unexpected EOS, Java violated protocol ({b})')
+            raise EndOfStream()
+        left -= len(t)
+        b.extend(t)
+    return b
+
+
+async def read_byte(reader: asyncio.StreamReader) -> int:
+    b = await read(reader, 1)
+    return b[0]
+
+
+async def read_bool(reader: asyncio.StreamReader) -> bool:
+    return await read_byte(reader) != 0
+
+
+async def read_int(reader: asyncio.StreamReader) -> int:
+    b = await read(reader, 4)
+    return struct.unpack('<i', b)[0]
+
+
+async def read_long(reader: asyncio.StreamReader) -> int:
+    b = await read(reader, 8)
+    return struct.unpack('<q', b)[0]
+
+
+async def read_bytes(reader: asyncio.StreamReader) -> bytes:
+    n = await read_int(reader)
+    return await read(reader, n)
+
+
+async def read_str(reader: asyncio.StreamReader) -> str:
+    b = await read_bytes(reader)
+    return b.decode('utf-8')
+
+
+libc = ctypes.CDLL(ctypes.util.find_library('c'), use_errno=True)
+libc.mount.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_ulong, ctypes.c_char_p)
+
+
+def mount(source, target, fs, options=''):
+    ret = libc.mount(source.encode(), target.encode(), fs.encode(), 0, options.encode())
+    if ret < 0:
+        errno = ctypes.get_errno()
+        raise OSError(errno, f"Error mounting {source} ({fs}) on {target} with options '{options}': {os.strerror(errno)}")
+
+
 class JVM:
     def __init__(self):
         self.process: Optional[asyncio.Process] = None
-        self.socket_file = '/' + uuid.uuid4().hex
+        token = uuid.uuid4().hex
+        self.socket_file = '/socket-' + token
+        self.root_dir = '/root-' + token
+        await blocking_to_async(worker.pool, os.mkdir, self.root_dir)
+        await blocking_to_async(worker.pool, mount, '/jvm-entryway', self.root_dir + '/jvm-entryway', 'none', 'bind,ro')
+        await blocking_to_async(worker.pool, mount, '/hail-jars', self.root_dir + '/hail-jars', 'none', 'bind,ro')
+        await blocking_to_async(worker.pool, mount, find_spark_home(), self.root_dir + '/spark', 'none', 'bind,ro')
 
-    def execute(self, command_string, env):
-        # FIXME: env
-        if self.process is None:
+    def kill(self):
+        if self.process is not None:
+            self.process.kill()
+
+    async def execute(self, command_string: List[str], *, output: bytearray):
+        assert worker is not None
+        if self.process is None or self.process.returncode is None:
+            if self.process is not None:
+                stdout, stderr = self.process.communicate()
+                log.info('process exited unexpectedly between jobs',
+                         stderr=stderr,
+                         stdout=stdout)
             self.process = await asyncio.create_subprocess_exec(
+                'chroot',
+                self.root_dir,
                 'java',
+                '-Xmx3750M',
                 '-cp',
-                '/JVMEntryway.class:/junixsocket-selftest-2.3.3-jar-with-dependencies.jar',
+                '/jvm-entryway/JVMEntryway.class:/jvm-entryway/junixsocket-selftest-2.3.3-jar-with-dependencies.jar:/spark/jars/*',
                 'is.hail.JVMEntryway',
                 self.socket_file,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-        
+
+        reader: asyncio.StreamReader
+        writer: asyncio.StreamWriter
+        reader, writer = await retry_transient_errors(
+            asyncio.open_unix_connection, self.socket_file)
+        write_int(writer, len(command_string))
+        for arg in command_string:
+            assert isinstance(arg, str)
+            write_str(writer, arg)
+
+        stop_event = asyncio.Event()
+        wait_for_stop = asyncio.ensure_future(stop_event.wait())
+
+        async def pipe_to_log(strm: asyncio.StreamReader):
+            while not strm.at_eof() and not wait_for_stop.done():
+                read_fut: asyncio.Future = asyncio.ensure_future(strm.readline())
+                await asyncio.wait([read_fut, wait_for_stop], return_when=asyncio.FIRST_COMPLETED)
+                if read_fut.done():
+                    output.extend(read_fut.result())
+
+        stdout_fut = asyncio.ensure_future(pipe_to_log(self.process.stdout))
+        stderr_fut = asyncio.ensure_future(pipe_to_log(self.process.stderr))
+        await writer.drain()
+        writer.close()
+        is_success = await read_bool(reader)
+        stop_event.set()
+        await stdout_fut
+        await stderr_fut
+        for entry in os.listdir(self.root_dir):
+            if entry not in ('hail-jars', 'jvm-entryway', 'spark'):
+                await blocking_to_async(worker.pool, shutil.rmtree, self.root_dir + '/' + entry)
+
+        if not is_success:
+            exception = await read_str(reader)
+            raise ValueError(exception)
 
 
 class Worker:
@@ -1370,7 +1450,7 @@ class Worker:
         self.stop_event = asyncio.Event()
         self.task_manager = aiotools.BackgroundTaskManager()
         self.jar_download_locks = defaultdict(asyncio.Lock)
-        self.jvm_processes = defaultdict(asyncio.Lock)
+        self.jvms = [JVM() for _ in range(CORES)]
 
         # filled in during activation
         self.log_store = None

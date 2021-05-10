@@ -34,7 +34,7 @@ src/main/java/is/hail/JVMEntryway.class: src/main/java/is/hail/JVMEntryway.java 
 	javac -cp jars/junixsocket-selftest-2.3.3-jar-with-dependencies.jar $<
 
 .PHONY: build-worker
-build-worker: build-prereqs src/main/java/is/hail/JVMEntryway.class
+build-worker: build-prereqs src/main/java/is/hail/JVMEntryway.class jars/junixsocket-selftest-2.3.3-jar-with-dependencies.jar
 	-docker pull $(BATCH_WORKER_LATEST)
 	python3 ../ci/jinja2_render.py '{"global":{"docker_prefix":"$(DOCKER_PREFIX)"}}' Dockerfile.worker Dockerfile.worker.out
 	docker build -t batch-worker -f Dockerfile.worker.out --cache-from batch-worker,$(BATCH_WORKER_LATEST),service-base ..

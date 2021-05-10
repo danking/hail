@@ -59,16 +59,18 @@ class JVMEntryway {
         invoked = true;
         out.writeBoolean(true);
       } catch (Throwable t) {
-        if (!invoked) {
-          out.writeBoolean(false);
-          try (StringWriter sw = new java.io.StringWriter();
-               PrintWriter pw = new java.io.PrintWriter(sw)) {
-            t.printStackTrace(pw);
-            String s = sw.toString();
-            byte[] bytes = s.getBytes(StandardCharsets.UTF_8);
-            out.writeInt(bytes.length);
-            out.write(bytes);
-          }
+        if (invoked) {
+          throw t;
+        }
+
+        out.writeBoolean(false);
+        try (StringWriter sw = new java.io.StringWriter();
+             PrintWriter pw = new java.io.PrintWriter(sw)) {
+          t.printStackTrace(pw);
+          String s = sw.toString();
+          byte[] bytes = s.getBytes(StandardCharsets.UTF_8);
+          out.writeInt(bytes.length);
+          out.write(bytes);
         }
       }
       Thread.currentThread().setContextClassLoader(oldClassLoader);
