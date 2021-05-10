@@ -67,10 +67,12 @@ class HailContext(object):
 
         Env._hc = self
 
-        ReferenceGenome._from_config(self._backend.get_reference('GRCh37'), True)
-        ReferenceGenome._from_config(self._backend.get_reference('GRCh38'), True)
-        ReferenceGenome._from_config(self._backend.get_reference('GRCm38'), True)
-        ReferenceGenome._from_config(self._backend.get_reference('CanFam3'), True)
+        grch37, grch38, grcm38, canfam3 = self._backend.get_references(('GRCh37', 'GRCh38', 'GRCm38', 'CanFam3'))
+
+        ReferenceGenome._from_config(grch37, True)
+        ReferenceGenome._from_config(grch38, True)
+        ReferenceGenome._from_config(grcm38, True)
+        ReferenceGenome._from_config(canfam3, True)
 
         if default_reference in ReferenceGenome._references:
             self._default_ref = ReferenceGenome._references[default_reference]

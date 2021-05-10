@@ -1,10 +1,8 @@
-from typing import Optional, BinaryIO
+from typing import BinaryIO, Dict
+import asyncio
 import struct
 import os
-import uuid
-import aiohttp
 import json
-import warnings
 import logging
 
 from hail.context import TemporaryDirectory, tmp_dir
@@ -13,16 +11,14 @@ from hail.expr.types import dtype, tvoid
 from hail.expr.table_type import ttable
 from hail.expr.matrix_type import tmatrix
 from hail.expr.blockmatrix_type import tblockmatrix
-
-from hailtop.config import get_deploy_config, get_user_config, DeployConfig
-from hailtop.auth import service_auth_headers, get_tokens
-from hailtop.utils import async_to_blocking, retry_transient_errors, secret_alnum_string, TransientError
 from hail.ir.renderer import CSERenderer
 
+from hailtop.config import get_deploy_config, get_user_config
+from hailtop.auth import get_tokens
+from hailtop.utils import async_to_blocking, secret_alnum_string, TransientError
 from hailtop.batch_client import client as hb
 
 from .backend import Backend
-from ..hail_logging import PythonOnlyLogger
 from ..fs.google_fs import GoogleCloudStorageFS
 
 
@@ -103,6 +99,8 @@ class ServiceBackend(Backend):
                  deploy_config=None,
                  skip_logging_configuration=None,
                  disable_progress_bar: bool = True):
+        del skip_logging_configuration
+
         if billing_project is None:
             billing_project = get_user_config().get('batch', 'billing_project', fallback=None)
         if billing_project is None:
@@ -133,6 +131,7 @@ class ServiceBackend(Backend):
         deploy_config = deploy_config or get_deploy_config()
         self.session_id = tokens.namespace_token_or_error(deploy_config.service_ns('batch'))
         self.bc = hb.BatchClient(self.billing_project)
+        self.async_bc = self.bc._async_client
         self.disable_progress_bar = disable_progress_bar
         self.batch_attributes: Dict[str, str] = dict()
 
@@ -171,7 +170,11 @@ class ServiceBackend(Backend):
                 write_str(infile, self.render(ir))
                 write_str(infile, token)
 
-            bb = self.bc.create_batch(token=token, attributes=self.batch_attributes)
+            if 'name' not in self.batch_attributes:
+                self.batch_attributes['name'] = 'execute(...)'
+            bb = self.async_bc.create_batch(token=token, attributes=self.batch_attributes)
+            del self.batch_attributes['name']
+
             j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
@@ -179,7 +182,7 @@ class ServiceBackend(Backend):
                 dir + '/in',
                 dir + '/out',
             ], mount_tokens=True)
-            b = bb.submit()
+            b = bb.submit(disable_progress_bar=self.disable_progress_bar)
             status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
                 raise ValueError(f'batch failed {status} {j.log()}')
@@ -210,7 +213,11 @@ class ServiceBackend(Backend):
                 write_str(infile, tmp_dir())
                 write_str(infile, self.render(ir))
 
-            bb = self.bc.create_batch(token=token, attributes=self.batch_attributes)
+            if 'name' not in self.batch_attributes:
+                self.batch_attributes['name'] = 'value_type(...)'
+            bb = self.async_bc.create_batch(token=token, attributes=self.batch_attributes)
+            del self.batch_attributes['name']
+
             j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
@@ -244,7 +251,11 @@ class ServiceBackend(Backend):
                 write_str(infile, tmp_dir())
                 write_str(infile, self.render(tir))
 
-            bb = self.bc.create_batch(token=token, attributes=self.batch_attributes)
+            if 'name' not in self.batch_attributes:
+                self.batch_attributes['name'] = 'table_type(...)'
+            bb = self.async_bc.create_batch(token=token, attributes=self.batch_attributes)
+            del self.batch_attributes['name']
+
             j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
@@ -278,7 +289,11 @@ class ServiceBackend(Backend):
                 write_str(infile, tmp_dir())
                 write_str(infile, self.render(mir))
 
-            bb = self.bc.create_batch(token=token, attributes=self.batch_attributes)
+            if 'name' not in self.batch_attributes:
+                self.batch_attributes['name'] = 'matrix_type(...)'
+            bb = self.async_bc.create_batch(token=token, attributes=self.batch_attributes)
+            del self.batch_attributes['name']
+
             j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
@@ -312,7 +327,11 @@ class ServiceBackend(Backend):
                 write_str(infile, tmp_dir())
                 write_str(infile, self.render(bmir))
 
-            bb = self.bc.create_batch(token=token, attributes=self.batch_attributes)
+            if 'name' not in self.batch_attributes:
+                self.batch_attributes['name'] = 'blockmatrix_type(...)'
+            bb = self.async_bc.create_batch(token=token, attributes=self.batch_attributes)
+            del self.batch_attributes['name']
+
             j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
@@ -348,6 +367,9 @@ class ServiceBackend(Backend):
         raise NotImplementedError("ServiceBackend does not support 'remove_reference'")
 
     def get_reference(self, name):
+        return async_to_blocking(self._async_get_reference(name))
+
+    async def _async_get_reference(self, name):
         token = secret_alnum_string()
         with TemporaryDirectory(ensure_exists=False) as dir:
             with self.fs.open(dir + '/in', 'wb') as infile:
@@ -355,7 +377,11 @@ class ServiceBackend(Backend):
                 write_str(infile, tmp_dir())
                 write_str(infile, name)
 
-            bb = self.bc.create_batch(token=token, attributes=self.batch_attributes)
+            if 'name' not in self.batch_attributes:
+                self.batch_attributes['name'] = f'get_reference({name})'
+            bb = self.async_bc.create_batch(token=token, attributes=self.batch_attributes)
+            del self.batch_attributes['name']
+
             j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
@@ -363,8 +389,8 @@ class ServiceBackend(Backend):
                 dir + '/in',
                 dir + '/out',
             ], mount_tokens=True)
-            b = bb.submit()
-            status = b.wait(disable_progress_bar=self.disable_progress_bar)
+            b = await bb.submit()
+            status = await b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
                 raise ValueError(f'batch failed {status} {j.log()}')
 
@@ -381,6 +407,12 @@ class ServiceBackend(Backend):
                     jstacktrace = read_str(outfile)
                     raise FatalError(jstacktrace)
 
+    def get_references(self, names):
+        return async_to_blocking(self._async_get_references(names))
+
+    def _async_get_references(self, names):
+        return asyncio.gather(*[self._async_get_reference(name) for name in names])
+
     def load_references_from_dataset(self, path):
         token = secret_alnum_string()
         with TemporaryDirectory(ensure_exists=False) as dir:
@@ -391,7 +423,11 @@ class ServiceBackend(Backend):
                 write_str(infile, self.bucket)
                 write_str(infile, path)
 
-            bb = self.bc.create_batch(token=token, attributes=self.batch_attributes)
+            if 'name' not in self.batch_attributes:
+                self.batch_attributes['name'] = 'load_references_from_dataset(...)'
+            bb = self.async_bc.create_batch(token=token, attributes=self.batch_attributes)
+            del self.batch_attributes['name']
+
             j = bb.create_jvm_job([
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],

@@ -715,7 +715,7 @@ class BatchClient:
             last_known_status=b,
         )
 
-    def create_batch(self, attributes=None, callback=None, token=None, cancel_after_n_failures=None):
+    def create_batch(self, attributes=None, callback=None, token=None, cancel_after_n_failures=None) -> BatchBuilder:
         return BatchBuilder(self, attributes, callback, token, cancel_after_n_failures)
 
     async def get_billing_project(self, billing_project):
