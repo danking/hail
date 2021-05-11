@@ -163,7 +163,7 @@ def eval_timed(expression):
     (Any, dict)
         Result of evaluating `expression` and a dictionary of the timings
     """
-    return _eval_many(expression, timed=True, name='eval_timed')
+    return _eval_many(expression, timed=True, name='eval_timed')[0]
 
 
 @typecheck(expression=expr_any)

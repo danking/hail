@@ -241,6 +241,7 @@ class ServiceBackend(Backend):
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
                 os.environ['HAIL_JAR_URL'],
+                batch_attributes['name'],
                 dir + '/in',
                 dir + '/out',
             ], mount_tokens=True)
@@ -279,6 +280,7 @@ class ServiceBackend(Backend):
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
                 os.environ['HAIL_JAR_URL'],
+                batch_attributes['name'],
                 dir + '/in',
                 dir + '/out',
             ], mount_tokens=True)
@@ -317,6 +319,7 @@ class ServiceBackend(Backend):
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
                 os.environ['HAIL_JAR_URL'],
+                batch_attributes['name'],
                 dir + '/in',
                 dir + '/out',
             ], mount_tokens=True)
@@ -355,6 +358,7 @@ class ServiceBackend(Backend):
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
                 os.environ['HAIL_JAR_URL'],
+                batch_attributes['name'],
                 dir + '/in',
                 dir + '/out',
             ], mount_tokens=True)
@@ -405,6 +409,7 @@ class ServiceBackend(Backend):
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
                 os.environ['HAIL_JAR_URL'],
+                batch_attributes['name'],
                 dir + '/in',
                 dir + '/out',
             ], mount_tokens=True)
@@ -451,6 +456,7 @@ class ServiceBackend(Backend):
                 'is.hail.backend.service.ServiceBackendSocketAPI2',
                 os.environ['HAIL_SHA'],
                 os.environ['HAIL_JAR_URL'],
+                batch_attributes['name'],
                 dir + '/in',
                 dir + '/out',
             ], mount_tokens=True)

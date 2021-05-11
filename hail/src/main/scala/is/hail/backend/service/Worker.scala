@@ -51,10 +51,19 @@ object Worker {
     if (args.length != 5) {
       throw new IllegalArgumentException(s"expected five arguments, not: ${ args.length }")
     }
-    val scratchDir = args(2)
+    val scratchDir = args(0)
+    val revision = args(1)
+    val jarGCSPath = args(2)
     val root = args(3)
     val i = args(4).toInt
     val timer = new WorkerTimer()
+
+    val deployConfig = DeployConfig.fromConfigFile(
+      s"$scratchDir/deploy-config/deploy-config.json")
+    DeployConfig.set(deployConfig)
+    val userTokens = Tokens.fromFile(s"$scratchDir/user-tokens/tokens.json")
+    Tokens.set(userTokens)
+    tls.setSSLConfigFromDir(s"$scratchDir/ssl-config")
 
     log.info(s"is.hail.backend.service.Worker $myRevision")
     log.info(s"running job $i at root $root with scratch directory '$scratchDir'")
@@ -98,9 +107,11 @@ object Worker {
     timer.end("readInputs")
     timer.start("executeFunction")
 
-    val hailContext = HailContext(
-      // FIXME: workers should not have backends, but some things do need hail contexts
-      new ServiceBackend(null, null, null), skipLoggingConfiguration = true, quiet = true)
+    if (!HailContext.isInitialized) {
+      HailContext(
+        // FIXME: workers should not have backends, but some things do need hail contexts
+        new ServiceBackend(null, null, null), skipLoggingConfiguration = true, quiet = true)
+    }
     val htc = new ServiceTaskContext(i)
     val result = f(context, htc, fs)
     htc.finish()

@@ -11,14 +11,23 @@ import org.json4s.jackson.JsonMethods
 object Tokens {
   lazy val log: Logger = LogManager.getLogger("Tokens")
 
+  private[this] var _get: Tokens = null
+
+  def set(x: Tokens) = {
+    _get = x
+  }
+
   def get: Tokens = {
-    val file = getTokensFile()
-    if (new File(file).isFile) {
-      fromFile(file)
-    } else {
-      log.info(s"tokens file not found: $file")
-      new Tokens(Map())
+    if (_get == null) {
+      val file = getTokensFile()
+      if (new File(file).isFile) {
+        _get = fromFile(file)
+      } else {
+        log.info(s"tokens file not found: $file")
+        _get = new Tokens(Map())
+      }
     }
+    return _get
   }
 
   def fromFile(file: String): Tokens = {

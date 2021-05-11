@@ -1182,7 +1182,6 @@ class JVMJob(Job):
 
                 self.state = 'running'
 
-                local_jar_location = f'/hail-jars/{self.revision}.jar'
                 log.info(f'{self}: downloading JAR')
                 with self.step('downloading_jar'):
                     async with worker.jar_download_locks[self.revision]:
@@ -1211,7 +1210,7 @@ class JVMJob(Job):
                     await self.jvm.execute(local_jar_location,
                                            self.user_command_string[0],
                                            self.user_command_string[1:])
-                self.state = 'success'
+                self.state = 'succeeded'
                 log.info(f'{self} main: {self.state}')
             except asyncio.CancelledError:
                 raise
@@ -1430,7 +1429,7 @@ class JVM:
     async def create_process(cls, socket_file: str) -> BufferedOutputProcess:
         return await BufferedOutputProcess.create(
             'java',
-            '-Xmx10g',
+            '-Xmx10g',  # FIXME: reduce this somehow
             '-cp',
             f'/jvm-entryway:/jvm-entryway/junixsocket-selftest-2.3.3-jar-with-dependencies.jar:{JVM.SPARK_HOME}/jars/*',
             'is.hail.JVMEntryway',

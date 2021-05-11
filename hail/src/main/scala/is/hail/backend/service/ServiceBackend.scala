@@ -58,12 +58,12 @@ class User(
 class ServiceBackend(
   val revision: String,
   val jarLocation: String,
-  var name: String
+  var name: String,
+  val scratchDir: String = sys.env.get("HAIL_WORKER_SCRATCH_DIR").getOrElse("")
 ) extends Backend {
   import ServiceBackend.log
 
-  private[this] var batchCount = 0
-  private[this] val scratchDir = sys.env.get("HAIL_WORKER_SCRATCH_DIR").getOrElse("")
+  var batchCount = 0
   private[this] val users = new ConcurrentHashMap[String, User]()
 
   def addUser(username: String, key: String): Unit = synchronized {
@@ -147,7 +147,7 @@ class ServiceBackend(
         "billing_project" -> JString(backendContext.billingProject),
         "n_jobs" -> JInt(n),
         "token" -> JString(token),
-        "name" -> JString(name + "_" + batchCount)),
+        "attributes" -> JObject("name" -> JString(name + "_" + batchCount))),
       jobs)
     batchCount += 1
     implicit val formats: Formats = DefaultFormats
@@ -688,9 +688,10 @@ object ServiceBackendSocketAPI2 {
       assert(backend.revision == revision, (backend.revision, revision))
       assert(backend.jarLocation == jarLocation, (backend.jarLocation, jarLocation))
       backend.name = name
+      backend.batchCount = 0
       backend
     } else {
-      val backend = new ServiceBackend(revision, jarLocation, name)
+      val backend = new ServiceBackend(revision, jarLocation, name, scratchDir)
       HailContext(backend, "hail.log", false, false, 50, skipLoggingConfiguration = true, 3)
       backend
     }
@@ -699,9 +700,14 @@ object ServiceBackendSocketAPI2 {
         new GoogleStorageFS(IOUtils.toString(is, Charset.defaultCharset().toString())).asCacheable()
       }
     }
+
     val deployConfig = DeployConfig.fromConfigFile(
       s"$scratchDir/deploy-config/deploy-config.json")
+    DeployConfig.set(deployConfig)
     val userTokens = Tokens.fromFile(s"$scratchDir/user-tokens/tokens.json")
+    Tokens.set(userTokens)
+    tls.setSSLConfigFromDir(s"$scratchDir/ssl-config")
+
     val sessionId = userTokens.namespaceToken(deployConfig.defaultNamespace)
     using(fs.openNoCompression(input)) { in =>
       using(fs.createNoCompression(output)) { out =>

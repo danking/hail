@@ -398,7 +398,7 @@ object HailContext {
 }
 
 class HailContext private(
-  val backend: Backend,
+  @volatile val backend: Backend,
   val logFile: String,
   val branchingFactor: Int,
   val optimizerIterations: Int) {
