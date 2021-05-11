@@ -14,15 +14,19 @@ object Tokens {
   def get: Tokens = {
     val file = getTokensFile()
     if (new File(file).isFile) {
-      using(new FileInputStream(file)) { is =>
-        implicit val formats: Formats = DefaultFormats
-        val tokens = JsonMethods.parse(is).extract[Map[String, String]]
-        log.info(s"tokens found for namespaces {${ tokens.keys.mkString(", ") }}")
-        new Tokens(tokens)
-      }
+      fromFile(file)
     } else {
       log.info(s"tokens file not found: $file")
       new Tokens(Map())
+    }
+  }
+
+  def fromFile(file: String): Tokens = {
+    using(new FileInputStream(file)) { is =>
+      implicit val formats: Formats = DefaultFormats
+      val tokens = JsonMethods.parse(is).extract[Map[String, String]]
+      log.info(s"tokens found for namespaces {${ tokens.keys.mkString(", ") }}")
+      new Tokens(tokens)
     }
   }
 

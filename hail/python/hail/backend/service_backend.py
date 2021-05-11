@@ -140,7 +140,6 @@ class ServiceBackend(Backend):
         self._fs = GoogleCloudStorageFS()
         tokens = get_tokens()
         deploy_config = deploy_config or get_deploy_config()
-        self.session_id = tokens.namespace_token_or_error(deploy_config.service_ns('batch'))
         self.bc = hb.BatchClient(self.billing_project)
         self.async_bc = self.bc._async_client
         self.disable_progress_bar = disable_progress_bar
@@ -178,7 +177,6 @@ class ServiceBackend(Backend):
             with self.fs.open(dir + '/in', 'wb') as infile:
                 write_int(infile, ServiceBackend.EXECUTE)
                 write_str(infile, tmp_dir())
-                write_str(infile, self.session_id)
                 write_str(infile, self.billing_project)
                 write_str(infile, self.bucket)
                 write_str(infile, self.render(ir))

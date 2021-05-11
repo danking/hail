@@ -61,7 +61,13 @@ class Pool(InstanceCollection):
         await super().async_init()
 
         async for record in self.db.select_and_fetchall(
-            'SELECT * FROM instances WHERE removed = 0 AND inst_coll = %s;', (self.name,)
+                '''
+SELECT instances.*, instances_free_cores_mcpu.free_cores_mcpu
+FROM instances
+INNER JOIN instances_free_cores_mcpu
+ON instances.name = instances_free_cores_mcpu.name
+WHERE removed = 0 AND inst_coll = %s;
+''', (self.name,)
         ):
             instance = Instance.from_record(self.app, self, record)
             self.add_instance(instance)

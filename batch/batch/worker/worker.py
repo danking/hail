@@ -1,7 +1,5 @@
-from typing import Optional, Dict, Callable, List
+from typing import Optional, Dict, Callable, List, Iterator
 import os
-import ctypes
-import ctypes.util
 import json
 import sys
 import re
@@ -19,6 +17,7 @@ from aiohttp import web
 import struct
 import async_timeout
 import concurrent
+from contextlib import ExitStack, contextmanager
 import aiodocker
 from collections import defaultdict
 from aiodocker.exceptions import DockerError
@@ -27,6 +26,7 @@ from hailtop.utils import (
     time_msecs,
     request_retry_transient_errors,
     sleep_and_backoff,
+    TransientError,
     retry_all_errors,
     check_shell,
     CalledProcessError,
@@ -42,7 +42,6 @@ from hailtop.batch_client.parse import parse_cpu_in_mcpu, parse_memory_in_bytes,
 from hailtop.batch.hail_genetics_images import HAIL_GENETICS_IMAGES
 from hailtop import aiotools
 from hailtop.aiotools.fs import RouterAsyncFS, LocalAsyncFS
-from hailtop.utils import retry_transient_errors, TransientError
 import hailtop.aiogoogle as aiogoogle
 
 # import uvloop
@@ -602,7 +601,7 @@ class Container:
 
 
 def populate_secret_host_path(host_path, secret_data):
-    os.makedirs(host_path)
+    os.makedirs(host_path, exist_ok=True)
     if secret_data is not None:
         for filename, data in secret_data.items():
             with open(f'{host_path}/{filename}', 'wb') as f:
@@ -1112,11 +1111,6 @@ class DockerJob(Job):
 
 
 class JVMJob(Job):
-    stack_size = 512 * 1024
-
-    def secret_host_path(self, secret):
-        return f'{self.scratch}/{secret["mount_path"][1:]}'
-
     def __init__(
         self,
         batch_id: int,
@@ -1131,6 +1125,7 @@ class JVMJob(Job):
         assert job_spec['process']['type'] == 'jvm'
         assert worker is not None
 
+        print(batch_id, user)
         self.jvm = worker.jvms.pop()
         self.scratch = self.jvm.root_dir
 
@@ -1139,23 +1134,23 @@ class JVMJob(Job):
         if input_files or output_files:
             raise Exception("i/o not supported")
 
-        assert not self.env
+        assert self.env == [{'name': 'GOOGLE_APPLICATION_CREDENTIALS', 'value': '/gsa-key/key.json'}], str(self.env)
 
-        user_command_string = job_spec['process']['command']
-        assert len(user_command_string) >= 3, user_command_string
-        self.revision = user_command_string[1]
-        self.jar_url = user_command_string[2]
+        self.user_command_string = job_spec['process']['command']
+        assert len(self.user_command_string) >= 3, self.user_command_string
+        self.revision = self.user_command_string[1]
+        self.jar_url = self.user_command_string[2]
 
         self.deleted = False
         self.timings = Timings(lambda: self.deleted)
         self.state = 'pending'
-        self.logbuffer = bytearray()
-
+        self.log: Optional[str] = None
 
     def step(self, name):
         return self.timings.step(name)
 
     async def run(self, worker):
+        assert self.jvm is not None
         async with worker.cpu_sem(self.cpu_in_mcpu):
             self.start_time = time_msecs()
 
@@ -1182,11 +1177,12 @@ class JVMJob(Job):
 
                 if self.secrets:
                     for secret in self.secrets:
-                        populate_secret_host_path(self.secret_host_path(secret), secret['data'])
+                        populate_secret_host_path(self.scratch + '/' + secret["mount_path"][1:],
+                                                  secret['data'])
 
-                populate_secret_host_path(self.gsa_key_file_path(), self.gsa_key)
                 self.state = 'running'
 
+                local_jar_location = f'/hail-jars/{self.revision}.jar'
                 log.info(f'{self}: downloading JAR')
                 with self.step('downloading_jar'):
                     async with worker.jar_download_locks[self.revision]:
@@ -1202,7 +1198,6 @@ class JVMJob(Job):
                                 ],
                             )
                             async with await user_fs.open(self.jar_url) as jar_data:
-                                await user_fs.makedirs('/hail-jars/', exist_ok=True)
                                 async with await user_fs.create(local_jar_location) as local_file:
                                     while True:
                                         b = await jar_data.read(256 * 1024)
@@ -1213,12 +1208,10 @@ class JVMJob(Job):
 
                 log.info(f'{self}: running jvm process')
                 with self.step('running'):
-                    await self.jvm.execute(self.command_string, output=self.logbuffer)
-                log.info(f'finished {self}')
-
-                await worker.log_store.write_log_file(
-                    self.format_version, self.batch_id, self.job_id, self.attempt_id, 'main', self.logbuffer.decode()
-                )
+                    await self.jvm.execute(local_jar_location,
+                                           self.user_command_string[0],
+                                           self.user_command_string[1:])
+                self.state = 'success'
                 log.info(f'{self} main: {self.state}')
             except asyncio.CancelledError:
                 raise
@@ -1231,8 +1224,16 @@ class JVMJob(Job):
             await self.cleanup()
 
     async def cleanup(self):
-        worker.jvms.append(self.jvm)
-        del self.jvm
+        if self.jvm is not None:
+            self.log = self.jvm.retrieve_and_clear_output()
+            worker.jvms.append(self.jvm)
+            self.jvm = None
+
+        if self.log is not None:
+            await worker.log_store.write_log_file(
+                self.format_version, self.batch_id, self.job_id, self.attempt_id, 'main', self.log
+            )
+
         self.end_time = time_msecs()
 
         if not self.deleted:
@@ -1250,21 +1251,23 @@ class JVMJob(Job):
 
             async with Flock('/xfsquota/projects', pool=worker.pool):
                 await check_shell(f"sed -i '/{self.project_id}:/d' /xfsquota/projects")
-
-            await blocking_to_async(self.pool, shutil.rmtree, self.scratch, ignore_errors=True)
         except asyncio.CancelledError:
             raise
         except Exception:
             log.exception('while deleting volumes')
 
     async def get_log(self):
-        return {'main': self.logbuffer.decode()}
+        if self.log is not None:
+            return {'main': self.log}
+        return {'main': self.jvm.output()}
 
     async def delete(self):
         log.info(f'deleting {self}')
         self.deleted = True
-        if self.process is not None and self.process.returncode is None:
-            self.process.kill()
+        log.info(f'{self.jvm}')
+        if self.jvm is not None:
+            log.info('interrupting')
+            self.jvm.interrupt()
 
     # {
     #   version: int,
@@ -1285,8 +1288,6 @@ class JVMJob(Job):
         status = await super().status()
         status['container_statuses'] = dict()
         status['container_statuses']['main'] = {'name': 'main', 'state': self.state, 'timing': self.timings.to_dict()}
-        if self.process is not None and self.process.returncode is not None:
-            status['container_statuses']['main']['exit_code'] = self.process.returncode
         return status
 
     def __str__(self):
@@ -1294,11 +1295,11 @@ class JVMJob(Job):
 
 
 def write_int(writer: asyncio.StreamWriter, v: int):
-    writer.write(struct.pack('<i', v))
+    writer.write(struct.pack('>i', v))
 
 
 def write_long(writer: asyncio.StreamWriter, v: int):
-    writer.write(struct.pack('<q', v))
+    writer.write(struct.pack('>q', v))
 
 
 def write_bytes(writer: asyncio.StreamWriter, b: bytes):
@@ -1338,12 +1339,12 @@ async def read_bool(reader: asyncio.StreamReader) -> bool:
 
 async def read_int(reader: asyncio.StreamReader) -> int:
     b = await read(reader, 4)
-    return struct.unpack('<i', b)[0]
+    return struct.unpack('>i', b)[0]
 
 
 async def read_long(reader: asyncio.StreamReader) -> int:
     b = await read(reader, 8)
-    return struct.unpack('<q', b)[0]
+    return struct.unpack('>q', b)[0]
 
 
 async def read_bytes(reader: asyncio.StreamReader) -> bytes:
@@ -1356,87 +1357,192 @@ async def read_str(reader: asyncio.StreamReader) -> str:
     return b.decode('utf-8')
 
 
-libc = ctypes.CDLL(ctypes.util.find_library('c'), use_errno=True)
-libc.mount.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_ulong, ctypes.c_char_p)
+@contextmanager
+def scoped_ensure_future(coro_or_future, *, loop=None) -> Iterator[asyncio.Future]:
+    fut = asyncio.ensure_future(coro_or_future, loop=loop)
+    try:
+        yield fut
+    finally:
+        fut.cancel()
 
 
-def mount(source, target, fs, options=''):
-    ret = libc.mount(source.encode(), target.encode(), fs.encode(), 0, options.encode())
-    if ret < 0:
-        errno = ctypes.get_errno()
-        raise OSError(errno, f"Error mounting {source} ({fs}) on {target} with options '{options}': {os.strerror(errno)}")
+class BufferedOutputProcess:
+    @classmethod
+    async def create(cls, *args, **kwargs):
+        assert 'stdout' not in kwargs
+        assert 'stderr' not in kwargs
+
+        process: asyncio.subprocess.Process = await asyncio.create_subprocess_exec(
+            *args,
+            **kwargs,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stop_event = asyncio.Event()
+        return cls(process, stop_event)
+
+    def __init__(self,
+                 process: asyncio.subprocess.Process,
+                 stop_event: asyncio.Event):
+        self.process = process
+        self.stop_event = stop_event
+        self.buf = bytearray()
+        assert process.stdout is not None
+        self.stdout_pump = asyncio.ensure_future(self.pump_to_buffer(process.stdout))
+        assert process.stderr is not None
+        self.stderr_pump = asyncio.ensure_future(self.pump_to_buffer(process.stderr))
+
+    async def pump_to_buffer(self, strm: asyncio.StreamReader):
+        with scoped_ensure_future(self.stop_event.wait()) as stop_fut:
+            while not strm.at_eof() and not self.stop_event.is_set():
+                with scoped_ensure_future(strm.readline()) as read_fut:
+                    await asyncio.wait([read_fut, stop_fut], return_when=asyncio.FIRST_COMPLETED)
+                    if read_fut.done():
+                        result = read_fut.result()
+                        self.buf.extend(result)
+
+
+    def output(self) -> str:
+        return self.buf.decode()
+
+    def retrieve_and_clear_output(self) -> str:
+        buf = self.buf.decode()
+        self.buf = bytearray()
+        return buf
+
+    def kill(self):
+        return self.process.kill()
+
+    @property
+    def returncode(self) -> Optional[int]:
+        return self.process.returncode
+
+    def close(self):
+        self.kill()
+        self.stdout_pump.cancel()
+        self.stderrr_pump.cancel()
 
 
 class JVM:
-    def __init__(self):
-        self.process: Optional[asyncio.Process] = None
+    SPARK_HOME = find_spark_home()
+
+    @classmethod
+    async def create_process(cls, socket_file: str) -> BufferedOutputProcess:
+        return await BufferedOutputProcess.create(
+            'java',
+            '-Xmx10g',
+            '-cp',
+            f'/jvm-entryway:/jvm-entryway/junixsocket-selftest-2.3.3-jar-with-dependencies.jar:{JVM.SPARK_HOME}/jars/*',
+            'is.hail.JVMEntryway',
+            socket_file)
+
+    @classmethod
+    async def create(cls, index: int):
+        assert worker is not None
+
         token = uuid.uuid4().hex
-        self.socket_file = '/socket-' + token
-        self.root_dir = '/root-' + token
-        await blocking_to_async(worker.pool, os.mkdir, self.root_dir)
-        await blocking_to_async(worker.pool, mount, '/jvm-entryway', self.root_dir + '/jvm-entryway', 'none', 'bind,ro')
-        await blocking_to_async(worker.pool, mount, '/hail-jars', self.root_dir + '/hail-jars', 'none', 'bind,ro')
-        await blocking_to_async(worker.pool, mount, find_spark_home(), self.root_dir + '/spark', 'none', 'bind,ro')
+        socket_file = '/socket-' + token
+        root_dir = '/root-' + token
+        output_file = root_dir + '/output'
+        should_interrupt = asyncio.Event()
+        await blocking_to_async(worker.pool, os.mkdir, root_dir)
+        process = await cls.create_process(socket_file)
+        return cls(index, socket_file, root_dir, output_file, should_interrupt, process)
+
+    def __init__(self,
+                 index: int,
+                 socket_file: str,
+                 root_dir: str,
+                 output_file: str,
+                 should_interrupt: asyncio.Event,
+                 process: BufferedOutputProcess):
+        self.index = index
+        self.socket_file = socket_file
+        self.root_dir = root_dir
+        self.output_File = output_file
+        self.should_interrupt = should_interrupt
+        self.process = process
+
+    def __str__(self):
+        return f'JVM-{self.index}'
+
+    def __repr__(self):
+        return f'JVM-{self.index}'
+
+    def interrupt(self):
+        self.should_interrupt.set()
 
     def kill(self):
         if self.process is not None:
             self.process.kill()
 
-    async def execute(self, command_string: List[str], *, output: bytearray):
+    def output(self) -> str:
+        return self.process.output()
+
+    def retrieve_and_clear_output(self) -> str:
+        return self.process.retrieve_and_clear_output()
+
+    async def execute(self, classpath: str, mainclass: str, command_string: List[str]):
         assert worker is not None
-        if self.process is None or self.process.returncode is None:
-            if self.process is not None:
-                stdout, stderr = self.process.communicate()
-                log.info('process exited unexpectedly between jobs',
-                         stderr=stderr,
-                         stdout=stdout)
-            self.process = await asyncio.create_subprocess_exec(
-                'chroot',
+
+        log.info(f'{self}: execute')
+        if self.process.returncode is not None:
+            log.warning('{self}: unexpected exit between jobs', extra=dict(output=self.process.output()))
+            os.remove(self.socket_file)
+            self.process = await self.create_process(self.socket_file)
+
+        interim_output = self.process.retrieve_and_clear_output()
+        if len(interim_output) > 0:
+            log.warning(f'{self}: unexpected output between jobs: {interim_output}')
+
+        with ExitStack() as stack:
+            reader: asyncio.StreamReader
+            writer: asyncio.StreamWriter
+            while True:
+                try:
+                    reader, writer = await asyncio.open_unix_connection(self.socket_file)
+                    break
+                except FileNotFoundError:
+                    await asyncio.sleep(0.25)
+                    pass
+            stack.callback(writer.close)
+            log.info(f'{self}: connection acquired')
+
+            command_string = [
+                classpath,
+                mainclass,
                 self.root_dir,
-                'java',
-                '-Xmx3750M',
-                '-cp',
-                '/jvm-entryway/JVMEntryway.class:/jvm-entryway/junixsocket-selftest-2.3.3-jar-with-dependencies.jar:/spark/jars/*',
-                'is.hail.JVMEntryway',
-                self.socket_file,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+                *command_string]
 
-        reader: asyncio.StreamReader
-        writer: asyncio.StreamWriter
-        reader, writer = await retry_transient_errors(
-            asyncio.open_unix_connection, self.socket_file)
-        write_int(writer, len(command_string))
-        for arg in command_string:
-            assert isinstance(arg, str)
-            write_str(writer, arg)
+            write_int(writer, len(command_string))
+            for arg in command_string:
+                assert isinstance(arg, str)
+                write_str(writer, arg)
+            await writer.drain()
 
-        stop_event = asyncio.Event()
-        wait_for_stop = asyncio.ensure_future(stop_event.wait())
+            wait_for_process = asyncio.ensure_future(read_bool(reader))
+            stack.callback(wait_for_process.cancel)
+            wait_for_interrupt = asyncio.ensure_future(self.should_interrupt.wait())
+            stack.callback(wait_for_interrupt.cancel)
 
-        async def pipe_to_log(strm: asyncio.StreamReader):
-            while not strm.at_eof() and not wait_for_stop.done():
-                read_fut: asyncio.Future = asyncio.ensure_future(strm.readline())
-                await asyncio.wait([read_fut, wait_for_stop], return_when=asyncio.FIRST_COMPLETED)
-                if read_fut.done():
-                    output.extend(read_fut.result())
+            await asyncio.wait([wait_for_process, wait_for_interrupt], return_when=asyncio.FIRST_COMPLETED)
 
-        stdout_fut = asyncio.ensure_future(pipe_to_log(self.process.stdout))
-        stderr_fut = asyncio.ensure_future(pipe_to_log(self.process.stderr))
-        await writer.drain()
-        writer.close()
-        is_success = await read_bool(reader)
-        stop_event.set()
-        await stdout_fut
-        await stderr_fut
-        for entry in os.listdir(self.root_dir):
-            if entry not in ('hail-jars', 'jvm-entryway', 'spark'):
-                await blocking_to_async(worker.pool, shutil.rmtree, self.root_dir + '/' + entry)
+            for entry in os.listdir(self.root_dir):
+                if entry not in ('hail-jars', 'jvm-entryway', 'spark'):
+                    await blocking_to_async(worker.pool, shutil.rmtree, self.root_dir + '/' + entry)
 
-        if not is_success:
-            exception = await read_str(reader)
-            raise ValueError(exception)
+            if wait_for_interrupt.done():
+                write_int(writer, 0)
+                await writer.drain()
+                assert read_int(reader) == 0
+                return
+
+            assert wait_for_process.done()
+            is_success = wait_for_process.result()
+            if not is_success:
+                exception = await read_str(reader)
+                raise ValueError(exception)
+            return
 
 
 class Worker:
@@ -1449,8 +1555,8 @@ class Worker:
         self.jobs = {}
         self.stop_event = asyncio.Event()
         self.task_manager = aiotools.BackgroundTaskManager()
+        os.mkdir('/hail-jars/')
         self.jar_download_locks = defaultdict(asyncio.Lock)
-        self.jvms = [JVM() for _ in range(CORES)]
 
         # filled in during activation
         self.log_store = None
@@ -1573,8 +1679,12 @@ class Worker:
                 web.get('/healthcheck', self.healthcheck),
             ]
         )
+
         try:
-            await asyncio.wait_for(self.activate(), MAX_IDLE_TIME_MSECS / 1000)
+            _, jvms = await asyncio.gather(
+                asyncio.wait_for(self.activate(), MAX_IDLE_TIME_MSECS / 1000),
+                asyncio.gather(*[JVM.create(i) for i in range(CORES)]))
+            self.jvms = jvms
         except asyncio.TimeoutError:
             log.exception(f'could not activate after trying for {MAX_IDLE_TIME_MSECS} ms, exiting')
             return
@@ -1777,7 +1887,7 @@ async def async_main():
             asyncio.get_event_loop().set_debug(True)
             log.debug('Tasks immediately after docker close')
             dump_all_stacktraces()
-            other_tasks = [t for t in asyncio.tasks() if t != asyncio.current_task()]
+            other_tasks = [t for t in asyncio.all_tasks() if t != asyncio.current_task()]
             if other_tasks:
                 _, pending = await asyncio.wait(other_tasks, timeout=10 * 60, return_when=asyncio.ALL_COMPLETED)
                 for t in pending:

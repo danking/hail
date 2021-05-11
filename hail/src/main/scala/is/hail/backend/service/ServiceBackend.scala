@@ -56,9 +56,9 @@ class User(
   val fs: GoogleStorageFS)
 
 class ServiceBackend(
-  private[this] val revision: String,
-  private[this] val jarLocation: String,
-  private[this] val name: String
+  val revision: String,
+  val jarLocation: String,
+  var name: String
 ) extends Backend {
   import ServiceBackend.log
 
@@ -674,18 +674,38 @@ class ServiceBackendSocketAPI(backend: ServiceBackend, socket: Socket) extends T
 
 object ServiceBackendSocketAPI2 {
   def main(argv: Array[String]): Unit = {
-    val backend = new ServiceBackend(argv(0), argv(1), argv(2))
-    assert(argv.length == 5, argv.toFastIndexedSeq)
-    HailContext(backend, "hail.log", false, false, 50, skipLoggingConfiguration = true, 3)
-    val scratchDir = sys.env.get("HAIL_WORKER_SCRATCH_DIR").getOrElse("")
+    assert(argv.length == 6, argv.toFastIndexedSeq)
+
+    val scratchDir = argv(0)
+    val revision = argv(1)
+    val jarLocation = argv(2)
+    val name = argv(3)
+    val input = argv(4)
+    val output = argv(5)
+
+    val backend = if (HailContext.isInitialized) {
+      val backend = HailContext.backend.asInstanceOf[ServiceBackend]
+      assert(backend.revision == revision, (backend.revision, revision))
+      assert(backend.jarLocation == jarLocation, (backend.jarLocation, jarLocation))
+      backend.name = name
+      backend
+    } else {
+      val backend = new ServiceBackend(revision, jarLocation, name)
+      HailContext(backend, "hail.log", false, false, 50, skipLoggingConfiguration = true, 3)
+      backend
+    }
     val fs = retryTransientErrors {
       using(new FileInputStream(s"$scratchDir/gsa-key/key.json")) { is =>
         new GoogleStorageFS(IOUtils.toString(is, Charset.defaultCharset().toString())).asCacheable()
       }
     }
-    using(fs.openNoCompression(argv(2))) { in =>
-      using(fs.createNoCompression(argv(3))) { out =>
-        new ServiceBackendSocketAPI2(backend, in, out).executeOneCommand()
+    val deployConfig = DeployConfig.fromConfigFile(
+      s"$scratchDir/deploy-config/deploy-config.json")
+    val userTokens = Tokens.fromFile(s"$scratchDir/user-tokens/tokens.json")
+    val sessionId = userTokens.namespaceToken(deployConfig.defaultNamespace)
+    using(fs.openNoCompression(input)) { in =>
+      using(fs.createNoCompression(output)) { out =>
+        new ServiceBackendSocketAPI2(backend, in, out, sessionId).executeOneCommand()
         out.flush()
       }
     }
@@ -695,7 +715,8 @@ object ServiceBackendSocketAPI2 {
 class ServiceBackendSocketAPI2(
   private[this] val backend: ServiceBackend,
   private[this] val in: InputStream,
-  private[this] val out: OutputStream
+  private[this] val out: OutputStream,
+  private[this] val sessionId: String
 ) extends Thread {
   import ServiceBackendSocketAPI2._
 
@@ -854,7 +875,6 @@ class ServiceBackendSocketAPI2(
 
       case EXECUTE =>
         val tmpdir = readString()
-        val sessionId = readString()
         val billingProject = readString()
         val bucket = readString()
         val code = readString()

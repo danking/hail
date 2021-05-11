@@ -46,14 +46,14 @@ class WorkerTimer() {
 object Worker {
   private[this] val log = Logger.getLogger(getClass.getName())
   private[this] val myRevision = HAIL_REVISION
-  private[this] val scratchDir = sys.env.get("HAIL_WORKER_SCRATCH_DIR").getOrElse("")
 
   def main(args: Array[String]): Unit = {
-    if (args.length != 4) {
-      throw new IllegalArgumentException(s"expected at least four arguments, not: ${ args.length }")
+    if (args.length != 5) {
+      throw new IllegalArgumentException(s"expected five arguments, not: ${ args.length }")
     }
-    val root = args(2)
-    val i = args(3).toInt
+    val scratchDir = args(2)
+    val root = args(3)
+    val i = args(4).toInt
     val timer = new WorkerTimer()
 
     log.info(s"is.hail.backend.service.Worker $myRevision")
