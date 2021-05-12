@@ -37,9 +37,9 @@ async def healthcheck(request):  # pylint: disable=unused-argument
 @monitor_endpoint
 @rest_authenticated_users_only
 async def get_object(request, userdata):
+    filepath = request.query.get('q')
     username = userdata['username']
     log.info(f'memory: get_object: 1: {filepath} from user {username}')
-    filepath = request.query.get('q')
     userinfo = await get_or_add_user(request.app, userdata)
     log.info(f'memory: get_object: 2: {filepath} from user {username}')
     maybe_file = await get_file_or_none(request.app, username, userinfo['fs'], filepath)
