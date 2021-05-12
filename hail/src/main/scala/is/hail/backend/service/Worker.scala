@@ -46,8 +46,10 @@ class WorkerTimer() {
 object Worker {
   private[this] val log = Logger.getLogger(getClass.getName())
   private[this] val myRevision = HAIL_REVISION
+  private[this] implicit val ec = scala.concurrent.ExecutionContext.global
 
   def main(args: Array[String]): Unit = {
+
     if (args.length != 5) {
       throw new IllegalArgumentException(s"expected five arguments, not: ${ args.length }")
     }
@@ -77,14 +79,13 @@ object Worker {
       }
     }
 
-    val fileRetrievalExecutionContext = scala.concurrent.ExecutionContext.global
     val fFuture = Future {
       retryTransientErrors {
         using(new ObjectInputStream(fs.openCachedNoCompression(s"$root/f"))) { is =>
           is.readObject().asInstanceOf[(Array[Byte], HailTaskContext, FS) => Array[Byte]]
         }
       }
-    }(fileRetrievalExecutionContext)
+    }
 
     val contextFuture = Future {
       retryTransientErrors {
@@ -98,9 +99,8 @@ object Worker {
           context
         }
       }
-    }(fileRetrievalExecutionContext)
+    }
 
-    // retryTransientErrors handles timeout and exception throwing logic
     val f = Await.result(fFuture, Duration.Inf)
     val context = Await.result(contextFuture, Duration.Inf)
 

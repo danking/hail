@@ -65,8 +65,9 @@ class ServiceBackend(
 ) extends Backend {
   import ServiceBackend.log
 
-  var batchCount = 0
+  private[this] var batchCount = 0
   private[this] val users = new ConcurrentHashMap[String, User]()
+  private[this] implicit val ec = scalaConcurrent.ExecutionContext.global
 
   def addUser(username: String, key: String): Unit = synchronized {
     val previous = users.put(username, new User(username, "/tmp", new GoogleStorageFS(key)))
@@ -86,6 +87,7 @@ class ServiceBackend(
   }
 
   def parallelizeAndComputeWithIndex(_backendContext: BackendContext, collection: Array[Array[Byte]], dependency: Option[TableStageDependency] = None)(f: (Array[Byte], HailTaskContext, FS) => Array[Byte]): Array[Array[Byte]] = {
+
     val backendContext = _backendContext.asInstanceOf[ServiceBackendContext]
 
     val fs = backendContext.fs.asCacheable(backendContext.sessionID)
@@ -98,29 +100,38 @@ class ServiceBackend(
 
     val root = s"gs://${ backendContext.bucket }/tmp/hail/query/$token"
 
-    log.info(s"parallelizeAndComputeWithIndex: token $token: writing f")
+    log.info(s"parallelizeAndComputeWithIndex: token $token: writing f and contexts")
 
-    using(new ObjectOutputStream(fs.createCachedNoCompression(s"$root/f"))) { os =>
-      os.writeObject(f)
-    }
-
-    log.info(s"parallelizeAndComputeWithIndex: token $token: writing context offsets")
-
-    using(fs.createCachedNoCompression(s"$root/contexts")) { os =>
-      var o = 12L * n
-      var i = 0
-      while (i < n) {
-        val len = collection(i).length
-        os.writeLong(o)
-        os.writeInt(len)
-        i += 1
-        o += len
-      }
-      log.info(s"parallelizeAndComputeWithIndex: token $token: writing contexts")
-      collection.foreach { context =>
-        os.write(context)
+    val uploadFunction = scalaConcurrent.Future {
+      retryTransientErrors {
+        using(new ObjectOutputStream(fs.createCachedNoCompression(s"$root/f"))) { os =>
+          os.writeObject(f)
+        }
       }
     }
+
+    val uploadContexts = scalaConcurrent.Future {
+      retryTransientErrors {
+        using(fs.createCachedNoCompression(s"$root/contexts")) { os =>
+          var o = 12L * n
+          var i = 0
+          while (i < n) {
+            val len = collection(i).length
+            os.writeLong(o)
+            os.writeInt(len)
+            i += 1
+            o += len
+          }
+          log.info(s"parallelizeAndComputeWithIndex: token $token: writing contexts")
+          collection.foreach { context =>
+            os.write(context)
+          }
+        }
+      }
+    }
+
+    scalaConcurrent.Await.result(uploadFunction, scalaConcurrent.duration.Duration.Inf)
+    scalaConcurrent.Await.result(uploadContexts, scalaConcurrent.duration.Duration.Inf)
 
     val jobs = new Array[JObject](n)
     var i = 0
@@ -160,7 +171,6 @@ class ServiceBackend(
 
     log.info(s"parallelizeAndComputeWithIndex: token $token: reading results")
 
-    implicit val ec = scalaConcurrent.ExecutionContext.global
     val r = new Array[Array[Byte]](n)
 
     def readResult(i: Int): scalaConcurrent.Future[Unit] = scalaConcurrent.Future {
