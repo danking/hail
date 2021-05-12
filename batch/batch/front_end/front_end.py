@@ -596,13 +596,16 @@ def check_service_account_permissions(user, sa):
 @routes.post('/api/v1alpha/batches/{batch_id}/jobs/create')
 @monitor_endpoint
 @rest_authenticated_users_only
-async def create_jobs(request, userdata):
+async def create_jobs(request: aiohttp.web.Request, userdata):
     app = request.app
+    batch_id = int(request.match_info['batch_id'])
+    job_specs = await request.json()
+    return await _create_jobs(userdata, job_specs, batch_id, app)
+
+
+async def _create_jobs(userdata: dict, job_specs: dict, batch_id: int, app: aiohttp.web.Application):
     db: Database = app['db']
     log_store: LogStore = app['log_store']
-
-    batch_id = int(request.match_info['batch_id'])
-
     user = userdata['username']
 
     # restrict to what's necessary; in particular, drop the session
@@ -628,9 +631,6 @@ WHERE user = %s AND id = %s AND NOT deleted;
         if record['state'] != 'open':
             raise web.HTTPBadRequest(reason=f'batch {batch_id} is not open')
         batch_format_version = BatchFormatVersion(record['format_version'])
-
-        async with timer.step('get request json'):
-            job_specs = await request.json()
 
         async with timer.step('validate job_specs'):
             try:
@@ -699,7 +699,7 @@ WHERE user = %s AND id = %s AND NOT deleted;
                     del resources['cpu']
                     req_cores_mcpu = parse_cpu_in_mcpu(resources['req_cpu'])
 
-                    if not is_valid_cores_mcpu(req_cores_mcpu):
+                    if req_cores_mcpu is None or not is_valid_cores_mcpu(req_cores_mcpu):
                         raise web.HTTPBadRequest(
                             reason=f'bad resource request for job {id}: '
                             f'cpu must be a power of two with a min of 0.25; '
@@ -968,8 +968,24 @@ VALUES (%s, %s, %s);
                     f'jobs_args={json.dumps(jobs_args)}'
                     f'job_parents_args={json.dumps(job_parents_args)}'
                 ) from err
+
     return web.Response()
 
+
+@routes.post('/api/v1alpha/batches/create-fast')
+@monitor_endpoint
+@rest_authenticated_users_only
+async def create_batch_fast(request, userdata):
+    app = request.app
+    db: Database = app['db']
+    user = userdata['username']
+    batch_and_bunch = await request.json()
+    batch_spec = batch_and_bunch['batch']
+    bunch = batch_and_bunch['bunch']
+    batch_id = await _create_batch(batch_spec, userdata, db)
+    await _create_jobs(userdata, bunch, batch_id, app)
+    await _close_batch(app, batch_id, user, db)
+    return web.json_response({'id': batch_id})
 
 @routes.post('/api/v1alpha/batches/create')
 @monitor_endpoint
@@ -979,7 +995,10 @@ async def create_batch(request, userdata):
     db: Database = app['db']
 
     batch_spec = await request.json()
+    id = await _create_batch(batch_spec, userdata, db)
+    return web.json_response({'id': id})
 
+async def _create_batch(batch_spec: dict, userdata: dict, db: Database):
     try:
         validate_batch(batch_spec)
     except ValidationError as e:
@@ -1070,8 +1089,7 @@ VALUES (%s, %s, %s)
             )
         return id
 
-    id = await insert()  # pylint: disable=no-value-for-parameter
-    return web.json_response({'id': id})
+    return await insert()  # pylint: disable=no-value-for-parameter
 
 
 async def _get_batch(app, batch_id):
@@ -1159,6 +1177,10 @@ WHERE user = %s AND id = %s AND NOT deleted;
     if not record:
         raise web.HTTPNotFound()
 
+    return await _close_batch(app, batch_id, user, db)
+
+
+async def _close_batch(app: aiohttp.web.Application, batch_id: int, user: str, db: Database):
     try:
         now = time_msecs()
         await check_call_procedure(db, 'CALL close_batch(%s, %s);', (batch_id, now))

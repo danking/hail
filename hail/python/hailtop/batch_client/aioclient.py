@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import math
 import random
 import logging
@@ -516,7 +516,27 @@ class BatchBuilder:
         self._jobs.append(j)
         return j
 
-    async def _submit_jobs(self, batch_id, byte_job_specs, n_jobs, pbar):
+    async def _fast_create(self, byte_job_specs: List[bytes], n_jobs: int, pbar) -> Batch:
+        assert n_jobs == len(self._job_specs)
+        b = bytearray()
+        b.extend(b'{"bunch":')
+        b.append(ord('['))
+        for i, spec in enumerate(byte_job_specs):
+            if i > 0:
+                b.append(ord(','))
+            b.extend(spec)
+        b.append(ord(']'))
+        b.extend(b',"batch":')
+        b.extend(self._batch_spec().encode('utf-8'))
+        b.append(ord('}'))
+        batch_json = await self._client._post(
+            '/api/v1alpha/batches/batches/create-fast',
+            data=aiohttp.BytesPayload(b, content_type='application/json', encoding='utf-8'),
+        )
+        pbar.update(n_jobs)
+        return Batch(self._client, batch_json['id'], self.attributes, n_jobs, self.token)
+
+    async def _submit_jobs(self, batch_id: Optional[int], byte_job_specs: List[bytes], n_jobs: int, pbar):
         assert len(byte_job_specs) > 0, byte_job_specs
 
         b = bytearray()
@@ -538,7 +558,7 @@ class BatchBuilder:
         )
         pbar.update(n_jobs)
 
-    async def _create(self):
+    def _batch_spec(self):
         n_jobs = len(self._job_specs)
         batch_spec = {'billing_project': self._client.billing_project, 'n_jobs': n_jobs, 'token': self.token}
         if self.attributes:
@@ -547,8 +567,12 @@ class BatchBuilder:
             batch_spec['callback'] = self.callback
         if self._cancel_after_n_failures is not None:
             batch_spec['cancel_after_n_failures'] = self._cancel_after_n_failures
+        return batch_spec
+
+    async def _create(self):
+        batch_spec = self._batch_spec()
         batch_json = await (await self._client._post('/api/v1alpha/batches/create', json=batch_spec)).json()
-        return Batch(self._client, batch_json['id'], self.attributes, n_jobs, self.token)
+        return Batch(self._client, batch_json['id'], self.attributes, batch_spec['n_jobs'], self.token)
 
     MAX_BUNCH_BYTESIZE = 1024 * 1024
     MAX_BUNCH_SIZE = 1024
@@ -563,9 +587,6 @@ class BatchBuilder:
         assert max_bunch_size > 0
         if self._submitted:
             raise ValueError("cannot submit an already submitted batch")
-        batch = await self._create()
-        id = batch.id
-        log.info(f'created batch {id}')
         byte_job_specs = [json.dumps(job_spec).encode('utf-8') for job_spec in self._job_specs]
         byte_job_specs_bunches = []
         bunch_sizes = []
@@ -593,16 +614,22 @@ class BatchBuilder:
             bunch_sizes.append(bunch_n_jobs)
 
         with tqdm(total=len(self._job_specs), disable=disable_progress_bar, desc='jobs submitted to queue') as pbar:
-            await bounded_gather(
-                *[
-                    functools.partial(self._submit_jobs, id, bunch, size, pbar)
-                    for bunch, size in zip(byte_job_specs_bunches, bunch_sizes)
-                ],
-                parallelism=6,
-            )
+            if len(byte_job_specs_bunches) == 1:
+                batch = await self._submit_jobs(None, byte_job_specs_bunches[0], bunch_sizes[0], pbar)
+                id = batch.id
+            else:
+                batch = await self._create()
+                id = batch.id
+                with tqdm(total=len(self._job_specs), disable=disable_progress_bar, desc='jobs submitted to queue') as pbar:
+                    await bounded_gather(
+                        *[functools.partial(self._submit_jobs, id, bunch, size, pbar)
+                          for bunch, size in zip(byte_job_specs_bunches, bunch_sizes)
+                          ],
+                        parallelism=6,
+                )
+                await self._client._patch(f'/api/v1alpha/batches/{id}/close')
 
-        await self._client._patch(f'/api/v1alpha/batches/{id}/close')
-        log.info(f'closed batch {id}')
+        log.info(f'created batch {id}')
 
         for j in self._jobs:
             j._job = j._job._submit(batch)

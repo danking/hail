@@ -1125,7 +1125,6 @@ class JVMJob(Job):
         assert job_spec['process']['type'] == 'jvm'
         assert worker is not None
 
-        print(batch_id, user)
         self.jvm = worker.jvms.pop()
         self.scratch = self.jvm.root_dir
 
