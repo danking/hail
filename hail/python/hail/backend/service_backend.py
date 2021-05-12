@@ -198,7 +198,7 @@ class ServiceBackend(Backend):
             b = await bb.submit(disable_progress_bar=self.disable_progress_bar)
             status = await b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
-                raise ValueError(f'batch failed {status} {j.log()}')
+                raise ValueError(f'batch failed {status} {await j.log()}')
 
 
             with self.fs.open(dir + '/out', 'rb') as outfile:
@@ -248,7 +248,7 @@ class ServiceBackend(Backend):
             b = bb.submit(disable_progress_bar=self.disable_progress_bar)
             status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
-                raise ValueError(f'batch failed {status} {j.log()}')
+                raise ValueError(f'batch failed {status} {await j.log()}')
 
 
             with self.fs.open(dir + '/out', 'rb') as outfile:
@@ -287,7 +287,7 @@ class ServiceBackend(Backend):
             b = bb.submit(disable_progress_bar=self.disable_progress_bar)
             status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
-                raise ValueError(f'batch failed {status} {j.log()}')
+                raise ValueError(f'batch failed {status} {await j.log()}')
 
 
             with self.fs.open(dir + '/out', 'rb') as outfile:
@@ -326,7 +326,7 @@ class ServiceBackend(Backend):
             b = bb.submit(disable_progress_bar=self.disable_progress_bar)
             status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
-                raise ValueError(f'batch failed {status} {j.log()}')
+                raise ValueError(f'batch failed {status} {await j.log()}')
 
 
             with self.fs.open(dir + '/out', 'rb') as outfile:
@@ -365,7 +365,7 @@ class ServiceBackend(Backend):
             b = bb.submit(disable_progress_bar=self.disable_progress_bar)
             status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
-                raise ValueError(f'batch failed {status} {j.log()}')
+                raise ValueError(f'batch failed {status} {await j.log()}')
 
 
             with self.fs.open(dir + '/out', 'rb') as outfile:
@@ -416,7 +416,7 @@ class ServiceBackend(Backend):
             b = await bb.submit(disable_progress_bar=self.disable_progress_bar)
             status = await b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
-                raise ValueError(f'batch failed {status} {j.log()}')
+                raise ValueError(f'batch failed {status} {await j.log()}')
 
             with self.fs.open(dir + '/out', 'rb') as outfile:
                 success = read_bool(outfile)
@@ -463,7 +463,7 @@ class ServiceBackend(Backend):
             b = bb.submit(disable_progress_bar=self.disable_progress_bar)
             status = b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
-                raise ValueError(f'batch failed {status} {j.log()}')
+                raise ValueError(f'batch failed {status} {await j.log()}')
 
 
             with self.fs.open(dir + '/out', 'rb') as outfile:
