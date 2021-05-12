@@ -413,15 +413,14 @@ class Container:
         return {'username': '_json_key', 'password': key}
 
     async def batch_worker_access_token(self):
-        async with aiohttp.ClientSession(raise_for_status=True, timeout=aiohttp.ClientTimeout(total=60)) as session:
-            async with await request_retry_transient_errors(
-                session,
-                'POST',
-                'http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token',
-                headers={'Metadata-Flavor': 'Google'},
-            ) as resp:
-                access_token = (await resp.json())['access_token']
-                return {'username': 'oauth2accesstoken', 'password': access_token}
+        async with await request_retry_transient_errors(
+            worker.client_session,
+            'POST',
+            'http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token',
+            headers={'Metadata-Flavor': 'Google'},
+        ) as resp:
+            access_token = (await resp.json())['access_token']
+            return {'username': 'oauth2accesstoken', 'password': access_token}
 
     async def run(self, worker):
         try:
@@ -1555,6 +1554,7 @@ class Worker:
         self.task_manager = aiotools.BackgroundTaskManager()
         os.mkdir('/hail-jars/')
         self.jar_download_locks = defaultdict(asyncio.Lock)
+        self.client_session = client_session()
 
         # filled in during activation
         self.log_store = None
@@ -1717,14 +1717,13 @@ class Worker:
             log.info('deactivated')
 
     async def deactivate(self):
-        async with client_session() as session:
-            # Don't retry.  If it doesn't go through, the driver
-            # monitoring loops will recover.  If the driver is
-            # gone (e.g. testing a PR), this would go into an
-            # infinite loop and the instance won't be deleted.
-            await session.post(
-                deploy_config.url('batch-driver', '/api/v1alpha/instances/deactivate'), headers=self.headers
-            )
+        # Don't retry.  If it doesn't go through, the driver
+        # monitoring loops will recover.  If the driver is
+        # gone (e.g. testing a PR), this would go into an
+        # infinite loop and the instance won't be deleted.
+        await self.client_session.post(
+            deploy_config.url('batch-driver', '/api/v1alpha/instances/deactivate'), headers=self.headers
+        )
 
     async def kill_1(self, request):  # pylint: disable=unused-argument
         log.info('killed')
@@ -1763,13 +1762,12 @@ class Worker:
         delay_secs = 0.1
         while True:
             try:
-                async with client_session() as session:
-                    await session.post(
-                        deploy_config.url('batch-driver', '/api/v1alpha/instances/job_complete'),
-                        json=body,
-                        headers=self.headers,
-                    )
-                    return
+                await self.client_session.post(
+                    deploy_config.url('batch-driver', '/api/v1alpha/instances/job_complete'),
+                    json=body,
+                    headers=self.headers,
+                )
+                return
             except asyncio.CancelledError:  # pylint: disable=try-except-raise
                 raise
             except Exception as e:
@@ -1816,14 +1814,13 @@ class Worker:
 
         body = {'status': status}
 
-        async with client_session() as session:
-            await request_retry_transient_errors(
-                session,
-                'POST',
-                deploy_config.url('batch-driver', '/api/v1alpha/instances/job_started'),
-                json=body,
-                headers=self.headers,
-            )
+        await request_retry_transient_errors(
+            self.client_session,
+            'POST',
+            deploy_config.url('batch-driver', '/api/v1alpha/instances/job_started'),
+            json=body,
+            headers=self.headers,
+        )
 
     async def post_job_started(self, job):
         try:
@@ -1834,36 +1831,35 @@ class Worker:
             log.exception(f'error while posting {job} started')
 
     async def activate(self):
-        async with client_session() as session:
-            resp = await request_retry_transient_errors(
-                session,
-                'GET',
-                deploy_config.url('batch-driver', '/api/v1alpha/instances/gsa_key'),
-                headers={'X-Hail-Instance-Name': NAME, 'Authorization': f'Bearer {os.environ["ACTIVATION_TOKEN"]}'},
-            )
-            resp_json = await resp.json()
+        resp = await request_retry_transient_errors(
+            self.client_session,
+            'GET',
+            deploy_config.url('batch-driver', '/api/v1alpha/instances/gsa_key'),
+            headers={'X-Hail-Instance-Name': NAME, 'Authorization': f'Bearer {os.environ["ACTIVATION_TOKEN"]}'},
+        )
+        resp_json = await resp.json()
 
-            with open('/worker-key.json', 'w') as f:
-                f.write(json.dumps(resp_json['key']))
+        with open('/worker-key.json', 'w') as f:
+            f.write(json.dumps(resp_json['key']))
 
-            credentials = google.oauth2.service_account.Credentials.from_service_account_file('/worker-key.json')
-            self.log_store = LogStore(
-                BATCH_LOGS_BUCKET_NAME, INSTANCE_ID, self.pool, project=PROJECT, credentials=credentials
-            )
+        credentials = google.oauth2.service_account.Credentials.from_service_account_file('/worker-key.json')
+        self.log_store = LogStore(
+            BATCH_LOGS_BUCKET_NAME, INSTANCE_ID, self.pool, project=PROJECT, credentials=credentials
+        )
 
-            credentials = aiogoogle.Credentials.from_file('/worker-key.json')
-            self.compute_client = aiogoogle.ComputeClient(PROJECT, credentials=credentials)
+        credentials = aiogoogle.Credentials.from_file('/worker-key.json')
+        self.compute_client = aiogoogle.ComputeClient(PROJECT, credentials=credentials)
 
-            resp = await request_retry_transient_errors(
-                session,
-                'POST',
-                deploy_config.url('batch-driver', '/api/v1alpha/instances/activate'),
-                json={'ip_address': os.environ['IP_ADDRESS']},
-                headers={'X-Hail-Instance-Name': NAME, 'Authorization': f'Bearer {os.environ["ACTIVATION_TOKEN"]}'},
-            )
-            resp_json = await resp.json()
+        resp = await request_retry_transient_errors(
+            self.client_session,
+            'POST',
+            deploy_config.url('batch-driver', '/api/v1alpha/instances/activate'),
+            json={'ip_address': os.environ['IP_ADDRESS']},
+            headers={'X-Hail-Instance-Name': NAME, 'Authorization': f'Bearer {os.environ["ACTIVATION_TOKEN"]}'},
+        )
+        resp_json = await resp.json()
 
-            self.headers = {'X-Hail-Instance-Name': NAME, 'Authorization': f'Bearer {resp_json["token"]}'}
+        self.headers = {'X-Hail-Instance-Name': NAME, 'Authorization': f'Bearer {resp_json["token"]}'}
 
 
 async def async_main():

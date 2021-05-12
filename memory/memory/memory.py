@@ -17,6 +17,7 @@ from hailtop.google_storage import GCS
 from hailtop.hail_logging import AccessLogger
 from hailtop.tls import internal_server_ssl_context
 from hailtop.utils import AsyncWorkerPool, retry_transient_errors, dump_all_stacktraces
+from hailtop.httpx import client_session as http_client_session
 from gear import setup_aiohttp_session, rest_authenticated_users_only, monitor_endpoint
 
 uvloop.install()
@@ -144,6 +145,7 @@ async def on_startup(app):
     k8s_client = kube.client.CoreV1Api()
     app['k8s_client'] = k8s_client
     app['redis_pool']: aioredis.ConnectionsPool = await aioredis.create_pool(socket)
+    app['client_session'] = http_client_session()
 
 
 async def on_cleanup(app):
@@ -156,8 +158,11 @@ async def on_cleanup(app):
             try:
                 app['redis_pool'].close()
             finally:
-                del app['k8s_client']
-                await asyncio.gather(*(t for t in asyncio.all_tasks() if t is not asyncio.current_task()))
+                try:
+                    del app['k8s_client']
+                finally:
+                    app['client_session'].close()
+                    await asyncio.gather(*(t for t in asyncio.all_tasks() if t is not asyncio.current_task()))
 
 
 def run():

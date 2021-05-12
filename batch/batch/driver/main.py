@@ -382,13 +382,12 @@ def validate_int(session, url_path, name, value, predicate, description):
 
 
 async def refresh_inst_colls_on_front_end(app):
-    async with client_session() as session:
-        await request_retry_transient_errors(
-            session,
-            'PATCH',
-            deploy_config.url('batch', '/api/v1alpha/inst_colls/refresh'),
-            headers=app['batch_headers'],
-        )
+    await request_retry_transient_errors(
+        app['client_session'],
+        'PATCH',
+        deploy_config.url('batch', '/api/v1alpha/inst_colls/refresh'),
+        headers=app['batch_headers'],
+    )
 
 
 @routes.post('/config-update/pool/{pool}')
@@ -1002,6 +1001,8 @@ SELECT instance_id, internal_token FROM globals;
 
     app['task_manager'].ensure_future(periodically_call(60, scheduling_cancelling_bump, app))
 
+    app['client_session'] = client_session()
+
 
 async def on_cleanup(app):
     try:
@@ -1025,10 +1026,13 @@ async def on_cleanup(app):
                             try:
                                 app['task_manager'].shutdown()
                             finally:
-                                del app['k8s_cache'].client
-                                await asyncio.gather(
-                                    *(t for t in asyncio.all_tasks() if t is not asyncio.current_task())
-                                )
+                                try:
+                                    del app['k8s_cache'].client
+                                finally:
+                                    app['client_session'].close()
+                                    await asyncio.gather(
+                                        *(t for t in asyncio.all_tasks() if t is not asyncio.current_task())
+                                    )
 
 
 def run():

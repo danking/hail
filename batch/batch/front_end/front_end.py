@@ -1192,13 +1192,12 @@ async def _close_batch(app: aiohttp.web.Application, batch_id: int, user: str, d
             raise web.HTTPBadRequest(reason=f'wrong number of jobs: expected {expected_n_jobs}, actual {actual_n_jobs}')
         raise
 
-    async with client_session() as session:
-        await request_retry_transient_errors(
-            session,
-            'PATCH',
-            deploy_config.url('batch-driver', f'/api/v1alpha/batches/{user}/{batch_id}/close'),
-            headers=app['batch_headers'],
-        )
+    await request_retry_transient_errors(
+        app['client_session'],
+        'PATCH',
+        deploy_config.url('batch-driver', f'/api/v1alpha/batches/{user}/{batch_id}/close'),
+        headers=app['batch_headers'],
+    )
 
     return web.Response()
 
@@ -2039,26 +2038,24 @@ async def index(request, userdata):  # pylint: disable=unused-argument
 
 
 async def cancel_batch_loop_body(app):
-    async with client_session() as session:
-        await request_retry_transient_errors(
-            session,
-            'POST',
-            deploy_config.url('batch-driver', '/api/v1alpha/batches/cancel'),
-            headers=app['batch_headers'],
-        )
+    await request_retry_transient_errors(
+        app['client_session'],
+        'POST',
+        deploy_config.url('batch-driver', '/api/v1alpha/batches/cancel'),
+        headers=app['batch_headers'],
+    )
 
     should_wait = True
     return should_wait
 
 
 async def delete_batch_loop_body(app):
-    async with client_session() as session:
-        await request_retry_transient_errors(
-            session,
-            'POST',
-            deploy_config.url('batch-driver', '/api/v1alpha/batches/delete'),
-            headers=app['batch_headers'],
-        )
+    await request_retry_transient_errors(
+        app['client_session'],
+        'POST',
+        deploy_config.url('batch-driver', '/api/v1alpha/batches/delete'),
+        headers=app['batch_headers'],
+    )
 
     should_wait = True
     return should_wait
@@ -2110,12 +2107,17 @@ SELECT instance_id, internal_token, n_tokens FROM globals;
         retry_long_running('delete_batch_loop', run_if_changed, delete_batch_state_changed, delete_batch_loop_body, app)
     )
 
+    app['client_session'] = client_session()
+
 
 async def on_cleanup(app):
     try:
         app['blocking_pool'].shutdown()
     finally:
-        app['task_manager'].shutdown()
+        try:
+            app['task_manager'].shutdown()
+        finally:
+            app['client_session'].close()
 
 
 def run():
