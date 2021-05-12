@@ -11,6 +11,7 @@ from aiohttp import web
 import kubernetes_asyncio as kube
 from prometheus_async.aio.web import server_stats  # type: ignore
 from typing import Set
+from collections import defaultdict
 
 from hailtop.config import get_deploy_config
 from hailtop.google_storage import GCS
@@ -70,15 +71,18 @@ async def write_object(request, userdata):
 
 async def get_or_add_user(app, userdata):
     users = app['users']
+    userlocks = app['userlocks']
     username = userdata['username']
     if username not in users:
-        log.info(f'get_or_add_user: cache miss: {username}')
-        k8s_client = app['k8s_client']
-        gsa_key_secret = await retry_transient_errors(
-            k8s_client.read_namespaced_secret, userdata['gsa_key_secret_name'], DEFAULT_NAMESPACE, _request_timeout=5.0
-        )
-        gsa_key = base64.b64decode(gsa_key_secret.data['key.json']).decode()
-        users[username] = {'fs': GCS(blocking_pool=app['thread_pool'], key=json.loads(gsa_key))}
+        async with userlocks[user]:
+            if username not in users:
+                log.info(f'get_or_add_user: cache miss: {username}')
+                k8s_client = app['k8s_client']
+                gsa_key_secret = await retry_transient_errors(
+                    k8s_client.read_namespaced_secret, userdata['gsa_key_secret_name'], DEFAULT_NAMESPACE, _request_timeout=5.0
+                )
+                gsa_key = base64.b64decode(gsa_key_secret.data['key.json']).decode()
+                users[username] = {'fs': GCS(blocking_pool=app['thread_pool'], key=json.loads(gsa_key))}
     return users[username]
 
 
@@ -141,6 +145,7 @@ async def on_startup(app):
     app['worker_pool'] = AsyncWorkerPool(parallelism=100, queue_size=10)
     app['files_in_progress'] = set()
     app['users'] = {}
+    app['userlocks'] = defaultdict(asyncio.Lock)
     kube.config.load_incluster_config()
     k8s_client = kube.client.CoreV1Api()
     app['k8s_client'] = k8s_client
