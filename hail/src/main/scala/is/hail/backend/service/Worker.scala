@@ -107,7 +107,9 @@ object Worker {
     timer.end("readInputs")
     timer.start("executeFunction")
 
-    if (!HailContext.isInitialized) {
+    if (HailContext.isInitialized) {
+      HailContext.get.backend = new ServiceBackend(null, null, null)
+    } else {
       HailContext(
         // FIXME: workers should not have backends, but some things do need hail contexts
         new ServiceBackend(null, null, null), skipLoggingConfiguration = true, quiet = true)

@@ -35,6 +35,8 @@ import org.newsclub.net.unix.{AFUNIXServerSocket, AFUNIXSocketAddress}
 
 import scala.annotation.switch
 import scala.reflect.ClassTag
+import scala.{concurrent => scalaConcurrent}
+
 
 class ServiceBackendContext(
   @transient val sessionID: String,
@@ -158,16 +160,22 @@ class ServiceBackend(
 
     log.info(s"parallelizeAndComputeWithIndex: token $token: reading results")
 
+    implicit val ec = scalaConcurrent.ExecutionContext.global
     val r = new Array[Array[Byte]](n)
 
-    // FIXME: parallelize this
-    i = 0
-    while (i < n) {
-      r(i) = using(fs.openCachedNoCompression(s"$root/result.$i")) { is =>
-        IOUtils.toByteArray(is)
+    def readResult(i: Int): scalaConcurrent.Future[Unit] = scalaConcurrent.Future {
+      r(i) = retryTransientErrors {
+        using(fs.openCachedNoCompression(s"$root/result.$i")) { is =>
+          IOUtils.toByteArray(is)
+        }
       }
-      i += 1
     }
+
+    scalaConcurrent.Await.result(
+      scalaConcurrent.Future.sequence(
+        Array.tabulate(n)(readResult).toFastIndexedSeq),
+      scalaConcurrent.duration.Duration.Inf)
+
     r
   }
 

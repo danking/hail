@@ -527,12 +527,13 @@ class BatchBuilder:
             b.extend(spec)
         b.append(ord(']'))
         b.extend(b',"batch":')
-        b.extend(self._batch_spec().encode('utf-8'))
+        b.extend(json.dumps(self._batch_spec()).encode('utf-8'))
         b.append(ord('}'))
-        batch_json = await self._client._post(
-            '/api/v1alpha/batches/batches/create-fast',
+        resp = await self._client._post(
+            '/api/v1alpha/batches/create-fast',
             data=aiohttp.BytesPayload(b, content_type='application/json', encoding='utf-8'),
         )
+        batch_json = await resp.json()
         pbar.update(n_jobs)
         return Batch(self._client, batch_json['id'], self.attributes, n_jobs, self.token)
 
@@ -588,7 +589,7 @@ class BatchBuilder:
         if self._submitted:
             raise ValueError("cannot submit an already submitted batch")
         byte_job_specs = [json.dumps(job_spec).encode('utf-8') for job_spec in self._job_specs]
-        byte_job_specs_bunches = []
+        byte_job_specs_bunches: List[List[bytes]] = []
         bunch_sizes = []
         bunch = []
         bunch_n_bytes = 0
@@ -615,7 +616,7 @@ class BatchBuilder:
 
         with tqdm(total=len(self._job_specs), disable=disable_progress_bar, desc='jobs submitted to queue') as pbar:
             if len(byte_job_specs_bunches) == 1:
-                batch = await self._submit_jobs(None, byte_job_specs_bunches[0], bunch_sizes[0], pbar)
+                batch = await self._fast_create(byte_job_specs_bunches[0], bunch_sizes[0], pbar)
                 id = batch.id
             else:
                 batch = await self._create()
