@@ -67,7 +67,8 @@ class ServiceBackend(
 
   private[this] var batchCount = 0
   private[this] val users = new ConcurrentHashMap[String, User]()
-  private[this] implicit val ec = scalaConcurrent.ExecutionContext.global
+  private[this] implicit val ec = scalaConcurrent.ExecutionContext.fromExecutorService(
+    Executors.newCachedThreadPool())
 
   def addUser(username: String, key: String): Unit = synchronized {
     val previous = users.put(username, new User(username, "/tmp", new GoogleStorageFS(key)))
@@ -138,7 +139,7 @@ class ServiceBackend(
     while (i < n) {
       jobs(i) = JObject(
           "always_run" -> JBool(false),
-          "job_id" -> JInt(i),
+          "job_id" -> JInt(i + 1),
           "parent_ids" -> JArray(List()),
           "process" -> JObject(
             "command" -> JArray(List(

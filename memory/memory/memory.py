@@ -37,10 +37,11 @@ async def healthcheck(request):  # pylint: disable=unused-argument
 @monitor_endpoint
 @rest_authenticated_users_only
 async def get_object(request, userdata):
+    username = userdata['username']
+    log.info(f'memory: get_object: 1: {filepath} from user {username}')
     filepath = request.query.get('q')
     userinfo = await get_or_add_user(request.app, userdata)
-    username = userdata['username']
-    log.info(f'memory: request for object {filepath} from user {username}')
+    log.info(f'memory: get_object: 2: {filepath} from user {username}')
     maybe_file = await get_file_or_none(request.app, username, userinfo['fs'], filepath)
     if maybe_file is None:
         raise web.HTTPNotFound()
@@ -70,6 +71,7 @@ async def get_or_add_user(app, userdata):
     users = app['users']
     username = userdata['username']
     if username not in users:
+        log.info(f'get_or_add_user: cache miss: {username}')
         k8s_client = app['k8s_client']
         gsa_key_secret = await retry_transient_errors(
             k8s_client.read_namespaced_secret, userdata['gsa_key_secret_name'], DEFAULT_NAMESPACE, _request_timeout=5.0

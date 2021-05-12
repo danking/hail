@@ -2,6 +2,7 @@ package is.hail.backend.service
 
 import java.io._
 import java.nio.charset._
+import java.util.{concurrent => javaConcurrent}
 
 import is.hail.{HAIL_REVISION, HailContext}
 import is.hail.backend.HailTaskContext
@@ -13,7 +14,7 @@ import org.apache.log4j.Logger
 
 import scala.collection.mutable
 import scala.concurrent.duration.{Duration, MILLISECONDS}
-import scala.concurrent.{Future, Await}
+import scala.concurrent.{Future, Await, ExecutionContext}
 
 class ServiceTaskContext(val partitionId: Int) extends HailTaskContext {
   override def stageId(): Int = 0
@@ -46,7 +47,8 @@ class WorkerTimer() {
 object Worker {
   private[this] val log = Logger.getLogger(getClass.getName())
   private[this] val myRevision = HAIL_REVISION
-  private[this] implicit val ec = scala.concurrent.ExecutionContext.global
+  private[this] implicit val ec = ExecutionContext.fromExecutorService(
+    javaConcurrent.Executors.newCachedThreadPool())
 
   def main(args: Array[String]): Unit = {
 
