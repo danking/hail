@@ -160,7 +160,8 @@ class ServiceBackend(
 
     val r = new Array[Array[Byte]](n)
 
-    i = 0  // reusing
+    // FIXME: parallelize this
+    i = 0
     while (i < n) {
       r(i) = using(fs.openCachedNoCompression(s"$root/result.$i")) { is =>
         IOUtils.toByteArray(is)
@@ -683,17 +684,11 @@ object ServiceBackendSocketAPI2 {
     val input = argv(4)
     val output = argv(5)
 
-    val backend = if (HailContext.isInitialized) {
-      val backend = HailContext.backend.asInstanceOf[ServiceBackend]
-      assert(backend.revision == revision, (backend.revision, revision))
-      assert(backend.jarLocation == jarLocation, (backend.jarLocation, jarLocation))
-      backend.name = name
-      backend.batchCount = 0
-      backend
+    val backend = new ServiceBackend(revision, jarLocation, name, scratchDir)
+    if (HailContext.isInitialized) {
+      HailContext.get.backend = backend
     } else {
-      val backend = new ServiceBackend(revision, jarLocation, name, scratchDir)
       HailContext(backend, "hail.log", false, false, 50, skipLoggingConfiguration = true, 3)
-      backend
     }
     val fs = retryTransientErrors {
       using(new FileInputStream(s"$scratchDir/gsa-key/key.json")) { is =>
