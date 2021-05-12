@@ -29,7 +29,6 @@ class JVMEntryway {
     while (true) {
       try (AFUNIXSocket socket = server.accept()) {
         System.err.println("connection accepted");
-        socket.setSoTimeout(60000);
         DataInputStream in = new DataInputStream(socket.getInputStream());
         DataOutputStream out = new DataOutputStream(socket.getOutputStream());
         int nRealArgs = in.readInt();
