@@ -131,13 +131,12 @@ class ServiceBackend(
       }
     }
 
-    scalaConcurrent.Await.result(uploadFunction, scalaConcurrent.duration.Duration.Inf)
-    scalaConcurrent.Await.result(uploadContexts, scalaConcurrent.duration.Duration.Inf)
-
-    val jobs = new Array[JObject](n)
-    var i = 0
-    while (i < n) {
-      jobs(i) = JObject(
+    val batchClient = BatchClient.fromSessionID(backendContext.sessionID)
+    val createBatch = scalaConcurrent.Future {
+      val jobs = new Array[JObject](n)
+      var i = 0
+      while (i < n) {
+        jobs(i) = JObject(
           "always_run" -> JBool(false),
           "job_id" -> JInt(i + 1),
           "parent_ids" -> JArray(List()),
@@ -150,19 +149,25 @@ class ServiceBackend(
               JString(s"$i"))),
             "type" -> JString("jvm")),
           "mount_tokens" -> JBool(true))
-      i += 1
+        i += 1
+      }
+
+      log.info(s"parallelizeAndComputeWithIndex: token $token: running job")
+
+      batchClient.create(
+        JObject(
+          "billing_project" -> JString(backendContext.billingProject),
+          "n_jobs" -> JInt(n),
+          "token" -> JString(token),
+          "attributes" -> JObject("name" -> JString(name + "_" + batchCount))),
+        jobs)
     }
 
-    log.info(s"parallelizeAndComputeWithIndex: token $token: running job")
+    scalaConcurrent.Await.result(uploadFunction, scalaConcurrent.duration.Duration.Inf)
+    scalaConcurrent.Await.result(uploadContexts, scalaConcurrent.duration.Duration.Inf)
+    val batchId = scalaConcurrent.Await.result(createBatch, scalaConcurrent.duration.Duration.Inf)
 
-    val batchClient = BatchClient.fromSessionID(backendContext.sessionID)
-    val batch = batchClient.run(
-      JObject(
-        "billing_project" -> JString(backendContext.billingProject),
-        "n_jobs" -> JInt(n),
-        "token" -> JString(token),
-        "attributes" -> JObject("name" -> JString(name + "_" + batchCount))),
-      jobs)
+    val batch = batchClient.waitForBatch(batchId)
     batchCount += 1
     implicit val formats: Formats = DefaultFormats
     val batchID = (batch \ "id").extract[Int]
@@ -723,12 +728,16 @@ object ServiceBackendSocketAPI2 {
     tls.setSSLConfigFromDir(s"$scratchDir/ssl-config")
 
     val sessionId = userTokens.namespaceToken(deployConfig.defaultNamespace)
-    using(fs.openNoCompression(input)) { in =>
-      using(fs.createNoCompression(output)) { out =>
-        new ServiceBackendSocketAPI2(backend, in, out, sessionId).executeOneCommand()
-        out.flush()
+    retryTransientErrors( {
+      using(fs.openNoCompression(input)) { in =>
+        retryTransientErrors( {
+          using(fs.createNoCompression(output)) { out =>
+            new ServiceBackendSocketAPI2(backend, in, out, sessionId).executeOneCommand()
+            out.flush()
+          }
+        }, retry404 = true)
       }
-    }
+    }, retry404 = true)
   }
 }
 

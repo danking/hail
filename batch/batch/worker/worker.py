@@ -259,8 +259,8 @@ class Timings:
 
 
 class ContainerStepManager:
-    def __init__(self, timing: Dict[str, float], is_deleted: Callable[[], bool]):
-        self.timing: Dict[str, float] = timing
+    def __init__(self, timing: Dict[str, int], is_deleted: Callable[[], bool]):
+        self.timing: Dict[str, int] = timing
         self.is_deleted = is_deleted
 
     def __enter__(self):
@@ -1222,14 +1222,16 @@ class JVMJob(Job):
 
     async def cleanup(self):
         if self.jvm is not None:
-            self.log = self.jvm.retrieve_and_clear_output()
-            worker.jvms.append(self.jvm)
-            self.jvm = None
+            with self.step('retrieve_output'):
+                self.log = self.jvm.retrieve_and_clear_output()
+                worker.jvms.append(self.jvm)
+                self.jvm = None
 
         if self.log is not None:
-            await worker.log_store.write_log_file(
-                self.format_version, self.batch_id, self.job_id, self.attempt_id, 'main', self.log
-            )
+            with self.step('uploading_log'):
+                await worker.log_store.write_log_file(
+                    self.format_version, self.batch_id, self.job_id, self.attempt_id, 'main', self.log
+                )
 
         self.end_time = time_msecs()
 
@@ -1239,15 +1241,16 @@ class JVMJob(Job):
 
         log.info(f'{self}: cleaning up')
         try:
-            await check_shell(
-                f'xfs_quota -x -D /xfsquota/projects -P /xfsquota/projid -c "limit -p bsoft=0 bhard=0 {self.project_name}" /host'
-            )
+            with self.step('xfs_cleanup'):
+                await check_shell(
+                    f'xfs_quota -x -D /xfsquota/projects -P /xfsquota/projid -c "limit -p bsoft=0 bhard=0 {self.project_name}" /host'
+                )
 
-            async with Flock('/xfsquota/projid', pool=worker.pool):
-                await check_shell(f"sed -i '/{self.project_name}:{self.project_id}/d' /xfsquota/projid")
+                async with Flock('/xfsquota/projid', pool=worker.pool):
+                    await check_shell(f"sed -i '/{self.project_name}:{self.project_id}/d' /xfsquota/projid")
 
-            async with Flock('/xfsquota/projects', pool=worker.pool):
-                await check_shell(f"sed -i '/{self.project_id}:/d' /xfsquota/projects")
+                async with Flock('/xfsquota/projects', pool=worker.pool):
+                    await check_shell(f"sed -i '/{self.project_id}:/d' /xfsquota/projects")
         except asyncio.CancelledError:
             raise
         except Exception:

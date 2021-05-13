@@ -73,7 +73,7 @@ class BatchClient(
   def delete(path: String, token: String): JValue =
     request(new HttpDelete(s"$baseUrl$path"))
 
-  private[this] def create(batchJson: JObject, jobs: IndexedSeq[JObject]): Long = {
+  def create(batchJson: JObject, jobs: IndexedSeq[JObject]): Long = {
     implicit val formats: Formats = DefaultFormats
 
     val bunches = new BoxedArrayBuilder[Array[Array[Byte]]]()

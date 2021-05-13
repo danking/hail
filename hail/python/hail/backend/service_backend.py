@@ -4,6 +4,7 @@ import struct
 import os
 import json
 import logging
+import contextlib
 
 from hail.context import TemporaryDirectory, tmp_dir
 from hail.utils import FatalError
@@ -15,7 +16,7 @@ from hail.ir.renderer import CSERenderer
 
 from hailtop.config import get_deploy_config, get_user_config
 from hailtop.auth import get_tokens
-from hailtop.utils import async_to_blocking, secret_alnum_string, TransientError
+from hailtop.utils import async_to_blocking, secret_alnum_string, TransientError, time_msecs
 from hailtop.batch_client import client as hb
 
 from .backend import Backend
@@ -88,6 +89,25 @@ def read_str(io: BinaryIO) -> str:
     b = read_bytes(io)
     return b.decode('utf-8')
 
+
+class Timings:
+    def __init__(self):
+        self.timings: Dict[str, Dict[str, int]] = dict()
+
+    @contextlib.contextmanager
+    def step(self, name: str):
+        assert name not in self.timings
+        d: Dict[str, int] = dict()
+        self.timings[name] = d
+        d['start_time'] = time_msecs()
+        yield
+        d['finish_time'] = time_msecs()
+        d['duration'] = d['finish_time'] - d['start_time']
+
+    def to_dict(self):
+        return self.timings
+
+
 class ServiceBackend(Backend):
     LOAD_REFERENCES_FROM_DATASET = 1
     VALUE_TYPE = 2
@@ -138,7 +158,6 @@ class ServiceBackend(Backend):
         self.billing_project = billing_project
         self.bucket = bucket
         self._fs = GoogleCloudStorageFS()
-        tokens = get_tokens()
         deploy_config = deploy_config or get_deploy_config()
         self.bc = hb.BatchClient(self.billing_project)
         self.async_bc = self.bc._async_client
@@ -174,28 +193,33 @@ class ServiceBackend(Backend):
     async def _async_execute_untimed(self, ir):
         token = secret_alnum_string()
         with TemporaryDirectory(ensure_exists=False) as dir:
-            with self.fs.open(dir + '/in', 'wb') as infile:
-                write_int(infile, ServiceBackend.EXECUTE)
-                write_str(infile, tmp_dir())
-                write_str(infile, self.billing_project)
-                write_str(infile, self.bucket)
-                write_str(infile, self.render(ir))
-                write_str(infile, token)
+            async def create_inputs():
+                with self.fs.open(dir + '/in', 'wb') as infile:
+                    write_int(infile, ServiceBackend.EXECUTE)
+                    write_str(infile, tmp_dir())
+                    write_str(infile, self.billing_project)
+                    write_str(infile, self.bucket)
+                    write_str(infile, self.render(ir))
+                    write_str(infile, token)
 
-            batch_attributes = self.batch_attributes
-            if 'name' not in batch_attributes:
-                batch_attributes = {**batch_attributes, 'name': 'execute(...)'}
-            bb = self.async_bc.create_batch(token=token, attributes=batch_attributes)
+            async def create_batch():
+                batch_attributes = self.batch_attributes
+                if 'name' not in batch_attributes:
+                    batch_attributes = {**batch_attributes, 'name': 'execute(...)'}
+                bb = self.async_bc.create_batch(token=token, attributes=batch_attributes)
 
-            j = bb.create_jvm_job([
-                'is.hail.backend.service.ServiceBackendSocketAPI2',
-                os.environ['HAIL_SHA'],
-                os.environ['HAIL_JAR_URL'],
-                batch_attributes['name'],
-                dir + '/in',
-                dir + '/out',
-            ], mount_tokens=True)
-            b = await bb.submit(disable_progress_bar=self.disable_progress_bar)
+                j = bb.create_jvm_job([
+                    'is.hail.backend.service.ServiceBackendSocketAPI2',
+                    os.environ['HAIL_SHA'],
+                    os.environ['HAIL_JAR_URL'],
+                    batch_attributes['name'],
+                    dir + '/in',
+                    dir + '/out',
+                ], mount_tokens=True)
+                return (j, await bb.submit(disable_progress_bar=self.disable_progress_bar))
+
+            _, (j, b) = await asyncio.gather(create_inputs(), create_batch())
+
             status = await b.wait(disable_progress_bar=self.disable_progress_bar)
             if status['n_succeeded'] != 1:
                 raise ValueError(f'batch failed {status} {await j.log()}')
@@ -215,8 +239,11 @@ class ServiceBackend(Backend):
 
         typ = dtype(resp['type'])
         if typ == tvoid:
-            return None
-        return typ._convert_from_json_na(resp['value'])
+            x = None
+        else:
+            x = typ._convert_from_json_na(resp['value'])
+
+        return x
 
     def execute_many(self, *irs, timed=False):
         return async_to_blocking(self._async_execute_many(*irs, timed=timed))
