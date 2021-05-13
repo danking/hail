@@ -857,117 +857,108 @@ WHERE user = %s AND id = %s AND NOT deleted;
                     for k, v in attributes.items():
                         job_attributes_args.append((batch_id, job_id, k, v))
 
-        if batch_format_version.has_full_spec_in_gcs():
-            async with timer.step('write spec to gcs'):
-                await spec_writer.write()
-
         rand_token = random.randint(0, app['n_tokens'] - 1)
 
-        async with timer.step('insert jobs'):
+        async def write_spec_to_gcs():
+            if batch_format_version.has_full_spec_in_gcs():
+                async with timer.step('write spec to gcs'):
+                    await spec_writer.write()
 
-            @transaction(db)
-            async def insert(tx):
-                try:
-                    await tx.execute_many(
-                        '''
+        async def insert_jobs_into_db():
+            async with timer.step('insert jobs'):
+                @transaction(db)
+                async def insert(tx):
+                    try:
+                        await tx.execute_many(
+                            '''
 INSERT INTO jobs (batch_id, job_id, state, spec, always_run, cores_mcpu, n_pending_parents, inst_coll)
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
 ''',
-                        jobs_args,
-                    )
-                except pymysql.err.IntegrityError as err:
-                    # 1062 ER_DUP_ENTRY https://dev.mysql.com/doc/refman/5.7/en/server-error-reference.html#error_er_dup_entry
-                    if err.args[0] == 1062:
-                        log.info(f'bunch containing job {(batch_id, jobs_args[0][1])} already inserted ({err})')
-                        return
-                    raise
-                try:
-                    await tx.execute_many(
-                        '''
+                            jobs_args,
+                        )
+                    except pymysql.err.IntegrityError as err:
+                        # 1062 ER_DUP_ENTRY https://dev.mysql.com/doc/refman/5.7/en/server-error-reference.html#error_er_dup_entry
+                        if err.args[0] == 1062:
+                            log.info(f'bunch containing job {(batch_id, jobs_args[0][1])} already inserted ({err})')
+                            return
+                        raise
+                    try:
+                        await tx.execute_many(
+                            '''
 INSERT INTO `job_parents` (batch_id, job_id, parent_id)
 VALUES (%s, %s, %s);
 ''',
-                        job_parents_args,
-                    )
-                except pymysql.err.IntegrityError as err:
-                    # 1062 ER_DUP_ENTRY https://dev.mysql.com/doc/refman/5.7/en/server-error-reference.html#error_er_dup_entry
-                    if err.args[0] == 1062:
-                        raise web.HTTPBadRequest(text=f'bunch contains job with duplicated parents ({err})')
-                    raise
-                await tx.execute_many(
-                    '''
+                            job_parents_args,
+                        )
+                    except pymysql.err.IntegrityError as err:
+                        # 1062 ER_DUP_ENTRY https://dev.mysql.com/doc/refman/5.7/en/server-error-reference.html#error_er_dup_entry
+                        if err.args[0] == 1062:
+                            raise web.HTTPBadRequest(text=f'bunch contains job with duplicated parents ({err})')
+                        raise
+                    await tx.execute_many(
+                        '''
 INSERT INTO `job_attributes` (batch_id, job_id, `key`, `value`)
 VALUES (%s, %s, %s, %s);
 ''',
-                    job_attributes_args,
-                )
+                        job_attributes_args,
+                    )
 
-                for inst_coll, resources in inst_coll_resources.items():
-                    n_jobs = resources['n_jobs']
-                    n_ready_jobs = resources['n_ready_jobs']
-                    ready_cores_mcpu = resources['ready_cores_mcpu']
-                    n_ready_cancellable_jobs = resources['n_ready_cancellable_jobs']
-                    ready_cancellable_cores_mcpu = resources['ready_cancellable_cores_mcpu']
-
-                    await tx.execute_update(
+                    batches_inst_coll_staging_args = [
+                        (batch_id,
+                         inst_coll,
+                         rand_token,
+                         resources['n_jobs'],
+                         resources['n_ready_jobs'],
+                         resources['ready_cores_mcpu'])
+                        for inst_coll, resources in inst_coll_resources.items()]
+                    await tx.execute_many(
                         '''
 INSERT INTO batches_inst_coll_staging (batch_id, inst_coll, token, n_jobs, n_ready_jobs, ready_cores_mcpu)
 VALUES (%s, %s, %s, %s, %s, %s)
 ON DUPLICATE KEY UPDATE
-  n_jobs = n_jobs + %s,
-  n_ready_jobs = n_ready_jobs + %s,
-  ready_cores_mcpu = ready_cores_mcpu + %s;
+  n_jobs = n_jobs + VALUES(n_jobs),
+  n_ready_jobs = n_ready_jobs + VALUES(n_ready_jobs),
+  ready_cores_mcpu = ready_cores_mcpu + VALUES(ready_cores_mcpu);
 ''',
-                        (
-                            batch_id,
-                            inst_coll,
-                            rand_token,
-                            n_jobs,
-                            n_ready_jobs,
-                            ready_cores_mcpu,
-                            n_jobs,
-                            n_ready_jobs,
-                            ready_cores_mcpu,
-                        ),
-                    )
-                    await tx.execute_update(
-                        '''
+                        batches_inst_coll_staging_args)
+
+                    batch_inst_coll_cancellable_resources_args = [
+                        (batch_id,
+                         inst_coll,
+                         rand_token,
+                         resources['n_ready_cancellable_jobs'],
+                         resources['ready_cancellable_cores_mcpu'])
+                        for inst_coll, resources in inst_coll_resources.items()]
+                    await tx.execute_many(
+                            '''
 INSERT INTO batch_inst_coll_cancellable_resources (batch_id, inst_coll, token, n_ready_cancellable_jobs, ready_cancellable_cores_mcpu)
 VALUES (%s, %s, %s, %s, %s)
 ON DUPLICATE KEY UPDATE
-  n_ready_cancellable_jobs = n_ready_cancellable_jobs + %s,
-  ready_cancellable_cores_mcpu = ready_cancellable_cores_mcpu + %s;
+  n_ready_cancellable_jobs = n_ready_cancellable_jobs + VALUES(n_ready_cancellable_jobs),
+  ready_cancellable_cores_mcpu = ready_cancellable_cores_mcpu + VALUES(ready_cancellable_cores_mcpu);
 ''',
-                        (
-                            batch_id,
-                            inst_coll,
-                            rand_token,
-                            n_ready_cancellable_jobs,
-                            ready_cancellable_cores_mcpu,
-                            n_ready_cancellable_jobs,
-                            ready_cancellable_cores_mcpu,
-                        ),
-                    )
+                        batch_inst_coll_cancellable_resources_args)
 
-                if batch_format_version.has_full_spec_in_gcs():
-                    await tx.execute_update(
-                        '''
+                    if batch_format_version.has_full_spec_in_gcs():
+                        await tx.execute_update(
+                            '''
 INSERT INTO batch_bunches (batch_id, token, start_job_id)
 VALUES (%s, %s, %s);
 ''',
-                        (batch_id, spec_writer.token, start_job_id),
-                    )
+                            (batch_id, spec_writer.token, start_job_id),
+                        )
 
-            try:
-                await insert()  # pylint: disable=no-value-for-parameter
-            except aiohttp.web.HTTPException:
-                raise
-            except Exception as err:
-                raise ValueError(
-                    f'encountered exception while inserting a bunch'
-                    f'jobs_args={json.dumps(jobs_args)}'
-                    f'job_parents_args={json.dumps(job_parents_args)}'
-                ) from err
+                try:
+                    await insert()  # pylint: disable=no-value-for-parameter
+                except aiohttp.web.HTTPException:
+                    raise
+                except Exception as err:
+                    raise ValueError(
+                        f'encountered exception while inserting a bunch'
+                        f'jobs_args={json.dumps(jobs_args)}'
+                        f'job_parents_args={json.dumps(job_parents_args)}'
+                    ) from err
+        await asyncio.gather(write_spec_to_gcs(), insert_jobs_into_db())
 
     return web.Response()
 
@@ -983,7 +974,12 @@ async def create_batch_fast(request, userdata):
     batch_spec = batch_and_bunch['batch']
     bunch = batch_and_bunch['bunch']
     batch_id = await _create_batch(batch_spec, userdata, db)
-    await _create_jobs(userdata, bunch, batch_id, app)
+    try:
+        await _create_jobs(userdata, bunch, batch_id, app)
+    except web.HTTPBadRequest as e:
+        if f'batch {batch_id} is not open' == e.reason:
+            return web.json_response({'id': batch_id})
+        raise
     await _close_batch(app, batch_id, user, db)
     return web.json_response({'id': batch_id})
 

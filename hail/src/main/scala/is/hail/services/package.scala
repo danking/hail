@@ -12,6 +12,7 @@ import org.apache.log4j.{LogManager, Logger}
 import scala.util.Random
 import java.io._
 import com.google.cloud.storage.StorageException
+import com.google.api.client.googleapis.json.GoogleJsonResponseException
 
 package object services {
   lazy val log: Logger = LogManager.getLogger("is.hail.services")
@@ -36,6 +37,8 @@ package object services {
         true
       case e: ClientResponseException =>
         RETRYABLE_HTTP_STATUS_CODES.contains(e.status) || (transient404 && e.status == 404)
+      case e: GoogleJsonResponseException =>
+        RETRYABLE_HTTP_STATUS_CODES.contains(e.getStatusCode()) ||  (transient404 && e.getStatusCode() == 404)
       case e: HttpHostConnectException =>
         true
       case e: NoRouteToHostException =>
