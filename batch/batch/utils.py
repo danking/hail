@@ -102,18 +102,16 @@ def worker_memory_cpu_cost_per_core_hour(worker_type, preemptible):
     return cost_per_core_hour
 
 
-def worker_memory_per_core_mib(worker_type):
+def worker_memory_per_core_mib(worker_type: str) -> int:
     if worker_type == 'standard':
-        m = 3840
-    elif worker_type == 'highmem':
-        m = 6656
-    else:
-        assert worker_type == 'highcpu', worker_type
-        m = 924  # this number must be divisible by 4. I rounded up to the nearest MiB
-    return m
+        return 3840
+    if worker_type == 'highmem':
+        return 6656
+    assert worker_type == 'highcpu', worker_type
+    return 924  # this number must be divisible by 4. I rounded up to the nearest MiB
 
 
-def worker_memory_per_core_bytes(worker_type):
+def worker_memory_per_core_bytes(worker_type: str) -> int:
     m = worker_memory_per_core_mib(worker_type)
     return int(m * 1024 ** 2)
 
@@ -122,7 +120,7 @@ def memory_bytes_to_cores_mcpu(memory_in_bytes, worker_type):
     return math.ceil((memory_in_bytes / worker_memory_per_core_bytes(worker_type)) * 1000)
 
 
-def cores_mcpu_to_memory_bytes(cores_in_mcpu, worker_type):
+def cores_mcpu_to_memory_bytes(cores_in_mcpu: int, worker_type: str) -> int:
     return int((cores_in_mcpu / 1000) * worker_memory_per_core_bytes(worker_type))
 
 

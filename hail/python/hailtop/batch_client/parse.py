@@ -1,4 +1,4 @@
-from typing import Optional, Mapping, Pattern
+from typing import Optional, Mapping, Pattern, Union
 import re
 import math
 
@@ -29,6 +29,32 @@ conv_factor: Mapping[str, int] = {
     'T': 1000**4, 'Ti': 1024**4,
     'P': 1000**5, 'Pi': 1024**5
 }
+
+
+memory_to_worker_type = {
+    'lowmem': 'highcpu',
+    'standard': 'standard',
+    'highmem': 'highmem',
+}
+worker_type_to_memory_ratio = {v: k for k, v in memory_to_worker_type.items()}
+memory_ratios = memory_to_worker_type.keys()
+worker_types = memory_to_worker_type.values()
+worker_type_to_core_list = {
+    'highcpu': [2, 4, 8, 16, 32, 64, 96],
+    'standard': [1, 2, 4, 8, 16, 32, 64, 96],
+    'highmem': [2, 4, 8, 16, 32, 64, 96],
+}
+valid_machine_types = [
+    f'n1-{worker_type}-{cores}'
+    for worker_type in worker_types
+    for cores in worker_type_to_core_list[worker_type]
+]
+
+
+def parse_memory_request(x: str) -> Optional[Union[int, str]]:
+    if x in memory_ratios:
+        return x
+    return parse_memory_in_bytes(x)
 
 
 def parse_memory_in_bytes(memory_string: str) -> Optional[int]:

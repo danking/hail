@@ -24,7 +24,7 @@ from hailtop.utils.validate import (
     ValidationError,
 )
 
-from ..globals import valid_machine_types, memory_to_worker_type
+from hailtop.batch_client.parse import memory_to_worker_type, valid_machine_types
 
 k8s_str = regex(r'[a-z0-9](?:[-a-z0-9]*[a-z0-9])?(?:\.[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)*', maxlen=253)
 

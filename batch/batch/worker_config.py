@@ -3,7 +3,7 @@ from collections import defaultdict
 
 from .globals import WORKER_CONFIG_VERSION
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Tuple, List, Dict, Optional
 
 if TYPE_CHECKING:
     from .inst_coll_config import PoolConfig  # pylint: disable=cyclic-import
@@ -92,7 +92,7 @@ class WorkerConfig:
         return WorkerConfig(config)
 
     @staticmethod
-    def from_pool_config(pool_config: 'PoolConfig'):
+    def from_pool_config(pool_config: 'PoolConfig', resource_rates: Dict[str, float]):
         disks = [
             {
                 'boot': True,
@@ -127,9 +127,9 @@ class WorkerConfig:
             'job-private': False,
         }
 
-        return WorkerConfig(config)
+        return WorkerConfig(config, resource_rates=resource_rates)
 
-    def __init__(self, config):
+    def __init__(self, config, resource_rates: Optional[Dict[str, float]] = None):
         self.config = config
 
         self.version = self.config['version']
@@ -156,6 +156,7 @@ class WorkerConfig:
         self.data_disk_size_gb = data_disk['size']
 
         self.job_private = self.config['job-private']
+        self.resource_rates = resource_rates
 
     def is_valid_configuration(self, valid_resources):
         is_valid = True
@@ -164,7 +165,7 @@ class WorkerConfig:
             is_valid &= resource['name'] in valid_resources
         return is_valid
 
-    def resources(self, cpu_in_mcpu, memory_in_bytes, storage_in_gib):
+    def resources(self, cpu_in_mcpu: int, memory_in_bytes: int, storage_in_gib: int) -> List[dict]:
         assert memory_in_bytes % (1024 * 1024) == 0, memory_in_bytes
         assert isinstance(storage_in_gib, int), storage_in_gib
 
@@ -182,7 +183,7 @@ class WorkerConfig:
         # storage is in units of MiB
         resources.append({'name': 'disk/pd-ssd/1', 'quantity': storage_in_gib * 1024})
 
-        quantities = defaultdict(lambda: 0)
+        quantities: Dict[str, int] = defaultdict(lambda: 0)
         for disk in self.disks:
             name = f'disk/{disk["type"]}/1'
             # the factors of 1024 cancel between GiB -> MiB and fraction_1024 -> fraction
@@ -201,12 +202,18 @@ class WorkerConfig:
 
         return resources
 
-    def cost_per_hour(self, resource_rates, cpu_in_mcpu, memory_in_bytes, storage_in_gb):
-        resources = self.resources(cpu_in_mcpu, memory_in_bytes, storage_in_gb)
+    def cost_per_hour(self,
+                      cores_mcpu: int,
+                      memory_bytes: int,
+                      storage_bytes: int
+                      ) -> float:
+        assert self.resource_rates is not None
+
+        resources = self.resources(cores_mcpu, memory_bytes, storage_bytes)
         cost_per_msec = 0
         for r in resources:
             name = r['name']
             quantity = r['quantity']
-            rate_unit_msec = resource_rates[name]
+            rate_unit_msec = self.resource_rates[name]
             cost_per_msec += quantity * rate_unit_msec
         return cost_per_msec * 1000 * 60 * 60

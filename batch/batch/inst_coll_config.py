@@ -1,17 +1,18 @@
+from typing import Union, Tuple, List, Dict, Optional, Any
 import re
 import logging
 
-from typing import Dict, Optional, Any
-
 from gear import Database
 
-from .globals import MAX_PERSISTENT_SSD_SIZE_GIB, valid_machine_types
+from hailtop.batch_client.parse import worker_type_to_memory_ratio
+from hailtop.utils.sorting import none_last
+
+from .globals import MAX_PERSISTENT_SSD_SIZE_GIB
 from .utils import (
     adjust_cores_for_memory_request,
     adjust_cores_for_packability,
     round_storage_bytes_to_gib,
     cores_mcpu_to_memory_bytes,
-    resources_to_machine_type,
 )
 from .worker_config import WorkerConfig
 
@@ -24,6 +25,8 @@ MACHINE_TYPE_REGEX = re.compile('(?P<machine_family>[^-]+)-(?P<machine_type>[^-]
 
 def machine_type_to_dict(machine_type: str) -> Optional[Dict[str, Any]]:
     match = MACHINE_TYPE_REGEX.search(machine_type)
+    if match is None:
+        return None
     return match.groupdict()
 
 
@@ -41,7 +44,7 @@ class InstanceCollectionConfig:
 
 class PoolConfig(InstanceCollectionConfig):
     @staticmethod
-    def from_record(record):
+    def from_record(record: dict, resource_rates: Dict[str, float]):
         return PoolConfig(
             name=record['name'],
             worker_type=record['worker_type'],
@@ -53,6 +56,7 @@ class PoolConfig(InstanceCollectionConfig):
             boot_disk_size_gb=record['boot_disk_size_gb'],
             max_instances=record['max_instances'],
             max_live_instances=record['max_live_instances'],
+            resource_rates=resource_rates
         )
 
     def __init__(
@@ -67,6 +71,7 @@ class PoolConfig(InstanceCollectionConfig):
         boot_disk_size_gb,
         max_instances,
         max_live_instances,
+        resource_rates
     ):
         self.name = name
         self.worker_type = worker_type
@@ -79,24 +84,45 @@ class PoolConfig(InstanceCollectionConfig):
         self.max_instances = max_instances
         self.max_live_instances = max_live_instances
 
-        self.worker_config = WorkerConfig.from_pool_config(self)
+        self.worker_config = WorkerConfig.from_pool_config(self, resource_rates)
+        self.memory_ratio = worker_type_to_memory_ratio[self.worker_type]
 
-    def convert_requests_to_resources(self, cores_mcpu, memory_bytes, storage_bytes):
-        storage_gib = requested_storage_bytes_to_actual_storage_gib(storage_bytes)
+    def memory_bytes_per_cores_mcpu(self, cores_mcpu: int) -> int:
+        return cores_mcpu_to_memory_bytes(cores_mcpu, self.worker_type)
 
+    def convert_requests_to_resources(self,
+                                      cores_mcpu: int,
+                                      memory_bytes: Union[int, str],
+                                      storage_bytes: int
+                                      ) -> Optional[Tuple[int, int, int]]:
+        if isinstance(memory_bytes, str):
+            if memory_bytes != self.memory_ratio:
+                return None
+            memory_bytes = self.memory_bytes_per_cores_mcpu(cores_mcpu)
         cores_mcpu = adjust_cores_for_memory_request(cores_mcpu, memory_bytes, self.worker_type)
         cores_mcpu = adjust_cores_for_packability(cores_mcpu)
-
+        if cores_mcpu > self.worker_cores * 1000:
+            return None
+        storage_gib = requested_storage_bytes_to_actual_storage_gib(storage_bytes)
         memory_bytes = cores_mcpu_to_memory_bytes(cores_mcpu, self.worker_type)
+        return (cores_mcpu, memory_bytes, storage_gib)
 
-        if cores_mcpu <= self.worker_cores * 1000:
-            return (cores_mcpu, memory_bytes, storage_gib)
-
+    def cost_and_resources_from_request(self,
+                                        cores_mcpu: int,
+                                        memory_bytes: Union[int, str],
+                                        storage_bytes: int
+                                        ) -> Optional[ResourcesAndCost]:
+        fulfilled_resources = self.convert_requests_to_resources(cores_mcpu, memory_bytes, storage_bytes)
+        if fulfilled_resources is not None:
+            return ResourcesAndCost(fulfilled_resources,
+                                    self.worker_config.cost_per_hour(cores_mcpu, memory_bytes, storage_bytes))
         return None
 
-    def cost_per_hour(self, resource_rates, cores_mcpu, memory_bytes, storage_gib):
-        cost_per_hour = self.worker_config.cost_per_hour(resource_rates, cores_mcpu, memory_bytes, storage_gib)
-        return cost_per_hour
+
+class ResourcesAndCost:
+    def __init__(self, resources: Tuple[int, int, int], cost: float):
+        self.resources = resources
+        self.cost = cost
 
 
 class JobPrivateInstanceManagerConfig(InstanceCollectionConfig):
@@ -112,17 +138,22 @@ class JobPrivateInstanceManagerConfig(InstanceCollectionConfig):
         self.max_instances = max_instances
         self.max_live_instances = max_live_instances
 
-    def convert_requests_to_resources(self, machine_type, storage_bytes):
+    def convert_requests_to_resources(self,
+                                      machine_type: str,
+                                      storage_bytes: int
+                                      ) -> Optional[Tuple[int, int, int, str]]:
         # minimum storage for a GCE instance is 10Gi
         storage_gib = max(10, requested_storage_bytes_to_actual_storage_gib(storage_bytes))
 
         machine_type_dict = machine_type_to_dict(machine_type)
+        if machine_type_dict is None:
+            return None
         cores = int(machine_type_dict['cores'])
         cores_mcpu = cores * 1000
 
         memory_bytes = cores_mcpu_to_memory_bytes(cores_mcpu, machine_type_dict['machine_type'])
 
-        return (self.name, cores_mcpu, memory_bytes, storage_gib, machine_type)
+        return (cores_mcpu, memory_bytes, storage_gib, machine_type)
 
 
 class InstanceCollectionConfigs:
@@ -131,7 +162,6 @@ class InstanceCollectionConfigs:
         self.db: Database = app['db']
         self.name_config: Dict[str, InstanceCollectionConfig] = {}
         self.name_pool_config: Dict[str, PoolConfig] = {}
-        self.resource_rates: Optional[Dict[str, float]] = None
         self.jpim_config: Optional[JobPrivateInstanceManagerConfig] = None
 
     async def async_init(self):
@@ -139,6 +169,9 @@ class InstanceCollectionConfigs:
 
     async def refresh(self):
         log.info('loading inst coll configs and resource rates from db')
+        resource_rates: Dict[str, float] = {
+            record['resource']: record['rate']
+            async for record in self.db.execute_and_fetchall('SELECT * FROM resources;')}
         records = self.db.execute_and_fetchall(
             '''
 SELECT inst_colls.*, pools.*
@@ -149,7 +182,7 @@ LEFT JOIN pools ON inst_colls.name = pools.name;
         async for record in records:
             is_pool = bool(record['is_pool'])
             if is_pool:
-                config = PoolConfig.from_record(record)
+                config = PoolConfig.from_record(record, resource_rates)
                 self.name_pool_config[config.name] = config
             else:
                 config = JobPrivateInstanceManagerConfig.from_record(record)
@@ -159,73 +192,20 @@ LEFT JOIN pools ON inst_colls.name = pools.name;
 
         assert self.jpim_config is not None
 
-        records = self.db.execute_and_fetchall(
-            '''
-SELECT * FROM resources;
-'''
-        )
-        self.resource_rates = {record['resource']: record['rate'] async for record in records}
 
-    def select_pool_from_cost(self, cores_mcpu, memory_bytes, storage_bytes):
-        assert self.resource_rates is not None
+    def select_pool(self,
+                    cores_mcpu: int,
+                    memory_bytes: Union[int, str],
+                    storage_bytes: int
+                    ) -> Optional[ResourcesAndCost]:
+        resources_and_cost: List[Optional[ResourcesAndCost]] = [
+            pool.cost_and_resources_from_request(cores_mcpu, memory_bytes, storage_bytes)
+            for pool in self.name_pool_config.values()]
+        return min(resources_and_cost, key=none_last(lambda x: x.cost))
 
-        optimal_result = None
-        optimal_cost = None
-        for pool in self.name_pool_config.values():
-            result = pool.convert_requests_to_resources(cores_mcpu, memory_bytes, storage_bytes)
-            if result:
-                maybe_cores_mcpu, maybe_memory_bytes, maybe_storage_gib = result
-                maybe_cost = pool.cost_per_hour(
-                    self.resource_rates, maybe_cores_mcpu, maybe_memory_bytes, maybe_storage_gib
-                )
-                if optimal_cost is None or maybe_cost < optimal_cost:
-                    optimal_cost = maybe_cost
-                    optimal_result = (pool.name, maybe_cores_mcpu, maybe_memory_bytes, maybe_storage_gib, None)
-        return optimal_result
-
-    def select_pool_from_worker_type(self, worker_type, cores_mcpu, memory_bytes, storage_bytes):
-        for pool in self.name_pool_config.values():
-            if pool.worker_type == worker_type:
-                result = pool.convert_requests_to_resources(cores_mcpu, memory_bytes, storage_bytes)
-                if result:
-                    actual_cores_mcpu, actual_memory_bytes, acutal_storage_gib = result
-                    return (pool.name, actual_cores_mcpu, actual_memory_bytes, acutal_storage_gib, None)
-        return None
-
-    def select_job_private(self, machine_type, storage_bytes):
+    def select_job_private(self,
+                           machine_type: str,
+                           storage_bytes: int
+                           ) -> Optional[Tuple[int, int, int, str]]:
+        assert self.jpim_config is not None
         return self.jpim_config.convert_requests_to_resources(machine_type, storage_bytes)
-
-    def select_inst_coll(
-        self, machine_type, preemptible, worker_type, req_cores_mcpu, req_memory_bytes, req_storage_bytes
-    ):
-        if preemptible and machine_type is None:
-            if worker_type is not None:
-                result = self.select_pool_from_worker_type(
-                    worker_type=worker_type,
-                    cores_mcpu=req_cores_mcpu,
-                    memory_bytes=req_memory_bytes,
-                    storage_bytes=req_storage_bytes)
-            else:
-                result = self.select_pool_from_cost(
-                    cores_mcpu=req_cores_mcpu,
-                    memory_bytes=req_memory_bytes,
-                    storage_bytes=req_storage_bytes)
-            if result is not None:
-                return result
-
-        # Determine if we can spin up a private machine that fulfills resource requests
-        if machine_type is None:
-            machine_type = resources_to_machine_type(
-                cores_mcpu=req_cores_mcpu,
-                memory_bytes=req_memory_bytes,
-                preemptible=preemptible)
-            if machine_type is None:
-                return None
-            worker_type = None
-
-        assert machine_type and machine_type in valid_machine_types
-        assert worker_type is None
-        result = self.select_job_private(
-            machine_type=machine_type,
-            storage_bytes=req_storage_bytes)
-        return result

@@ -68,7 +68,7 @@ from ..inst_coll_config import InstanceCollectionConfigs
 from ..log_store import LogStore
 from ..database import CallError, check_call_procedure
 from ..batch_configuration import BATCH_BUCKET_NAME, DEFAULT_NAMESPACE
-from ..globals import HTTP_CLIENT_MAX_SIZE, BATCH_FORMAT_VERSION, memory_to_worker_type
+from ..globals import HTTP_CLIENT_MAX_SIZE, BATCH_FORMAT_VERSION
 from ..spec_writer import SpecWriter
 from ..batch_format_version import BatchFormatVersion
 
@@ -689,80 +689,86 @@ WHERE user = %s AND id = %s AND NOT deleted;
                     resources = {}
                     spec['resources'] = resources
 
-                worker_type = None
                 machine_type = resources.get('machine_type')
-                preemptible = resources.get('preemptible', BATCH_JOB_DEFAULT_PREEMPTIBLE)
+                is_pool_job = machine_type is None
+                preemptible = resources.get('preemptible')
+                req_cpu: Optional[str] = resources.pop('cpu', None)
+                req_memory: Optional[str] = resources.pop('memory', None)
+                req_storage: Optional[str] = resources.pop('storage', None)
+                inst_coll_configs: InstanceCollectionConfigs = app['inst_coll_configs']
 
-                if machine_type and ('cpu' in resources or 'memory' in resources):
-                    raise web.HTTPBadRequest(reason='cannot specify cpu and memory with machine_type')
+                if machine_type is not None
+                    req_storage = req_storage or BATCH_JOB_PRIVATE_DEFAULT_STORAGE
+                    resources['req_machine_type'] = machine_type
+                    resources['req_storage'] = req_storage
 
-                if machine_type is None:
-                    if 'cpu' not in resources:
-                        resources['cpu'] = BATCH_JOB_DEFAULT_CPU
-                    resources['req_cpu'] = resources['cpu']
-                    del resources['cpu']
-                    req_cores_mcpu = parse_cpu_in_mcpu(resources['req_cpu'])
+                    if req_cpu is not None:
+                        raise web.HTTPBadRequest(
+                            reason=f'bad resource request for job {id}: machine_type and cpu are mutually exclusive; '
+                            f'cpu={req_cpu}, machine_type={machine_type}.'
+                        )
+                    if req_memory is not None:
+                        raise web.HTTPBadRequest(
+                            reason=f'bad resource request for job {id}: machine_type and memory are mutually exclusive; '
+                            f'memory={req_memory}, machine_type={machine_type}.'
+                        )
+                    req_storage_bytes = parse_storage_in_bytes(req_storage_bytes)
+                    if req_storage_bytes is None:
+                        raise web.HTTPBadRequest(
+                            reason=f'bad resource request for job {id}: '
+                            f'invalid; storage found {req_storage}'
+                        )
 
+                    private_instance = inst_coll_configs.select_job_private(machine_type, req_storage_bytes)
+                    if private_instance is None:
+                        raise web.HTTPBadRequest(
+                            reason=f'unrecognized machine type or invalid storage request for job {id}: '
+                            f'machine_type={machine_type}, storage={req_storage_bytes}.'
+                        )
+                    cores_mcpu, memory_bytes, storage_gib, machine_sub_type = private_instance
+                    resources['machine_type'] = machine_sub_type
+                else:
+                    # machine_type is None implies use a pool
+                    req_cpu = req_cpu or BATCH_JOB_DEFAULT_CPU
+                    req_memory = req_memory or BATCH_JOB_DEFAULT_MEMORY
+                    req_storage = req_storage or BATCH_JOB_POOL_DEFAULT_STORAGE
+                    resources['req_cpu'] = req_cpu
+                    resources['req_memory'] = req_memory
+                    resources['req_storage'] = req_storage
+
+                    req_cores_mcpu = parse_cpu_in_mcpu(req_cpu)
                     if not is_valid_cores_mcpu(req_cores_mcpu):
                         raise web.HTTPBadRequest(
                             reason=f'bad resource request for job {id}: '
                             f'cpu must be a power of two with a min of 0.25; '
-                            f'found {resources["req_cpu"]}.'
+                            f'found {req_cpu}.'
                         )
-
-                    if 'memory' not in resources:
-                        resources['memory'] = BATCH_JOB_DEFAULT_MEMORY
-                    resources['req_memory'] = resources['memory']
-                    del resources['memory']
-                    req_memory = resources['req_memory']
-                    if req_memory in memory_to_worker_type:
-                        worker_type = memory_to_worker_type[req_memory]
-                        req_memory_bytes = cores_mcpu_to_memory_bytes(req_cores_mcpu, worker_type)
-                    else:
-                        req_memory_bytes = parse_memory_in_bytes(req_memory)
-                else:
-                    req_cores_mcpu = None
-                    req_memory_bytes = None
-
-                if 'storage' not in resources:
-                    if machine_type is None:
-                        resources['storage'] = BATCH_JOB_POOL_DEFAULT_STORAGE
-                    else:
-                        resources['storage'] = BATCH_JOB_PRIVATE_DEFAULT_STORAGE
-                resources['req_storage'] = resources['storage']
-                del resources['storage']
-                req_storage_bytes = parse_storage_in_bytes(resources['req_storage'])
-
-                if req_storage_bytes is None:
-                    raise web.HTTPBadRequest(
-                        reason=f'bad resource request for job {id}: '
-                        f'storage must be convertable to bytes; '
-                        f'found {resources["req_storage"]}'
+                    req_memory_bytes = parse_memory_request(req_memory)
+                    if req_memory_bytes is None:
+                        raise web.HTTPBadRequest(
+                            reason=f'bad resource request for job {id}: '
+                            f'invalid memory; found {req_memory}.'
+                        )
+                    req_storage_bytes = parse_storage_in_bytes(req_storage)
+                    if req_storage_bytes is None:
+                        raise web.HTTPBadRequest(
+                            reason=f'bad resource request for job {id}: '
+                            f'invalid storage; found {req_storage}.'
+                        )
+                    resources_and_cost = inst_coll_configs.select_pool(
+                        req_cores_mcpu, req_memory_bytes, req_storage_bytes
                     )
+                    if resources_and_cost is None:
+                        raise web.HTTPBadRequest(
+                            reason=f'no pool can fulfill resource requests for job {id}: '
+                            f'cpu={req_cpu}, mem={req_memory}, storage={req_storage}.'
+                        )
+                    cores_mcpu, memory_bytes, storage_gib = resources_and_cost.resources
 
-                inst_coll_configs: InstanceCollectionConfigs = app['inst_coll_configs']
-
-                result = inst_coll_configs.select_inst_coll(
-                    machine_type, preemptible, worker_type, req_cores_mcpu, req_memory_bytes, req_storage_bytes
-                )
-
-                if result is None:
-                    raise web.HTTPBadRequest(
-                        reason=f'resource requests for job {id} are unsatisfiable: '
-                        f'cpu={resources["req_cpu"]}, '
-                        f'memory={resources["req_memory"]}, '
-                        f'storage={resources["req_storage"]}, '
-                        f'preemptible={preemptible}, '
-                        f'machine_type={machine_type}'
-                    )
-
-                inst_coll_name, cores_mcpu, memory_bytes, storage_gib, machine_type = result
                 resources['cores_mcpu'] = cores_mcpu
                 resources['memory_bytes'] = memory_bytes
                 resources['storage_gib'] = storage_gib
                 resources['preemptible'] = preemptible
-                if machine_type is not None:
-                    resources['machine_type'] = machine_type
 
                 secrets = spec.get('secrets')
                 if not secrets:
