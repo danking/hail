@@ -902,17 +902,13 @@ CREATE PROCEDURE add_attempt(
   OUT delta_cores_mcpu INT
 )
 BEGIN
-  DECLARE attempt_exists BOOLEAN;
   SET delta_cores_mcpu = IFNULL(delta_cores_mcpu, 0);
 
-  SET attempt_exists = EXISTS (SELECT * FROM attempts
-                               WHERE batch_id = in_batch_id AND
-                                 job_id = in_job_id AND attempt_id = in_attempt_id
-                               FOR UPDATE);
+  INSERT INTO attempts (batch_id, job_id, attempt_id, instance_name)
+  VALUES (in_batch_id, in_job_id, in_attempt_id, in_instance_name)
+  ON DUPLICATE KEY UPDATE batch_id = batch_id;
 
-  IF NOT attempt_exists AND in_attempt_id IS NOT NULL THEN
-    INSERT INTO attempts (batch_id, job_id, attempt_id, instance_name) VALUES (in_batch_id, in_job_id, in_attempt_id, in_instance_name);
-
+  IF ROW_COUNT() != 0 AND in_attempt_id IS NOT NULL THEN
     UPDATE instances, instances_free_cores_mcpu
     SET free_cores_mcpu = free_cores_mcpu - in_cores_mcpu
     WHERE instances.name = in_instance_name
@@ -920,7 +916,6 @@ BEGIN
       AND (instances.state = 'pending' OR instances.state = 'active');
 
     SET delta_cores_mcpu = -1 * in_cores_mcpu;
-    END IF;
   END IF;
 END $$
 
