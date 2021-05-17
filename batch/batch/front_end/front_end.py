@@ -465,84 +465,87 @@ async def _query_batches(request, user, q):
         'NOT deleted',
     ]
     where_args = [user]
+    having_conditions = []
+    having_args = []
 
     last_batch_id = request.query.get('last_batch_id')
     if last_batch_id is not None:
         last_batch_id = int(last_batch_id)
-        where_conditions.append('(id < %s)')
+        where_conditions.append('id < %s')
         where_args.append(last_batch_id)
 
     terms = q.split()
     for t in terms:
         if t[0] == '!':
-            negate = True
             t = t[1:]
+            def add_where(expr, args):
+                where_conditions.append('(NOT (' + expr + '))')
+                where_args.extend(args)
+            def add_having(expr, args):
+                having_conditions.append('(NOT (' + expr + '))')
+                having_args.extend(args)
         else:
-            negate = False
+            def add_where(expr, args):
+                where_conditions.append(expr)
+                where_args.extend(args)
+            def add_having(expr, args):
+                having_conditions.append(expr)
+                having_args.extend(args)
 
         if '=' in t:
             k, v = t.split('=', 1)
-            condition = '''
-((batches.id) IN
+            add_where('''
+batches.id IN
  (SELECT batch_id FROM batch_attributes
-  WHERE `key` = %s AND `value` = %s))
-'''
-            args = [k, v]
+  WHERE `key` = %s AND `value` = %s)
+''', [k, v])
         elif t.startswith('has:'):
             k = t[4:]
-            condition = '''
-((batches.id) IN
+            add_where('''
+batches.id IN
  (SELECT batch_id FROM batch_attributes
-  WHERE `key` = %s))
-'''
-            args = [k]
+  WHERE `key` = %s)
+''', [k])
         elif t.startswith('user:'):
             k = t[5:]
-            condition = '''
-(batches.`user` = %s)
-'''
-            args = [k]
+            add_where('''
+batches.`user` = %s
+''', [k])
         elif t.startswith('billing_project:'):
             k = t[16:]
-            condition = '''
-(batches.`billing_project` = %s)
-'''
-            args = [k]
+            add_where('''
+batches.`billing_project` = %s
+''', [k])
         elif t == 'open':
-            condition = "(`state` = 'open')"
-            args = []
+            add_where("`state` = 'open'", [])
         elif t == 'closed':
-            condition = "(`state` != 'open')"
-            args = []
+            add_where("`state` != 'open'", [])
         elif t == 'complete':
-            condition = "(`state` = 'complete')"
-            args = []
+            add_where("`state` = 'complete'", [])
         elif t == 'running':
-            condition = "(`state` = 'running')"
-            args = []
+            add_where("`state` = 'running'", [])
         elif t == 'cancelled':
-            condition = '(batches_cancelled.id IS NOT NULL)'
-            args = []
+            add_where('batches_cancelled.id IS NOT NULL', [])
         elif t == 'failure':
-            condition = '(n_failed > 0)'
-            args = []
+            add_having('COALESCE(SUM(n_failed), 0) > 0', [])
         elif t == 'success':
             # need complete because there might be no jobs
-            condition = "(`state` = 'complete' AND n_succeeded = n_jobs)"
-            args = []
+            add_where("`state` = 'complete'", [])
+            add_having("COALESCE(SUM(n_succeeded), 0) = n_jobs", [])
         else:
             session = await aiohttp_session.get_session(request)
             set_message(session, f'Invalid search term: {t}.', 'error')
             return ([], None)
 
-        if negate:
-            condition = f'(NOT {condition})'
-
-        where_conditions.append(condition)
-        where_args.extend(args)
 
     sql = f'''
-SELECT batches.*, SUM(`usage` * rate) AS cost, batches_cancelled.id IS NOT NULL as cancelled
+SELECT batches.*,
+       SUM(`usage` * rate) AS cost,
+       batches_cancelled.id IS NOT NULL as cancelled,
+       COALESCE(SUM(n_completed), 0) as n_completed,
+       COALESCE(SUM(n_succeeded), 0) as n_succeeded,
+       COALESCE(SUM(n_failed), 0) as n_failed,
+       COALESCE(SUM(n_cancelled), 0) as n_cancelled
 FROM batches
 LEFT JOIN aggregated_batch_resources
   ON batches.id = aggregated_batch_resources.batch_id
@@ -550,12 +553,15 @@ LEFT JOIN resources
   ON aggregated_batch_resources.resource = resources.resource
 LEFT JOIN batches_cancelled
   ON batches.id = batches_cancelled.id
+LEFT JOIN batches_job_state_summary
+  ON batches.id = batches_job_state_summary.id
 WHERE {' AND '.join(where_conditions)}
 GROUP BY batches.id
+{ 'HAVING' if len(having_conditions) > 0 else '' }{' AND '.join(having_conditions)}
 ORDER BY batches.id DESC
 LIMIT 51;
 '''
-    sql_args = where_args
+    sql_args = where_args + having_args
 
     batches = [batch_record_to_dict(batch) async for batch in db.select_and_fetchall(sql, sql_args)]
 
@@ -1093,7 +1099,13 @@ async def _get_batch(app, batch_id):
 
     record = await db.select_and_fetchone(
         '''
-SELECT batches.*, SUM(`usage` * rate) AS cost, batches_cancelled.id IS NOT NULL as cancelled
+SELECT batches.*,
+       SUM(`usage` * rate) AS cost,
+       batches_cancelled.id IS NOT NULL as cancelled,
+       COALESCE(SUM(n_completed), 0) as n_completed,
+       COALESCE(SUM(n_succeeded), 0) as n_succeeded,
+       COALESCE(SUM(n_failed), 0) as n_failed,
+       COALESCE(SUM(n_cancelled), 0) as n_cancelled
 FROM batches
 LEFT JOIN aggregated_batch_resources
        ON batches.id = aggregated_batch_resources.batch_id
@@ -1101,6 +1113,8 @@ LEFT JOIN resources
        ON aggregated_batch_resources.resource = resources.resource
 LEFT JOIN batches_cancelled
        ON batches.id = batches_cancelled.id
+LEFT JOIN batches_job_state_summary
+       ON batches.id = batches_job_state_summary.id
 WHERE batches.id = %s AND NOT deleted
 GROUP BY batches.id;
 ''',

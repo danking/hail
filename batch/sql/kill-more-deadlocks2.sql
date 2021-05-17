@@ -2,7 +2,7 @@ CREATE TABLE IF NOT EXISTS `instances_free_cores_mcpu` (
   `name` VARCHAR(100) NOT NULL,
   `free_cores_mcpu` INT NOT NULL,
   PRIMARY KEY (`name`),
-  FOREIGN KEY (`name`) REFERENCES instances(`name`)
+  FOREIGN KEY (`name`) REFERENCES instances(`name`) ON DELETE CASCADE
 ) ENGINE = InnoDB;
 
 INSERT INTO `instances_free_cores_mcpu`

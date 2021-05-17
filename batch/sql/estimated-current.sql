@@ -43,17 +43,17 @@ VALUES ('standard', 'standard', 16, 1, 0, 1, 4);
 
 INSERT INTO pools (`name`, `worker_type`, `worker_cores`, `worker_local_ssd_data_disk`,
   `worker_pd_ssd_data_disk_size_gb`, `enable_standing_worker`, `standing_worker_cores`)
-VALUES ('highmem', 'highmem', 16, 10, 1, 0, 0, 4);
+VALUES ('highmem', 'highmem', 16, 10, 1, 0, 4);
 
 INSERT INTO pools (`name`, `worker_type`, `worker_cores`, `worker_local_ssd_data_disk`,
   `worker_pd_ssd_data_disk_size_gb`, `enable_standing_worker`, `standing_worker_cores`)
-VALUES ('highcpu', 'highcpu', 16, 10, 1, 0, 0, 4);
+VALUES ('highcpu', 'highcpu', 16, 10, 1, 0, 4);
 
 CREATE TABLE IF NOT EXISTS `billing_projects` (
   `name` VARCHAR(100) NOT NULL,
   `status` ENUM('open', 'closed', 'deleted') NOT NULL DEFAULT 'open',
   `limit` DOUBLE DEFAULT NULL,
-  `msec_mcpu` BIGINT DEFAULT 0
+  `msec_mcpu` BIGINT DEFAULT 0,
   PRIMARY KEY (`name`)
 ) ENGINE = InnoDB;
 CREATE INDEX `billing_project_status` ON `billing_projects` (`status`);
@@ -140,10 +140,6 @@ CREATE TABLE IF NOT EXISTS `batches` (
   `deleted` BOOLEAN NOT NULL DEFAULT FALSE,
   `cancelled` BOOLEAN NOT NULL DEFAULT FALSE,
   `n_jobs` INT NOT NULL,
-  `n_completed` INT NOT NULL DEFAULT 0,
-  `n_succeeded` INT NOT NULL DEFAULT 0,
-  `n_failed` INT NOT NULL DEFAULT 0,
-  `n_cancelled` INT NOT NULL DEFAULT 0,
   `time_created` BIGINT NOT NULL,
   `time_closed` BIGINT,
   `time_completed` BIGINT,
@@ -160,10 +156,20 @@ CREATE INDEX `batches_token` ON `batches` (`token`);
 CREATE INDEX `batches_time_completed` ON `batches` (`time_completed`);
 CREATE INDEX `batches_billing_project_state` ON `batches` (`billing_project`, `state`);
 
+CREATE TABLE IF NOT EXISTS `batches_job_state_summary` (
+  `id` BIGINT NOT NULL,
+  `n_completed` INT NOT NULL DEFAULT 0,
+  `n_succeeded` INT NOT NULL DEFAULT 0,
+  `n_failed` INT NOT NULL DEFAULT 0,
+  `n_cancelled` INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`)
+  FOREIGN KEY (`id`) REFERENCES batches(id)
+) ENGINE = InnoDB;
+
 CREATE TABLE IF NOT EXISTS `batches_cancelled` (
   `id` BIGINT NOT NULL,
   PRIMARY KEY (`id`),
-  FOREIGN KEY (`id`) REFERENCES billing_projects(id)
+  FOREIGN KEY (`id`) REFERENCES batches(id)
 ) ENGINE = InnoDB;
 
 CREATE TABLE IF NOT EXISTS `batches_inst_coll_staging` (
@@ -1150,6 +1156,9 @@ BEGIN
   DECLARE cur_end_time BIGINT;
   DECLARE delta_cores_mcpu INT DEFAULT 0;
   DECLARE expected_attempt_id VARCHAR(40);
+  DECLARE cur_n_tokens INT;
+  DECLARE rand_token INT;
+  DECLARE is_complete BOOLEAN;
 
   START TRANSACTION;
 
@@ -1193,30 +1202,44 @@ BEGIN
     SET state = new_state, status = new_status, attempt_id = in_attempt_id
     WHERE batch_id = in_batch_id AND job_id = in_job_id;
 
-    UPDATE batches SET n_completed = n_completed + 1 WHERE id = in_batch_id;
-    UPDATE batches
-      SET time_completed = new_timestamp,
-          `state` = 'complete'
-      WHERE id = in_batch_id AND n_completed = batches.n_jobs;
+    SELECT n_tokens INTO cur_n_tokens FROM globals LOCK IN SHARE MODE;
+    SET rand_token = FLOOR(RAND() * cur_n_tokens);
 
-    IF new_state = 'Cancelled' THEN
-      UPDATE batches SET n_cancelled = n_cancelled + 1 WHERE id = in_batch_id;
-    ELSEIF new_state = 'Error' OR new_state = 'Failed' THEN
-      UPDATE batches SET n_failed = n_failed + 1 WHERE id = in_batch_id;
-    ELSE
-      UPDATE batches SET n_succeeded = n_succeeded + 1 WHERE id = in_batch_id;
+    INSERT INTO batches_job_state_summary VALUES(
+      in_batch_id,
+      rand_token,
+      1,
+      n_cancelled + (new_state = 'Cancelled'),
+      n_failed + (new_state = 'Failed' OR new_state = 'Error'),
+      n_succeeded + (new_state = 'Success'))
+    ON DUPLICATE KEY UPDATE
+      n_completed = n_completed + 1,
+      n_cancelled = n_cancelled + (new_state = 'Cancelled'),
+      n_failed = n_failed + (new_state = 'Failed' OR new_state = 'Error'),
+      n_succeeded = n_succeeded + (new_state = 'Success');
+
+    SELECT COALESCE(SUM(n_completed), 0) = n_jobs INTO is_complete
+    FROM batches INNER JOIN batches_job_state_summary
+    GROUP BY batches.id
+    LOCK IN SHARE MODE;
+
+    IF is_complete THEN
+      UPDATE batches
+         SET time_completed = IFNULL(time_completed, new_timestamp),
+             `state` = 'complete'
+      WHERE id = in_batch_id;
     END IF;
 
     UPDATE jobs
-      INNER JOIN `job_parents`
+    INNER JOIN `job_parents`
         ON jobs.batch_id = `job_parents`.batch_id AND
            jobs.job_id = `job_parents`.job_id
-      SET jobs.state = IF(jobs.n_pending_parents = 1, 'Ready', 'Pending'),
-          jobs.n_pending_parents = jobs.n_pending_parents - 1,
-          jobs.cancelled = IF(new_state = 'Success', jobs.cancelled, 1)
-      WHERE jobs.batch_id = in_batch_id AND
-            `job_parents`.batch_id = in_batch_id AND
-            `job_parents`.parent_id = in_job_id;
+       SET jobs.state = IF(jobs.n_pending_parents = 1, 'Ready', 'Pending'),
+           jobs.n_pending_parents = jobs.n_pending_parents - 1,
+           jobs.cancelled = IF(new_state = 'Success', jobs.cancelled, 1)
+     WHERE jobs.batch_id = in_batch_id AND
+           `job_parents`.batch_id = in_batch_id AND
+           `job_parents`.parent_id = in_job_id;
 
     COMMIT;
     SELECT 0 as rc,

@@ -567,7 +567,7 @@ class Container:
 
     # {
     #   name: str,
-    #   state: str, (pending, pulling, creating, starting, running, uploading_log, deleting, suceeded, error, failed)
+    #   state: str, (pending, pulling, creating, starting, running, uploading_log, deleting, succeeded, error, failed)
     #   timing: dict(str, float),
     #   error: str, (optional)
     #   short_error: str, (optional)

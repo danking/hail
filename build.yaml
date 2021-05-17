@@ -2249,6 +2249,8 @@ steps:
         script: /io/sql/kill-more-deadlocks2.sql
       - name: no-locks-add-attempt
         script: /io/sql/no-locks-add-attempt.sql
+      - name: batches-job-state-summary
+        script: /io/sql/batches-job-state-summary.sql
     inputs:
       - from: /repo/batch/sql
         to: /io/sql

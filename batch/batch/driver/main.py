@@ -884,9 +884,13 @@ async def cancel_fast_failing_batches(app):
 
     records = db.select_and_fetchall(
         '''
-SELECT id
+SELECT batches.id, cancel_after_n_failures
 FROM batches
-WHERE state = 'running' AND cancel_after_n_failures IS NOT NULL AND n_failed >= cancel_after_n_failures
+LEFT JOIN batches_job_state_summary
+       ON batches.id = batches_job_state_summary.id
+WHERE state = 'running' AND cancel_after_n_failures IS NOT NULL
+GROUP BY batches.id
+HAVING COALESCE(SUM(n_failed), 0) >= cancel_after_n_failures
 '''
     )
     async for batch in records:

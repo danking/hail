@@ -32,6 +32,7 @@ DROP TABLE IF EXISTS `batch_bunches`;
 DROP TABLE IF EXISTS `ready_cores`;  # deprecated
 DROP TABLE IF EXISTS `gevents_mark`;
 DROP TABLE IF EXISTS `jobs`;
+DROP TABLE IF EXISTS `batches_job_state_summary`;
 DROP TABLE IF EXISTS `batches_cancelled`;
 DROP TABLE IF EXISTS `batches_staging`;  # deprecated
 DROP TABLE IF EXISTS `batches_inst_coll_staging`;
