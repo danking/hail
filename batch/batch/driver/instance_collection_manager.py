@@ -1,13 +1,14 @@
+from typing import Dict, Optional
 import asyncio
 import re
 import collections
 import logging
-from typing import Dict
 
 from gear import Database
 
 from ..inst_coll_config import InstanceCollectionConfigs
 from .instance_collection import InstanceCollection
+from .instance import Instance
 from .job_private import JobPrivateInstanceManager
 from .pool import Pool
 
@@ -19,13 +20,14 @@ class InstanceCollectionManager:
         self.app = app
         self.db: Database = app['db']
         self.machine_name_prefix = machine_name_prefix
-        self.inst_coll_regex = re.compile(f'{self.machine_name_prefix}(?P<inst_coll>.*)-.*')
+        self.inst_coll_regex = re.compile(f'{self.machine_name_prefix}(?P<inst_coll>[^-]*)-.*')
 
         self.name_inst_coll: Dict[str, InstanceCollection] = {}
         self.name_pool: Dict[str, Pool] = {}
         self.job_private_inst_manager: JobPrivateInstanceManager = None
 
     async def async_init(self, config_manager: InstanceCollectionConfigs):
+        assert config_manager.jpim_config is not None
         jpim = JobPrivateInstanceManager(self.app, self.machine_name_prefix, config_manager.jpim_config)
         self.job_private_inst_manager = jpim
         self.name_inst_coll[jpim.name] = jpim
@@ -73,9 +75,7 @@ class InstanceCollectionManager:
     def get_inst_coll(self, inst_coll_name):
         return self.name_inst_coll.get(inst_coll_name)
 
-    def get_instance(self, inst_name):
-        inst_coll_name = None
-
+    def get_instance(self, inst_name) -> Optional[Instance]:
         match = re.search(self.inst_coll_regex, inst_name)
         if match:
             inst_coll_name = match.groupdict()['inst_coll']

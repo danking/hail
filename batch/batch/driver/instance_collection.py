@@ -10,7 +10,7 @@ from hailtop import aiotools, aiogoogle
 from gear import Database
 
 from .instance import Instance
-from .zone_monitor import ZoneMonitor
+from .zoned_family_monitor import ZonedFamilyMonitor
 
 log = logging.getLogger('inst_collection')
 
@@ -20,7 +20,7 @@ class InstanceCollection:
         self.app = app
         self.db: Database = app['db']
         self.compute_client: aiogoogle.ComputeClient = self.app['compute_client']
-        self.zone_monitor: ZoneMonitor = self.app['zone_monitor']
+        self.zoned_family_monitor: ZonedFamilyMonitor = self.app['zoned_family_monitor']
 
         self.name = name
         self.machine_name_prefix = f'{machine_name_prefix}{self.name}-'
@@ -52,11 +52,11 @@ class InstanceCollection:
     def n_instances(self):
         return len(self.name_instance)
 
-    def generate_machine_name(self):
+    def generate_machine_name(self, family):
         while True:
             # 36 ** 5 = ~60M
             suffix = secret_alnum_string(5, case='lower')
-            machine_name = f'{self.machine_name_prefix}{suffix}'
+            machine_name = f'{self.machine_name_prefix}{family}-{suffix}'
             if machine_name not in self.name_instance:
                 break
         return machine_name
