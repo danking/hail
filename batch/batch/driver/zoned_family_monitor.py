@@ -1,5 +1,8 @@
+from typing import Tuple, List, Optional, Dict
+
 import logging
 import random
+from collections import defaultdict
 
 from hailtop import aiotools, aiogoogle
 from hailtop.utils import periodically_call, url_basename
@@ -7,52 +10,44 @@ from hailtop.utils import periodically_call, url_basename
 from ..utils import WindowFractionCounter
 from ..batch_configuration import BATCH_GCP_REGIONS, GCP_ZONE
 
-log = logging.getLogger('zone_monitor')
+log = logging.getLogger('zoned_family_monitor')
 
 
-class ZoneWeight:
-    def __init__(self, zone, weight):
+class ZonedFamilyWeight:
+    def __init__(self, zone: str, family: str, weight):
         self.zone = zone
+        self.family = family
         self.weight = weight
 
     def __repr__(self):
-        return f'{self.zone}: {self.weight}'
+        return f'{(self.zone, self.family)}: {self.weight}'
 
 
-class ZoneSuccessRate:
+class ZonedFamilySuccessRate:
     def __init__(self):
         self._global_counter = WindowFractionCounter(10)
-        self._zone_counters = {}
+        self._zoned_family_counters: Dict[Tuple[str, str], WindowFractionCounter] = defaultdict(lambda: WindowFractionCounter(10))
 
-    def _get_zone_counter(self, zone: str):
-        zone_counter = self._zone_counters.get(zone)
-        if not zone_counter:
-            zone_counter = WindowFractionCounter(10)
-            self._zone_counters[zone] = zone_counter
-        return zone_counter
-
-    def push(self, zone: str, key: str, success: bool):
+    def push(self, zoned_family: Tuple[str, str], key: str, success: bool):
         self._global_counter.push(key, success)
-        zone_counter = self._get_zone_counter(zone)
-        zone_counter.push(key, success)
+        self._zoned_family_counters[zoned_family].push(key, success)
 
     def global_success_rate(self) -> float:
         return self._global_counter.fraction()
 
-    def zone_success_rate(self, zone) -> float:
-        zone_counter = self._get_zone_counter(zone)
-        return zone_counter.fraction()
+    def zoned_family_success_rate(self, zoned_family: Tuple[str, str]) -> float:
+        return self._zoned_family_counters[zoned_family].fraction()
 
     def __repr__(self):
-        return f'global {self._global_counter}, zones {self._zone_counters}'
+        return f'global {self._global_counter}, zones {self._zoned_family_counters}'
 
 
-class ZoneMonitor:
+class ZonedFamilyMonitor:
     def __init__(self, app):
         self.app = app
         self.compute_client: aiogoogle.ComputeClient = app['compute_client']
 
-        self.zone_success_rate = ZoneSuccessRate()
+        self.zoned_family_success_rate = ZonedFamilySuccessRate()
 
         self.region_info = None
         self.zones = []
@@ -65,32 +60,38 @@ class ZoneMonitor:
     def shutdown(self):
         self.task_manager.shutdown()
 
-    def get_zone(self, worker_cores, worker_local_ssd_data_disk, worker_pd_ssd_data_disk_size_gb):
+    def get_zone(self, worker_cores, worker_local_ssd_data_disk, worker_pd_ssd_data_disk_size_gb) -> Optional[str]:
+        zoned_family = self.get_zoned_family(worker_cores, worker_local_ssd_data_disk, worker_pd_ssd_data_disk_size_gb)
+        if zoned_family:
+            return zoned_family[0]
+        return None
+
+    def get_zoned_family(self, worker_cores, worker_local_ssd_data_disk, worker_pd_ssd_data_disk_size_gb) -> Optional[Tuple[str, str]]:
         if self.app['inst_coll_manager'].global_live_total_cores_mcpu // 1000 < 1_000:
-            zone = GCP_ZONE
-        else:
-            zone_weights = self.zone_weights(worker_cores, worker_local_ssd_data_disk, worker_pd_ssd_data_disk_size_gb)
+            return (GCP_ZONE, 'n2')
 
-            if not zone_weights:
-                return None
+        zoned_family_weights = self.zoned_family_weights(
+            worker_cores, worker_local_ssd_data_disk, worker_pd_ssd_data_disk_size_gb)
 
-            zones = [zw.zone for zw in zone_weights]
+        if not zoned_family_weights:
+            return None
 
-            zone_prob_weights = [
-                min(zw.weight, 10) * self.zone_success_rate.zone_success_rate(zw.zone) for zw in zone_weights
-            ]
+        zones = [(zw.zone, zw.family) for zw in zoned_family_weights]
 
-            log.info(f'zone_success_rate {self.zone_success_rate}')
-            log.info(f'zone_prob_weights {zone_prob_weights}')
+        zoned_family_prob_weights = [
+            min(zw.weight, 10) * self.zoned_family_success_rate.zoned_family_success_rate((zw.zone, zw.family)) for zw in zoned_family_weights
+        ]
 
-            zone = random.choices(zones, zone_prob_weights)[0]
-        return zone
+        log.info(f'zoned_family_success_rate {self.zoned_family_success_rate}')
+        log.info(f'zoned_family_prob_weights {zoned_family_prob_weights}')
 
-    def zone_weights(self, worker_cores, worker_local_ssd_data_disk, worker_pd_ssd_data_disk_size_gb):
+        return random.choices(zones, zoned_family_prob_weights)[0]
+
+    def zoned_family_weights(self, worker_cores, worker_local_ssd_data_disk, worker_pd_ssd_data_disk_size_gb) -> Optional[List[ZonedFamilyWeight]]:
         if not self.region_info:
             return None
 
-        _zone_weights = []
+        _zoned_family_weights = []
         for r in self.region_info.values():
             quota_remaining = {q['metric']: q['limit'] - q['usage'] for q in r['quotas']}
 
@@ -102,11 +103,12 @@ class ZoneMonitor:
 
             weight = max(remaining / len(r['zones']), 1)
             for z in r['zones']:
-                zone_name = url_basename(z)
-                _zone_weights.append(ZoneWeight(zone_name, weight))
+                zoned_family_name = url_basename(z)
+                for family in ('n1', 'n2'):
+                    _zoned_family_weights.append(ZonedFamilyWeight(zoned_family_name, family, weight))
 
-        log.info(f'zone_weights {_zone_weights}')
-        return _zone_weights
+        log.info(f'zoned_family_weights {_zoned_family_weights}')
+        return _zoned_family_weights
 
     async def update_region_quotas(self):
         self.region_info = {name: await self.compute_client.get(f'/regions/{name}') for name in BATCH_GCP_REGIONS}
