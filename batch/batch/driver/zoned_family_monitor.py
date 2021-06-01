@@ -126,7 +126,7 @@ class ZonedFamilyMonitor:
 
             remaining = quota_remaining['PREEMPTIBLE_CPUS'] / worker_cores
             if worker_local_ssd_data_disk:
-                remaining = min(remaining, quota_remaining['LOCAL_SSD_TOTAL_GB'] / 375)
+                remaining = min(remaining, quota_remaining['PREEMPTIBLE_LOCAL_SSD_GB'] / 375)
             else:
                 remaining = min(remaining, quota_remaining['SSD_TOTAL_GB'] / worker_pd_ssd_data_disk_size_gb)
 
