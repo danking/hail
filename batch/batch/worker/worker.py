@@ -1660,6 +1660,7 @@ class ImageData:
                f'last_accessed={time_msecs_str(self.last_accessed)}' \
                f')'
 
+
 def write_int(writer: asyncio.StreamWriter, v: int):
     writer.write(struct.pack('>i', v))
 
@@ -1672,6 +1673,7 @@ def write_bytes(writer: asyncio.StreamWriter, b: bytes):
     n = len(b)
     write_int(writer, n)
     writer.write(b)
+
 
 def write_str(writer: asyncio.StreamWriter, s: str):
     write_bytes(writer, s.encode('utf-8'))
@@ -1767,7 +1769,6 @@ class BufferedOutputProcess:
                         result = read_fut.result()
                         self.buf.extend(result)
 
-
     def output(self) -> str:
         return self.buf.decode()
 
@@ -1786,7 +1787,7 @@ class BufferedOutputProcess:
     def close(self):
         self.kill()
         self.stdout_pump.cancel()
-        self.stderrr_pump.cancel()
+        self.stderr_pump.cancel()
 
 
 class JVM:
@@ -1870,7 +1871,6 @@ class JVM:
                     break
                 except FileNotFoundError:
                     await asyncio.sleep(0.25)
-                    pass
             stack.callback(writer.close)
             log.info(f'{self}: connection acquired')
 
@@ -1934,6 +1934,8 @@ class Worker:
         self.log_store = None
         self.headers = None
         self.compute_client = None
+
+        self.jvms: List[JVM] = []
 
     async def shutdown(self):
         self.task_manager.shutdown()

@@ -70,9 +70,9 @@ class StringTableReader(
       val requestedPType = bodyPType(requestedRowType)
       val rowFieldNames = requestedRowType.fieldNames
 
-      { (region: Region, context: Any) =>
+      { (region: Region, fs: FS, context: Any) =>
         val rvb = new RegionValueBuilder(region)
-        linesBody(context).map{ bLine =>
+        linesBody(fs, context).map{ bLine =>
           val line = bLine.toString
           rvb.start(requestedPType)
           rvb.startStruct()
