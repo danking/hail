@@ -665,7 +665,7 @@ class SourceCopier:
         part_size = dest_fs._copy_part_size()
 
         if size <= part_size:
-            await retry_transient_errors(self._copy_file, srcfile, size, destfile)
+            await retry_transient_errors(asyncio.wait_for, self._copy_file(srcfile, size, destfile), timeout=5)
             return
 
         n_parts, rem = divmod(size, part_size)
