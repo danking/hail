@@ -666,6 +666,7 @@ class SourceCopier:
 
         if size <= part_size:
             await retry_transient_errors(self._copy_file, srcfile, size, destfile)
+            source_report.finish_bytes(size)
             return
 
         n_parts, rem = divmod(size, part_size)
