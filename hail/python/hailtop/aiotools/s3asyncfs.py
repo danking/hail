@@ -451,4 +451,5 @@ class S3AsyncFS(AsyncFS):
     def _copy_part_size():
         # Because the S3 upload_part API call requires the entire part
         # be loaded into memory, use a smaller part size.
-        return 8 * 1024 * 1024
+        # return 8 * 1024 * 1024
+        return 32 * 1024 * 1024
