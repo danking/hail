@@ -449,7 +449,7 @@ async def bounded_gather2_return_exceptions(sema: asyncio.Semaphore, *pfs):
         return await asyncio.gather(*tasks)
 
 
-async def bounded_gather2_raise_exceptions(sema: asyncio.Semaphore, *pfs, cancel_on_error: bool = False):
+async def bounded_gather2_raise_exceptions(sema: asyncio.Semaphore, *pfs, cancel_on_error: bool = False, timeout=5):
     '''Run the partial functions `pfs` as tasks with parallelism bounded
     by `sema`, which should be `asyncio.Semaphore` whose initial value
     is the level of parallelism.
@@ -464,11 +464,19 @@ async def bounded_gather2_raise_exceptions(sema: asyncio.Semaphore, *pfs, cancel
     cancel_on_error is True, the unfinished tasks are all cancelled.
 
     '''
-    async def run_with_sema(pf):
-        async with sema:
-            return await pf()
+    async def run_with_sema_timeout(pf):
+        async def run_with_sema():
+            async with sema:
+                return await pf()
 
-    tasks = [asyncio.create_task(run_with_sema(pf)) for pf in pfs]
+        task_timeout = timeout
+        while True:
+            try:
+                return asyncio.wait_for(run_with_sema(), timeout=task_timeout)
+            except asyncio.TimeoutError:
+                task_timeout = await sleep_and_backoff(task_timeout)
+
+    tasks = [asyncio.create_task(run_with_sema_timeout(pf)) for pf in pfs]
 
     if not cancel_on_error:
         async with WithoutSemaphore(sema):
@@ -488,10 +496,10 @@ async def bounded_gather2_raise_exceptions(sema: asyncio.Semaphore, *pfs, cancel
                     await asyncio.wait(tasks)
 
 
-async def bounded_gather2(sema: asyncio.Semaphore, *pfs, return_exceptions: bool = False, cancel_on_error: bool = False):
+async def bounded_gather2(sema: asyncio.Semaphore, *pfs, return_exceptions: bool = False, cancel_on_error: bool = False, timeout=5):
     if return_exceptions:
         return await bounded_gather2_return_exceptions(sema, *pfs)
-    return await bounded_gather2_raise_exceptions(sema, *pfs, cancel_on_error=cancel_on_error)
+    return await bounded_gather2_raise_exceptions(sema, *pfs, cancel_on_error=cancel_on_error, timeout=timeout)
 
 
 RETRYABLE_HTTP_STATUS_CODES = {408, 500, 502, 503, 504}
