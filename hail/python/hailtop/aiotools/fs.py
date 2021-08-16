@@ -456,7 +456,7 @@ class Transfer:
 
 
 class SourceReport:
-    def __init__(self, source, tqdm_files: Optional[Any]=None, tqdm_bytes: Optional[Any]=None):
+    def __init__(self, source, tqdm_files: Optional[Any], tqdm_bytes: Optional[Any]=None):
         self._source = source
         self._source_type: Optional[str] = None
         self._files = 0
