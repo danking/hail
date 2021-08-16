@@ -682,8 +682,9 @@ class SourceCopier:
             async def f(i):
                 this_part_size = rem if i == n_parts - 1 and rem else part_size
                 await retry_transient_errors(
-                    self._copy_part,
-                    source_report, part_size, srcfile, i, this_part_size, part_creator, return_exceptions)
+                    asyncio.wait_for,
+                    self._copy_part(source_report, part_size, srcfile, i, this_part_size, part_creator, return_exceptions),
+                    timeout=5)
                 source_report.finish_bytes(this_part_size)
 
             await bounded_gather2(sema, *[
