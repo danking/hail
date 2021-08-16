@@ -73,7 +73,7 @@ async def main() -> None:
             sortby = SortKey.CUMULATIVE
             ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
             ps.print_stats()
-            asyncio.sleep(60)
+            await asyncio.sleep(60)
 
     stats_fut = asyncio.ensure_future(dump_stats())
 
