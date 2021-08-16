@@ -456,7 +456,7 @@ class Transfer:
 
 
 class SourceReport:
-    def __init__(self, source, tqdm_files: Optional[Any], tqdm_bytes: Optional[Any]):
+    def __init__(self, source, tqdm_files: Optional[Any]=None, tqdm_bytes: Optional[Any]=None):
         self._source = source
         self._source_type: Optional[str] = None
         self._files = 0
@@ -526,7 +526,7 @@ class CopyReport:
         if isinstance(transfer, Transfer):
             self._transfer_report: Union[TransferReport, List[TransferReport]] = TransferReport(transfer, *args, **kwargs)
         else:
-            self._transfer_report = [TransferReport(t) for t in transfer]
+            self._transfer_report = [TransferReport(t, *args, **kwargs) for t in transfer]
         self._exception: Optional[Exception] = None
 
     def set_exception(self, exception: Exception):
