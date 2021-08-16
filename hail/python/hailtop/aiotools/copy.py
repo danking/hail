@@ -50,9 +50,10 @@ async def copy(requester_pays_project: Optional[str],
         async with RouterAsyncFS(default_scheme, filesystems) as fs:
             sema = asyncio.Semaphore(50)
             async with sema:
-                with tqdm(desc='files', position=1) as tqdm_files, tqdm(desc='bytes', position=2) as tqdm_bytes:
+                with tqdm(desc='files', leave=False, position=0) as tqdm_files, \
+                     tqdm(desc='bytes', leave=False, position=1) as tqdm_bytes:
                     copy_report = await fs.copy(sema, transfers, tqdm_files=tqdm_files, tqdm_bytes=tqdm_bytes)
-                    copy_report.summarize()
+                copy_report.summarize()
 
 
 async def main() -> None:

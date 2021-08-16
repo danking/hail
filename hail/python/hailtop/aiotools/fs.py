@@ -456,7 +456,7 @@ class Transfer:
 
 
 class SourceReport:
-    def __init__(self, source, tqdm_files: Optional[Any], tqdm_bytes: Optional[Any]=None):
+    def __init__(self, source, tqdm_files: Optional[Any]=None, tqdm_bytes: Optional[Any]=None):
         self._source = source
         self._source_type: Optional[str] = None
         self._files = 0
@@ -470,21 +470,25 @@ class SourceReport:
 
     def start_copying(self, files: int, total_bytes: int):
         self._files += files
-        if self._tqdm_files:
+        if self._tqdm_files is not None:
+            if self._tqdm_files.total is None:
+                self._tqdm_files.total = 0
             self._tqdm_files.total += files
             self._tqdm_files.refresh()
 
         self._bytes += total_bytes
-        if self._tqdm_bytes:
+        if self._tqdm_bytes is not None:
+            if self._tqdm_bytes.total is None:
+                self._tqdm_bytes.total = 0
             self._tqdm_bytes.total += total_bytes
             self._tqdm_bytes.refresh()
 
     def finish_copying_success(self, files: int, total_bytes: int):
         self._complete += files
-        if self._tqdm_files:
+        if self._tqdm_files is not None:
             self._tqdm_files.update(files)
-        if self._tqdm_bytes:
-            self._tqdm_files.update(total_bytes)
+        if self._tqdm_bytes is not None:
+            self._tqdm_bytes.update(total_bytes)
 
     def finish_copying_failure(self, files: int, total_bytes: int):
         self._errors += files
