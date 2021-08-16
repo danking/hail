@@ -681,14 +681,14 @@ class SourceCopier:
         async with part_creator:
             with tqdm(desc='part semaphore', position=2, total=sema._value+1) as pbar:
                 async def f(i):
-                    pbar.update(i)
+                    pbar.update(1)
                     this_part_size = rem if i == n_parts - 1 and rem else part_size
                     await retry_transient_errors(
                         asyncio.wait_for,
                         self._copy_part(source_report, part_size, srcfile, i, this_part_size, part_creator, return_exceptions),
                         timeout=5)
                     source_report.finish_bytes(this_part_size)
-                    pbar.update(-i)
+                    pbar.update(-1)
 
                 await bounded_gather2(sema, *[
                     functools.partial(f, i)
