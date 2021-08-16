@@ -13,7 +13,7 @@ import functools
 import humanize
 from hailtop.utils import (
     retry_transient_errors, blocking_to_async, url_basename, url_join, bounded_gather2,
-    time_msecs, humanize_timedelta_msecs, OnlineBoundedGather2)
+    time_msecs, humanize_timedelta_msecs, OnlineBoundedGather2, tqdm)
 from .weighted_semaphore import WeightedSemaphore
 from .stream import ReadableStream, WritableStream, blocking_readable_stream_to_async, blocking_writable_stream_to_async
 
@@ -679,18 +679,21 @@ class SourceCopier:
             part_creator = await self.router_fs.multi_part_create(sema, destfile, n_parts)
 
         async with part_creator:
-            async def f(i):
-                this_part_size = rem if i == n_parts - 1 and rem else part_size
-                await retry_transient_errors(
-                    asyncio.wait_for,
-                    self._copy_part(source_report, part_size, srcfile, i, this_part_size, part_creator, return_exceptions),
-                    timeout=5)
-                source_report.finish_bytes(this_part_size)
+            with tqdm(desc='part semaphore', position=2, total=sema._value+1) as pbar:
+                async def f(i):
+                    pbar.update(i)
+                    this_part_size = rem if i == n_parts - 1 and rem else part_size
+                    await retry_transient_errors(
+                        asyncio.wait_for,
+                        self._copy_part(source_report, part_size, srcfile, i, this_part_size, part_creator, return_exceptions),
+                        timeout=5)
+                    source_report.finish_bytes(this_part_size)
+                    pbar.update(-i)
 
-            await bounded_gather2(sema, *[
-                functools.partial(f, i)
-                for i in range(n_parts)
-            ], cancel_on_error=True)
+                await bounded_gather2(sema, *[
+                    functools.partial(f, i)
+                    for i in range(n_parts)
+                ], cancel_on_error=True)
 
     async def _copy_file_multi_part(
             self,
@@ -845,7 +848,7 @@ class Copier:
         # This is essentially a limit on amount of memory in temporary
         # buffers during copying.  We allow ~10 full-sized copies to
         # run concurrently.
-        self.xfer_sema = WeightedSemaphore(10 * Copier.BUFFER_SIZE)
+        self.xfer_sema = WeightedSemaphore(20 * Copier.BUFFER_SIZE)
 
     async def _dest_type(self, transfer: Transfer):
         '''Return the (real or assumed) type of `dest`.
