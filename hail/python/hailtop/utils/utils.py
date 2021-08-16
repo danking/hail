@@ -469,7 +469,7 @@ async def bounded_gather2_raise_exceptions(sema: asyncio.Semaphore, *pfs, cancel
             async with sema:
                 return await pf()
 
-        task_timeout = timeout
+        task_timeout = None
         while True:
             try:
                 return await asyncio.wait_for(run_with_sema(), timeout=task_timeout)
