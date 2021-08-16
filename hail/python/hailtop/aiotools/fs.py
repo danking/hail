@@ -483,14 +483,16 @@ class SourceReport:
             self._tqdm_bytes.total += total_bytes
             self._tqdm_bytes.refresh()
 
-    def finish_copying_success(self, files: int, total_bytes: int):
+    def finish_bytes(self, part_bytes: int):
+        if self._tqdm_bytes is not None:
+            self._tqdm_bytes.update(part_bytes)
+
+    def finish_files(self, files: int):
         self._complete += files
         if self._tqdm_files is not None:
             self._tqdm_files.update(files)
-        if self._tqdm_bytes is not None:
-            self._tqdm_bytes.update(total_bytes)
 
-    def finish_copying_failure(self, files: int, total_bytes: int):
+    def finish_as_error(self, files: int):
         self._errors += files
 
     def set_exception(self, exception: Exception):
@@ -682,6 +684,7 @@ class SourceCopier:
                 await retry_transient_errors(
                     self._copy_part,
                     source_report, part_size, srcfile, i, this_part_size, part_creator, return_exceptions)
+                source_report.finish_bytes(this_part_size)
 
             await bounded_gather2(sema, *[
                 functools.partial(f, i)
@@ -696,12 +699,11 @@ class SourceCopier:
             srcstat: FileStatus,
             destfile: str,
             return_exceptions: bool):
-        part_bytes = await srcstat.size()
-        source_report.start_copying(1, part_bytes)
+        source_report.start_copying(1, await srcstat.size())
         success = False
         try:
             await self._copy_file_multi_part_main(sema, source_report, srcfile, srcstat, destfile, return_exceptions)
-            source_report.finish_copying_success(1, part_bytes)
+            source_report.finish_files(1)
             success = True
         except Exception as e:
             if return_exceptions:
@@ -710,7 +712,7 @@ class SourceCopier:
                 raise e
         finally:
             if not success:
-                source_report.finish_copying_failure(1, part_bytes)
+                source_report.finish_as_error(1)
 
     async def _full_dest(self):
         if self.dest_type_task:
