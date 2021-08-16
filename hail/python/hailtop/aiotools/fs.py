@@ -634,15 +634,19 @@ class SourceCopier:
                          part_creator: MultiPartCreate,
                          return_exceptions: bool) -> None:
         try:
+            print(f'{part_number}: starting')
             async with self.xfer_sema.acquire_manager(min(Copier.BUFFER_SIZE, this_part_size)):
                 async with await self.router_fs.open_from(srcfile, part_number * part_size) as srcf:
                     async with await part_creator.create_part(part_number, part_number * part_size, size_hint=this_part_size) as destf:
                         n = this_part_size
                         while n > 0:
+                            print(f'{part_number}: reading at most {min(Copier.BUFFER_SIZE, this_part_size)}')
                             b = await srcf.read(min(Copier.BUFFER_SIZE, n))
                             if len(b) == 0:
                                 raise UnexpectedEOFError()
+                            print(f'{part_number}: read {len(b)}')
                             written = await destf.write(b)
+                            print(f'{part_number}: wrote')
                             assert written == len(b)
                             n -= len(b)
         except Exception as e:
