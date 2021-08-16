@@ -51,7 +51,7 @@ async def copy(requester_pays_project: Optional[str],
             sema = asyncio.Semaphore(100)
             async with sema:
                 with tqdm(desc='files', leave=False, position=0, unit='file') as tqdm_files, \
-                     tqdm(desc='bytes', leave=False, position=1, unit='byte', unit_scale=True, smoothing=0.03) as tqdm_bytes:
+                     tqdm(desc='bytes', leave=False, position=1, unit='byte', unit_scale=True, smoothing=0.1) as tqdm_bytes:
                     copy_report = await fs.copy(sema, transfers, tqdm_files=tqdm_files, tqdm_bytes=tqdm_bytes)
                 copy_report.summarize()
 
@@ -61,10 +61,29 @@ async def main() -> None:
     requster_pays_project = json.loads(sys.argv[1])
     files = json.loads(sys.argv[2])
 
+    import cProfile, pstats, io
+    from pstats import SortKey
+    pr = cProfile.Profile()
+    pr.enable()
+    collecting_stats = True
+
+    async def dump_stats():
+        while collecting_stats:
+            s = io.StringIO()
+            sortby = SortKey.CUMULATIVE
+            ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+            ps.print_stats()
+            asyncio.sleep(60)
+
+    stats_fut = asyncio.ensure_future(dump_stats())
+
     await copy(
         requster_pays_project,
         [Transfer(f['from'], f['to'], treat_dest_as=Transfer.DEST_IS_TARGET) for f in files]
     )
+    pr.disable()
+    collecting_stats = False
+    await stats_fut
 
 
 if __name__ == '__main__':
