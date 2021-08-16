@@ -221,9 +221,10 @@ class AsyncFS(abc.ABC):
     async def copy(self,
                    sema: asyncio.Semaphore,
                    transfer: Union['Transfer', List['Transfer']],
-                   return_exceptions: bool = False) -> 'CopyReport':
+                   return_exceptions: bool = False,
+                   **kwargs) -> 'CopyReport':
         copier = Copier(self)
-        copy_report = CopyReport(transfer)
+        copy_report = CopyReport(transfer, **kwargs)
         await copier.copy(sema, copy_report, transfer, return_exceptions)
         copy_report.mark_done()
         return copy_report
@@ -455,7 +456,7 @@ class Transfer:
 
 
 class SourceReport:
-    def __init__(self, source):
+    def __init__(self, source, tqdm_files: Optional[Any], tqdm_bytes: Optional[Any]):
         self._source = source
         self._source_type: Optional[str] = None
         self._files = 0
@@ -464,6 +465,29 @@ class SourceReport:
         self._complete = 0
         self._first_file_error: Optional[Dict[str, Any]] = None
         self._exception: Optional[Exception] = None
+        self._tqdm_files = tqdm_files
+        self._tqdm_bytes = tqdm_bytes
+
+    def start_copying(self, files: int, total_bytes: int):
+        self._files += files
+        if self._tqdm_files:
+            self._tqdm_files.total += files
+            self._tqdm_files.refresh()
+
+        self._bytes += total_bytes
+        if self._tqdm_bytes:
+            self._tqdm_bytes.total += total_bytes
+            self._tqdm_bytes.refresh()
+
+    def finish_copying_success(self, files: int, total_bytes: int):
+        self._complete += files
+        if self._tqdm_files:
+            self._tqdm_files.update(files)
+        if self._tqdm_bytes:
+            self._tqdm_files.update(total_bytes)
+
+    def finish_copying_failure(self, files: int, total_bytes: int):
+        self._errors += files
 
     def set_exception(self, exception: Exception):
         assert not self._exception
@@ -481,12 +505,12 @@ class SourceReport:
 class TransferReport:
     _source_report: Union[SourceReport, List[SourceReport]]
 
-    def __init__(self, transfer: Transfer):
+    def __init__(self, transfer: Transfer, *args, **kwargs):
         self._transfer = transfer
         if isinstance(transfer.src, str):
-            self._source_report = SourceReport(transfer.src)
+            self._source_report = SourceReport(transfer.src, *args, **kwargs)
         else:
-            self._source_report = [SourceReport(s) for s in transfer.src]
+            self._source_report = [SourceReport(s, *args, **kwargs) for s in transfer.src]
         self._exception: Optional[Exception] = None
 
     def set_exception(self, exception: Exception):
@@ -495,12 +519,12 @@ class TransferReport:
 
 
 class CopyReport:
-    def __init__(self, transfer: Union[Transfer, List[Transfer]]):
+    def __init__(self, transfer: Union[Transfer, List[Transfer]], *args, **kwargs):
         self._start_time = time_msecs()
         self._end_time = None
         self._duration = None
         if isinstance(transfer, Transfer):
-            self._transfer_report: Union[TransferReport, List[TransferReport]] = TransferReport(transfer)
+            self._transfer_report: Union[TransferReport, List[TransferReport]] = TransferReport(transfer, *args, **kwargs)
         else:
             self._transfer_report = [TransferReport(t) for t in transfer]
         self._exception: Optional[Exception] = None
@@ -668,12 +692,12 @@ class SourceCopier:
             srcstat: FileStatus,
             destfile: str,
             return_exceptions: bool):
-        source_report._files += 1
-        source_report._bytes += await srcstat.size()
+        part_bytes = await srcstat.size()
+        source_report.start_copying(1, part_bytes)
         success = False
         try:
             await self._copy_file_multi_part_main(sema, source_report, srcfile, srcstat, destfile, return_exceptions)
-            source_report._complete += 1
+            source_report.finish_copying_success(1, part_bytes)
             success = True
         except Exception as e:
             if return_exceptions:
@@ -682,7 +706,7 @@ class SourceCopier:
                 raise e
         finally:
             if not success:
-                source_report._errors += 1
+                source_report.finish_copying_failure(1, part_bytes)
 
     async def _full_dest(self):
         if self.dest_type_task:
