@@ -665,7 +665,9 @@ class SourceCopier:
         part_size = dest_fs._copy_part_size()
 
         if size <= part_size:
-            await retry_transient_errors(asyncio.wait_for, self._copy_file(srcfile, size, destfile), timeout=5)
+            async def copy_with_timeout():
+                return await asyncio.wait_for(self._copy_file(srcfile, size, destfile))
+            await retry_transient_errors(copy_with_timeout)
             return
 
         n_parts, rem = divmod(size, part_size)
@@ -683,10 +685,11 @@ class SourceCopier:
                 async def f(i):
                     pbar.update(1)
                     this_part_size = rem if i == n_parts - 1 and rem else part_size
-                    await retry_transient_errors(
-                        asyncio.wait_for,
-                        self._copy_part(source_report, part_size, srcfile, i, this_part_size, part_creator, return_exceptions),
-                        timeout=5)
+                    async def copy_with_timeout():
+                        return await asyncio.wait_for(
+                            self._copy_part(source_report, part_size, srcfile, i, this_part_size, part_creator, return_exceptions),
+                            timeout=5)
+                    await retry_transient_errors(copy_with_timeout)
                     source_report.finish_bytes(this_part_size)
                     pbar.update(-1)
 
