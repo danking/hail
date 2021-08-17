@@ -464,18 +464,6 @@ async def bounded_gather2_raise_exceptions(sema: asyncio.Semaphore, *pfs, cancel
     cancel_on_error is True, the unfinished tasks are all cancelled.
 
     '''
-    async def run_with_sema_timeout(pf):
-        async def run_with_sema():
-            async with sema:
-                return await pf()
-
-        task_timeout = None
-        while True:
-            try:
-                return await asyncio.wait_for(run_with_sema(), timeout=task_timeout)
-            except asyncio.TimeoutError:
-                task_timeout = task_timeout * 2
-
     i = 0
     results = [None] * len(pfs)
 

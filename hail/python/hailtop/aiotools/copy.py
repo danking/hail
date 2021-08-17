@@ -78,7 +78,7 @@ async def main() -> None:
             if collecting_stats.is_set():
                 return
             ps = pstats.Stats(pr).sort_stats(SortKey.TIME)
-            ps.print_stats(10)
+            ps.print_stats(25)
             pr.enable()
 
     stats_fut = asyncio.ensure_future(dump_stats())
