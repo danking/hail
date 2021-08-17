@@ -606,7 +606,11 @@ class SourceCopier:
         if self.pending == 0:
             self.barrier.set()
 
-    async def _copy_file(self, srcfile: str, size: int, destfile: str) -> None:
+    async def _copy_file(self,
+                         source_report: SourceReport,
+                         srcfile: str,
+                         size: int,
+                         destfile: str) -> None:
         assert not destfile.endswith('/')
 
         async with self.xfer_sema.acquire_manager(min(Copier.BUFFER_SIZE, size)):
@@ -624,6 +628,7 @@ class SourceCopier:
                             return
                         written = await destf.write(b)
                         assert written == len(b)
+                        source_report.finish_bytes(written)
 
     async def _copy_part(self,
                          source_report: SourceReport,
@@ -644,6 +649,7 @@ class SourceCopier:
                                 raise UnexpectedEOFError()
                             written = await destf.write(b)
                             assert written == len(b)
+                            source_report.finish_bytes(written)
                             n -= len(b)
         except Exception as e:
             if return_exceptions:
@@ -665,8 +671,7 @@ class SourceCopier:
         part_size = dest_fs._copy_part_size()
 
         if size <= part_size:
-            await retry_transient_errors(self._copy_file, srcfile, size, destfile)
-            source_report.finish_bytes(size)
+            await retry_transient_errors(self._copy_file, source_report, srcfile, size, destfile)
             return
 
         n_parts, rem = divmod(size, part_size)
@@ -680,19 +685,15 @@ class SourceCopier:
             part_creator = await self.router_fs.multi_part_create(sema, destfile, n_parts)
 
         async with part_creator:
-            with tqdm(desc='part semaphore', position=2, total=sema._value+1) as pbar:
-                async def f(i):
-                    pbar.update(1)
-                    this_part_size = rem if i == n_parts - 1 and rem else part_size
-                    await retry_transient_errors(
-                        self._copy_part, source_report, part_size, srcfile, i, this_part_size, part_creator, return_exceptions)
-                    source_report.finish_bytes(this_part_size)
-                    pbar.update(-1)
+            async def f(i):
+                this_part_size = rem if i == n_parts - 1 and rem else part_size
+                await retry_transient_errors(
+                    self._copy_part, source_report, part_size, srcfile, i, this_part_size, part_creator, return_exceptions)
 
-                await bounded_gather2(sema, *[
-                    functools.partial(f, i)
-                    for i in range(n_parts)
-                ], cancel_on_error=True)
+            await bounded_gather2(sema, *[
+                functools.partial(f, i)
+                for i in range(n_parts)
+            ], cancel_on_error=True)
 
     async def _copy_file_multi_part(
             self,
