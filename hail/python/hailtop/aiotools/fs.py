@@ -622,14 +622,13 @@ class SourceCopier:
                     dest_cm = await self.router_fs.create(destfile)
 
                 async with dest_cm as destf:
-                    async def write(buf):
-                        written = await destf.write(buf)
+                    while True:
+                        b = await srcf.read(Copier.BUFFER_SIZE)
+                        if not b:
+                            return
+                        written = await destf.write(b)
+                        assert written == len(b)
                         source_report.finish_bytes(written)
-                        assert written == len(buf)
-
-                    b = await srcf.read(Copier.BUFFER_SIZE)
-                    while b:
-                        _, b = await asyncio.gather(write(b), srcf.read(Copier.BUFFER_SIZE))
 
     async def _copy_part(self,
                          source_report: SourceReport,
@@ -643,18 +642,15 @@ class SourceCopier:
             async with self.xfer_sema.acquire_manager(min(Copier.BUFFER_SIZE, this_part_size)):
                 async with await self.router_fs.open_from(srcfile, part_number * part_size) as srcf:
                     async with await part_creator.create_part(part_number, part_number * part_size, size_hint=this_part_size) as destf:
-                        async def write(buf):
-                            written = await destf.write(buf)
-                            assert written == len(buf)
-                            source_report.finish_bytes(written)
-
                         n = this_part_size
-                        b = await srcf.read(min(Copier.BUFFER_SIZE, n))
                         while n > 0:
+                            b = await srcf.read(min(Copier.BUFFER_SIZE, n))
                             n_read = len(b)
                             if n_read  == 0:
                                 raise UnexpectedEOFError()
-                            _, b = await asyncio.gather(write(b), srcf.read(min(Copier.BUFFER_SIZE, n)))
+                            written = await destf.write(b)
+                            assert written == n_read
+                            source_report.finish_bytes(written)
                             n -= n_read
         except Exception as e:
             if return_exceptions:
