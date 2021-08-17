@@ -477,6 +477,7 @@ async def bounded_gather2_raise_exceptions(sema: asyncio.Semaphore, *pfs, cancel
                 task_timeout = task_timeout * 2
 
     i = 0
+    results = [None] * len(pfs)
 
     async def worker():
         nonlocal i
@@ -485,9 +486,8 @@ async def bounded_gather2_raise_exceptions(sema: asyncio.Semaphore, *pfs, cancel
                 if i < len(pfs):
                     me = i
                     i += 1
-                    result[me] = await pfs[me]()
+                    results[me] = await pfs[me]()
 
-    results = [None] * len(pfs)
     tasks = [asyncio.create_task(worker()) for _ in range(sema._value)]
 
     if not cancel_on_error:
