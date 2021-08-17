@@ -476,15 +476,25 @@ async def bounded_gather2_raise_exceptions(sema: asyncio.Semaphore, *pfs, cancel
             except asyncio.TimeoutError:
                 task_timeout = task_timeout * 2
 
-    tasks = [asyncio.create_task(run_with_sema_timeout(pf)) for pf in pfs]
+    async def worker():
+        while i < len(pfs):
+            async with sema:
+                if i < len(pfs):
+                    me = i
+                    i += 1
+                    result[me] = await pfs[me]()
+
+    i = 0
+    results = [None] * len(pfs)
+    tasks = [asyncio.create_task(worker()) for _ in range(sema._value)]
 
     if not cancel_on_error:
         async with WithoutSemaphore(sema):
-            return await asyncio.gather(*tasks)
+            await asyncio.gather(*tasks)
 
     try:
         async with WithoutSemaphore(sema):
-            return await asyncio.gather(*tasks)
+            await asyncio.gather(*tasks)
     finally:
         _, exc, _ = sys.exc_info()
         if exc is not None:
@@ -494,6 +504,7 @@ async def bounded_gather2_raise_exceptions(sema: asyncio.Semaphore, *pfs, cancel
             if tasks:
                 async with WithoutSemaphore(sema):
                     await asyncio.wait(tasks)
+    return results
 
 
 async def bounded_gather2(sema: asyncio.Semaphore, *pfs, return_exceptions: bool = False, cancel_on_error: bool = False, timeout=5):
