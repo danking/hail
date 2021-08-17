@@ -18,6 +18,7 @@ import socket
 import requests
 import google.auth.exceptions
 import google.api_core.exceptions
+import botocore
 import time
 import weakref
 from requests.adapters import HTTPAdapter
@@ -618,6 +619,8 @@ def is_transient_error(e):
     if isinstance(e, google.api_core.exceptions.GatewayTimeout):
         return True
     if isinstance(e, google.api_core.exceptions.ServiceUnavailable):
+        return True
+    if isinstance(e, botocore.exceptions.ConnectionClosedError):
         return True
     if isinstance(e, TransientError):
         return True
