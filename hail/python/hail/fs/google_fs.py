@@ -47,6 +47,7 @@ class GoogleCloudStorageFS(FS):
         elif src_is_remote:
             self.client.get(src, dest)
         elif dest_is_remote:
+            print(f'put({src}, {dest})')
             self.client.put(src, dest)
         else:
             dst_w_file = dest
