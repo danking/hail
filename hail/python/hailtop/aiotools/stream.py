@@ -215,7 +215,7 @@ class AsyncQueueWritableStream(WritableStream):
 
 
 def async_writable_blocking_readable_stream_pair() -> Tuple[AsyncQueueWritableStream, BlockingQueueReadableStream]:
-    q: janus.Queue = janus.Queue(maxsize=1)
+    q: janus.Queue = janus.Queue(maxsize=5)
     blocking_readable = BlockingQueueReadableStream(q)
     async_writable = AsyncQueueWritableStream(q, blocking_readable)
     return async_writable, blocking_readable
