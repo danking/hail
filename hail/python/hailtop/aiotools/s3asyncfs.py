@@ -172,7 +172,9 @@ class S3CreatePartManager(AsyncContextManager[WritableStream]):
                     PartNumber=self._number + 1,
                     UploadId=self._mpc._upload_id,
                     Body=b)
-                self._mpc._etags[self._number] = resp['ETag']
+                etag = resp['ETag']
+                assert etag is not None
+                self._mpc._etags[self._number] = etag
             except BaseException as e:
                 self._exc = e
 
