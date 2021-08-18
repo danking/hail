@@ -175,7 +175,7 @@ class S3CreatePartManager(AsyncContextManager[WritableStream]):
                     Body=b)
                 etag = resp['ETag']
                 assert etag is not None
-                print(f'got etag {etag} for {self._namber}')
+                print(f'got etag {etag} for {self._number}')
                 self._mpc._etags[self._number] = etag
             except BaseException as e:
                 self._exc = e
