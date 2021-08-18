@@ -166,7 +166,6 @@ class S3CreatePartManager(AsyncContextManager[WritableStream]):
         def put():
             try:
                 b = blocking_collect.get()
-                print(f'got {len(b)}')
                 resp = self._mpc._fs._s3.upload_part(
                     Bucket=self._mpc._bucket,
                     Key=self._mpc._name,
@@ -175,7 +174,6 @@ class S3CreatePartManager(AsyncContextManager[WritableStream]):
                     Body=b)
                 etag = resp['ETag']
                 assert etag is not None
-                print(f'got etag {etag} for {self._number}')
                 self._mpc._etags[self._number] = etag
             except BaseException as e:
                 self._exc = e
@@ -192,10 +190,8 @@ class S3CreatePartManager(AsyncContextManager[WritableStream]):
         assert self._put_thread is not None
         await self._async_writable.wait_closed()
         try:
-            print(f'waiting for thread to join')
             await blocking_to_async(self._mpc._fs._thread_pool, self._put_thread.join)
         finally:
-            print(f'finally {self._exc}')
             if self._exc:
                 _, exc, _ = sys.exc_info()
                 if exc:
