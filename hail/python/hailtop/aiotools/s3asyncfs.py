@@ -192,8 +192,10 @@ class S3CreatePartManager(AsyncContextManager[WritableStream]):
         assert self._put_thread is not None
         await self._async_writable.wait_closed()
         try:
+            print(f'waiting for thread to join')
             await blocking_to_async(self._mpc._fs._thread_pool, self._put_thread.join)
         finally:
+            print(f'finally {self._exc}')
             if self._exc:
                 _, exc, _ = sys.exc_info()
                 if exc:
