@@ -470,6 +470,7 @@ async def bounded_gather2_raise_exceptions(sema: asyncio.Semaphore, *pfs, cancel
 
     async def worker():
         nonlocal i
+        print(f'working on {i}')
         while i < len(pfs):
             async with sema:
                 if i < len(pfs):
@@ -482,10 +483,12 @@ async def bounded_gather2_raise_exceptions(sema: asyncio.Semaphore, *pfs, cancel
     if not cancel_on_error:
         async with WithoutSemaphore(sema):
             await asyncio.gather(*tasks)
+        return results
 
     try:
         async with WithoutSemaphore(sema):
             await asyncio.gather(*tasks)
+        return results
     finally:
         _, exc, _ = sys.exc_info()
         if exc is not None:
@@ -495,7 +498,6 @@ async def bounded_gather2_raise_exceptions(sema: asyncio.Semaphore, *pfs, cancel
             if tasks:
                 async with WithoutSemaphore(sema):
                     await asyncio.wait(tasks)
-    return results
 
 
 async def bounded_gather2(sema: asyncio.Semaphore, *pfs, return_exceptions: bool = False, cancel_on_error: bool = False, timeout=5):
