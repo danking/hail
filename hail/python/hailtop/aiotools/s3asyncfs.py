@@ -166,6 +166,7 @@ class S3CreatePartManager(AsyncContextManager[WritableStream]):
         def put():
             try:
                 b = blocking_collect.get()
+                print(f'got {len(b)}')
                 resp = self._mpc._fs._s3.upload_part(
                     Bucket=self._mpc._bucket,
                     Key=self._mpc._name,
@@ -174,6 +175,7 @@ class S3CreatePartManager(AsyncContextManager[WritableStream]):
                     Body=b)
                 etag = resp['ETag']
                 assert etag is not None
+                print(f'got etag {etag} for {self._namber}')
                 self._mpc._etags[self._number] = etag
             except BaseException as e:
                 self._exc = e
