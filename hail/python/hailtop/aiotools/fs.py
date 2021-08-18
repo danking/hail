@@ -690,6 +690,7 @@ class SourceCopier:
                 this_part_size = rem if i == n_parts - 1 and rem else part_size
                 await retry_transient_errors(
                     self._copy_part, source_report, part_size, srcfile, i, this_part_size, part_creator, return_exceptions)
+                print(f'finished with {i}')
 
             await bounded_gather2(sema, *[
                 functools.partial(f, i)

@@ -230,7 +230,7 @@ class S3MultiPartCreate(MultiPartCreate):
         parts = []
         part_number = 1
         for etag in self._etags:
-            assert etag is not None
+            assert etag is not None, f'{len(self._etags)}, {self._etags}'
             parts.append({
                 'ETag': etag,
                 'PartNumber': part_number
