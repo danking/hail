@@ -475,7 +475,6 @@ async def bounded_gather2_raise_exceptions(sema: asyncio.Semaphore, *pfs, cancel
                 if i < len(pfs):
                     me = i
                     i += 1
-                    print(f'working on {me}')
                     results[me] = await pfs[me]()
 
     tasks = [asyncio.create_task(worker()) for _ in range(sema._value)]
