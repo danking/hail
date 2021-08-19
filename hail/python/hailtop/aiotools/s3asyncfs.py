@@ -176,7 +176,8 @@ class S3CreatePartManager(AsyncContextManager[WritableStream]):
                 assert etag is not None
                 self._mpc._etags[self._number] = etag
             except BaseException as e:
-                self._exc = e
+                self._exc = ValueError('error in put', self._mpc._bucket, self._mpc._name, self._mpc._name, self._number + 1, self._mpc._upload_id)
+                self._exc.__cause__ = e
 
         self._put_thread = threading.Thread(target=put)
         self._put_thread.start()
