@@ -8,6 +8,7 @@ from hailtop.aiotools.fs import RouterAsyncFS, LocalAsyncFS, Transfer
 from hailtop.aiogoogle import GoogleStorageAsyncFS
 from hailtop.aiotools.s3asyncfs import S3AsyncFS
 from hailtop.utils import tqdm
+import uvloop
 
 def referenced_schemes(transfers: List[Transfer]):
     def scheme_from_url(url):
@@ -48,7 +49,7 @@ async def copy(requester_pays_project: Optional[str],
                                               gcs_params=gcs_params)
                        for s in schemes]
         async with RouterAsyncFS(default_scheme, filesystems) as fs:
-            sema = asyncio.Semaphore(10)
+            sema = asyncio.Semaphore(25)
             async with sema:
                 with tqdm(desc='files', leave=False, position=0, unit='file') as tqdm_files, \
                      tqdm(desc='bytes', leave=False, position=1, unit='byte', unit_scale=True, smoothing=0.1) as tqdm_bytes:
@@ -61,15 +62,15 @@ async def main() -> None:
     requster_pays_project = json.loads(sys.argv[1])
     files = json.loads(sys.argv[2])
 
-    import cProfile, pstats, io
-    from pstats import SortKey
-    pr = cProfile.Profile()
-    pr.enable()
-    collecting_stats = asyncio.Event()
+    #import cProfile, pstats, io
+    #from pstats import SortKey
+    #pr = cProfile.Profile()
+    #pr.enable()
+    #collecting_stats = asyncio.Event()
 
     async def dump_stats():
         while True:
-            done, pending = await asyncio.wait([asyncio.sleep(60), collecting_stats.wait()],
+            done, pending = await asyncio.wait([asyncio.sleep(30), collecting_stats.wait()],
                                                return_when=asyncio.FIRST_COMPLETED)
             for t in pending:
                 t.cancel()
@@ -81,16 +82,17 @@ async def main() -> None:
             ps.print_stats(10)
             pr.enable()
 
-    stats_fut = asyncio.ensure_future(dump_stats())
+    # stats_fut = asyncio.ensure_future(dump_stats())
 
     await copy(
         requster_pays_project,
         [Transfer(f['from'], f['to'], treat_dest_as=Transfer.DEST_IS_TARGET) for f in files]
     )
-    pr.disable()
-    collecting_stats.set()
-    await stats_fut
+    #pr.disable()
+    #collecting_stats.set()
+    #await stats_fut
 
 
 if __name__ == '__main__':
+    uvloop.install()
     asyncio.run(main())

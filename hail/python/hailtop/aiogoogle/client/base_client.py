@@ -3,6 +3,8 @@ from typing import Any, Optional, Type, TypeVar
 from hailtop.utils import RateLimit
 from hailtop.aiogoogle.auth import BaseSession, Session, RateLimitedSession
 
+from ..jsonx import json
+
 ClientType = TypeVar('ClientType', bound='BaseClient')
 
 
@@ -21,17 +23,20 @@ class BaseClient:
     async def get(self, path: str, **kwargs) -> Any:
         async with await self._session.get(
                 f'{self._base_url}{path}', **kwargs) as resp:
-            return await resp.json()
+            assert resp.get_encoding() == 'utf-8', resp.get_encoding()
+            return json.loads(await resp.read())
 
     async def post(self, path: str, **kwargs) -> Any:
         async with await self._session.post(
                 f'{self._base_url}{path}', **kwargs) as resp:
-            return await resp.json()
+            assert resp.get_encoding() == 'utf-8', resp.get_encoding()
+            return json.loads(await resp.read())
 
     async def delete(self, path: str, **kwargs) -> None:
         async with await self._session.delete(
                 f'{self._base_url}{path}', **kwargs) as resp:
-            return await resp.json()
+            assert resp.get_encoding() == 'utf-8', resp.get_encoding()
+            return json.loads(await resp.reaad())
 
     async def close(self) -> None:
         if hasattr(self, '_session'):

@@ -17,6 +17,7 @@ from hailtop.aiotools import (
 
 from hailtop.aiogoogle.auth import BaseSession
 from .base_client import BaseClient
+from ..jsonx import json
 
 log = logging.getLogger(__name__)
 
@@ -67,7 +68,8 @@ class InsertObjectStream(WritableStream):
     async def _wait_closed(self):
         await self._it.stop()
         async with await self._request_task as resp:
-            self._value = await resp.json()
+            assert resp.get_encoding() == 'utf-8', resp.get_encoding()
+            self._value = json.loads(await resp.body())
 
 
 class _WriteBuffer:

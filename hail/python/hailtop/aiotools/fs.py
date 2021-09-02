@@ -474,14 +474,14 @@ class SourceReport:
             if self._tqdm_files.total is None:
                 self._tqdm_files.total = 0
             self._tqdm_files.total += files
-            self._tqdm_files.refresh()
+            self._tqdm_files.update(0)
 
         self._bytes += total_bytes
         if self._tqdm_bytes is not None:
             if self._tqdm_bytes.total is None:
                 self._tqdm_bytes.total = 0
             self._tqdm_bytes.total += total_bytes
-            self._tqdm_bytes.refresh()
+            self._tqdm_bytes.update(0)
 
     def finish_bytes(self, part_bytes: int):
         if self._tqdm_bytes is not None:
@@ -849,7 +849,7 @@ class Copier:
         # This is essentially a limit on amount of memory in temporary
         # buffers during copying.  We allow ~10 full-sized copies to
         # run concurrently.
-        self.xfer_sema = WeightedSemaphore(10 * Copier.BUFFER_SIZE)
+        self.xfer_sema = WeightedSemaphore(5 * Copier.BUFFER_SIZE)
 
     async def _dest_type(self, transfer: Transfer):
         '''Return the (real or assumed) type of `dest`.

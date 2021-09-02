@@ -465,29 +465,19 @@ async def bounded_gather2_raise_exceptions(sema: asyncio.Semaphore, *pfs, cancel
     cancel_on_error is True, the unfinished tasks are all cancelled.
 
     '''
-    i = 0
-    results = [None] * len(pfs)
+    async def run_with_sema(pf):
+        async with sema:
+            return await pf()
 
-    async def worker():
-        nonlocal i
-        while i < len(pfs):
-            async with sema:
-                if i < len(pfs):
-                    me = i
-                    i += 1
-                    results[me] = await pfs[me]()
-
-    tasks = [asyncio.create_task(worker()) for _ in range(sema._value)]
+    tasks = [asyncio.create_task(run_with_sema(pf)) for pf in pfs]
 
     if not cancel_on_error:
         async with WithoutSemaphore(sema):
-            await asyncio.gather(*tasks)
-        return results
+            return await asyncio.gather(*tasks)
 
     try:
         async with WithoutSemaphore(sema):
-            await asyncio.gather(*tasks)
-        return results
+            return await asyncio.gather(*tasks)
     finally:
         _, exc, _ = sys.exc_info()
         if exc is not None:
