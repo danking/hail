@@ -27,3 +27,4 @@ sortedcontainers==2.1.0
 tabulate==0.8.3
 tqdm==4.42.1
 google-cloud-storage==1.25.*
+uvloop==0.14.0
