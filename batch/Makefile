@@ -21,21 +21,13 @@ build-batch:
 	python3 ../ci/jinja2_render.py '{"service_base_image":{"image":"'$$(cat ../docker/service-base-image-ref)'"}}' Dockerfile Dockerfile.out
 	../docker-build.sh . Dockerfile.out $(BATCH_IMAGE)
 
-jars/junixsocket-selftest-2.3.3-jar-with-dependencies.jar:
-	mkdir jars
-	cd jars && curl -LO https://github.com/kohlschutter/junixsocket/releases/download/junixsocket-parent-2.3.3/junixsocket-selftest-2.3.3-jar-with-dependencies.jar
-
-src/main/java/is/hail/JVMEntryway.class: src/main/java/is/hail/JVMEntryway.java jars/junixsocket-selftest-2.3.3-jar-with-dependencies.jar
-	javac -cp jars/junixsocket-selftest-2.3.3-jar-with-dependencies.jar $<
-
 .PHONY: build-worker
-build-worker: src/main/java/is/hail/JVMEntryway.class
+build-worker:
 	python3 ../ci/jinja2_render.py '{"hail_ubuntu_image":{"image":"'$$(cat ../docker/hail-ubuntu-image-ref)'"}}' Dockerfile.worker Dockerfile.worker.out
 	../docker-build.sh .. batch/Dockerfile.worker.out $(BATCH_WORKER_IMAGE)
 
 .PHONY: build
 build: build-batch build-worker
-
 
 JINJA_ENVIRONMENT = '{"code":{"sha":"$(shell git rev-parse --short=12 HEAD)"},"deploy":$(DEPLOY),"batch_image":{"image":"$(BATCH_IMAGE)"},"batch_worker_image":{"image":"$(BATCH_WORKER_IMAGE)"},"default_ns":{"name":"$(NAMESPACE)"},"batch_database":{"user_secret_name":"sql-batch-user-config"},"scope":"$(SCOPE)"}'
 
