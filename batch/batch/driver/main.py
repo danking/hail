@@ -690,10 +690,11 @@ FROM
   FROM
   (
     SELECT batches.user, jobs.state, jobs.cores_mcpu, jobs.inst_coll,
-      (jobs.always_run OR NOT (jobs.cancelled OR batches.cancelled)) AS runnable,
-      (NOT jobs.always_run AND (jobs.cancelled OR batches.cancelled)) AS cancelled
+      (jobs.always_run OR NOT (jobs.cancelled OR batches_cancelled.id IS NOT NULL)) AS runnable,
+      (NOT jobs.always_run AND (jobs.cancelled OR batches_cancelled.id IS NOT NULL)) AS cancelled
     FROM batches
     INNER JOIN jobs ON batches.id = jobs.batch_id
+    LEFT JOIN batches_cancelled ON batches.id = batches_cancelled.id
     WHERE batches.`state` = 'running'
   ) as v
   GROUP BY user, inst_coll
@@ -1172,12 +1173,14 @@ async def on_cleanup(app):
                                         await app['compute_client'].close()
                                     finally:
                                         try:
-                                            await app['client_session'].close()
-                                        finally:
                                             del app['k8s_cache'].client
-                                            await asyncio.gather(
-                                                *(t for t in asyncio.all_tasks() if t is not asyncio.current_task())
-                                            )
+                                        finally:
+                                            try:
+                                                await app['client_session'].close()
+                                            finally:
+                                                await asyncio.gather(
+                                                    *(t for t in asyncio.all_tasks() if t is not asyncio.current_task())
+                                                )
 
 
 def run():
