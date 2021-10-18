@@ -2326,6 +2326,12 @@ steps:
         script: /io/sql/add-frozen-mode.sql
       - name: add-instance-config
         script: /io/sql/add-instance-config.sql
+      - name: kill-more-deadlocks
+        script: /io/sql/kill-more-deadlocks.sql
+      - name: kill-more-deadlocks2
+        script: /io/sql/kill-more-deadlocks2.sql
+      - name: no-locks-add-attempt
+        script: /io/sql/no-locks-add-attempt.sql
     inputs:
       - from: /repo/batch/sql
         to: /io/sql
@@ -2516,6 +2522,7 @@ steps:
         for: alive
     dependsOn:
       - default_ns
+      - merge_code
       - deploy_batch
       - query_image
       - deploy_query_sa
