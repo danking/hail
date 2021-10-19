@@ -2522,7 +2522,6 @@ steps:
         for: alive
     dependsOn:
       - default_ns
-      - merge_code
       - deploy_batch
       - query_image
       - deploy_query_sa
