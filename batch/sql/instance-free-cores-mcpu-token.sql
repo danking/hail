@@ -224,7 +224,7 @@ BEGIN
           jobs.job_id = in_job_id;
 
     UPDATE batches
-        batches.n_completed = batches.n_completed + 1,
+    SET batches.n_completed = batches.n_completed + 1,
         batches.n_cancelled = batches.n_cancelled + (new_state = 'Cancelled'),
         batches.n_failed    = batches.n_failed    + (new_state = 'Error' OR new_state = 'Failed'),
         batches.n_succeeded = batches.n_succeeded + (new_state = 'Success'),
