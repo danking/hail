@@ -219,7 +219,7 @@ BEGIN
     UPDATE jobs
     SET jobs.state = new_state,
         jobs.status = new_status,
-        jobs.attempt_id = in_attempt_id,
+        jobs.attempt_id = in_attempt_id
     WHERE jobs.batch_id = in_batch_id AND
           jobs.job_id = in_job_id;
 
