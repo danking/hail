@@ -83,7 +83,7 @@ BEGIN
       INSERT INTO instances_free_cores_mcpu (name, free_cores_mcpu, token)
       VALUES (in_instance_name, -in_cores_mcpu, rand_token)
       ON DUPLICATE KEY UPDATE
-         free_cores_mcpu = free_cores_mcpu - in_cores_mcpu
+         free_cores_mcpu = free_cores_mcpu - in_cores_mcpu;
 
       SET delta_cores_mcpu = -1 * in_cores_mcpu;
     END IF;
@@ -135,7 +135,7 @@ BEGIN
     INSERT INTO instances_free_cores_mcpu (name, free_cores_mcpu, token)
     VALUES (in_instance_name, cur_cores_mcpu, rand_token)
     ON DUPLICATE KEY UPDATE
-       free_cores_mcpu = free_cores_mcpu + in_cores_mcpu
+       free_cores_mcpu = free_cores_mcpu + in_cores_mcpu;
 
     SET delta_cores_mcpu = cur_cores_mcpu;
   END IF;
@@ -200,7 +200,7 @@ BEGIN
     INSERT INTO instances_free_cores_mcpu (name, free_cores_mcpu, token)
     VALUES (in_instance_name, cur_cores_mcpu, rand_token)
     ON DUPLICATE KEY UPDATE
-       free_cores_mcpu = free_cores_mcpu + cur_cores_mcpu
+       free_cores_mcpu = free_cores_mcpu + cur_cores_mcpu;
 
     SET delta_cores_mcpu = delta_cores_mcpu + cur_cores_mcpu;
   END IF;
