@@ -13,11 +13,12 @@ def client():
 
 
 def test_scale(client):
-    n_jobs = 10
+    n_jobs = 1000
     batch = client.create_batch()
     for idx in range(n_jobs):
-        sleep_time = random.uniform(0, 30)
-        batch.create_job('alpine:3.8', command=['sleep', str(round(sleep_time))])
+        # sleep_time = random.uniform(0, 5)
+        sleep_time = 0
+        batch.create_job('alpine:3.8', command=['sleep', str(round(sleep_time))], resources={'cpu': '250m'})
 
     batch = batch.submit()
     batch.wait()
