@@ -10,6 +10,7 @@ CREATE PROCEDURE deactivate_instance(
   IN in_timestamp BIGINT
 )
 BEGIN
+  DECLARE cur_n_tokens INT;
   DECLARE cur_state VARCHAR(40);
   DECLARE rand_token INT;
 
@@ -59,6 +60,7 @@ CREATE PROCEDURE add_attempt(
   OUT delta_cores_mcpu INT
 )
 BEGIN
+  DECLARE cur_n_tokens INT;
   DECLARE cur_state VARCHAR(40);
   DECLARE rand_token INT;
 
@@ -98,6 +100,7 @@ CREATE PROCEDURE unschedule_job(
   IN new_reason VARCHAR(40)
 )
 BEGIN
+  DECLARE cur_n_tokens INT;
   DECLARE cur_job_state VARCHAR(40);
   DECLARE cur_instance_state VARCHAR(40);
   DECLARE cur_attempt_id VARCHAR(40);
@@ -162,6 +165,7 @@ CREATE PROCEDURE mark_job_complete(
   IN new_timestamp BIGINT
 )
 BEGIN
+  DECLARE cur_n_tokens INT;
   DECLARE cur_job_state VARCHAR(40);
   DECLARE cur_instance_state VARCHAR(40);
   DECLARE cur_cores_mcpu INT;
