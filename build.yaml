@@ -2334,6 +2334,8 @@ steps:
         script: /io/sql/no-locks-add-attempt.sql
       - name: no-mjc-deadlocks2
         script: /io/sql/no-mjc-deadlocks2.sql
+      - name: instance-free-cores-mcpu-token
+        script: /io/sql/instance-free-cores-mcpu-token.sql
     inputs:
       - from: /repo/batch/sql
         to: /io/sql

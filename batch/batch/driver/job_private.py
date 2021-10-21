@@ -50,11 +50,12 @@ class JobPrivateInstanceManager(InstanceCollection):
 
         async for record in self.db.select_and_fetchall(
                 '''
-SELECT instances.*, instances_free_cores_mcpu.free_cores_mcpu
+SELECT instances.*, SUM(instances_free_cores_mcpu.free_cores_mcpu)
 FROM instances
 INNER JOIN instances_free_cores_mcpu
 ON instances.name = instances_free_cores_mcpu.name
-WHERE removed = 0 AND inst_coll = %s;
+WHERE removed = 0 AND inst_coll = %s
+GROUP BY instances.name;
 ''', (self.name,)
         ):
             instance = Instance.from_record(self.app, self, record)

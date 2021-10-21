@@ -3,6 +3,7 @@ import datetime
 import logging
 import secrets
 import humanize
+import random
 import base64
 import json
 from typing import Optional
@@ -52,6 +53,7 @@ class Instance:
         state = 'pending'
         now = time_msecs()
         token = secrets.token_urlsafe(32)
+        rand_token = random.randint(0, app['n_tokens'] - 1)
 
         @transaction(db)
         async def insert(tx):
@@ -79,10 +81,10 @@ VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
             )
             await tx.just_execute(
                 '''
-INSERT INTO instances_free_cores_mcpu (name, free_cores_mcpu)
-VALUES (%s, %s);
+INSERT INTO instances_free_cores_mcpu (name, free_cores_mcpu, token)
+VALUES (%s, %s, %s);
 ''',
-                (name, worker_cores_mcpu,),
+                (name, worker_cores_mcpu, rand_token),
             )
         await insert()  # pylint: disable=no-value-for-parameter
 

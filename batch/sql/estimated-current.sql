@@ -110,7 +110,8 @@ CREATE INDEX `instances_time_activated` ON `instances` (`time_activated`);
 CREATE TABLE IF NOT EXISTS `instances_free_cores_mcpu` (
   `name` VARCHAR(100) NOT NULL,
   `free_cores_mcpu` INT NOT NULL,
-  PRIMARY KEY (`name`),
+  `token` VARCHAR(100) NOT NULL,
+  PRIMARY KEY (`name`, `token`),
   FOREIGN KEY (`name`) REFERENCES instances(`name`)
 ) ENGINE = InnoDB;
 
@@ -715,8 +716,12 @@ CREATE PROCEDURE deactivate_instance(
 )
 BEGIN
   DECLARE cur_state VARCHAR(40);
+  DECLARE rand_token INT;
 
   START TRANSACTION;
+
+  SELECT n_tokens INTO cur_n_tokens FROM globals LOCK IN SHARE MODE;
+  SET rand_token = FLOOR(RAND() * cur_n_tokens);
 
   SELECT state INTO cur_state FROM instances WHERE name = in_instance_name FOR UPDATE;
 
@@ -737,7 +742,7 @@ BEGIN
 
     UPDATE instances, instances_free_cores_mcpu
     SET state = 'inactive',
-        free_cores_mcpu = cores_mcpu
+        free_cores_mcpu = IF(rand_token = instances_free_cores_mcpu.token, cores_mcpu, 0)
     WHERE instances.name = in_instance_name
       AND instances.name = instances_free_cores_mcpu.name;
 
@@ -903,6 +908,12 @@ CREATE PROCEDURE add_attempt(
   OUT delta_cores_mcpu INT
 )
 BEGIN
+  DECLARE cur_state VARCHAR(40);
+  DECLARE rand_token INT;
+
+  SELECT n_tokens INTO cur_n_tokens FROM globals LOCK IN SHARE MODE;
+  SET rand_token = FLOOR(RAND() * cur_n_tokens);
+
   SET delta_cores_mcpu = IFNULL(delta_cores_mcpu, 0);
 
   IF in_attempt_id IS NOT NULL THEN
@@ -910,12 +921,16 @@ BEGIN
     VALUES (in_batch_id, in_job_id, in_attempt_id, in_instance_name)
     ON DUPLICATE KEY UPDATE batch_id = batch_id;
 
-    IF ROW_COUNT() != 0 THEN
-      UPDATE instances, instances_free_cores_mcpu
-      SET free_cores_mcpu = free_cores_mcpu - in_cores_mcpu
-      WHERE instances.name = in_instance_name
-        AND instances.name = instances_free_cores_mcpu.name
-        AND (instances.state = 'pending' OR instances.state = 'active');
+    SELECT `state` INTO cur_state
+    FROM instances
+    WHERE name = in_instance_name
+    LOCK IN SHARE MODE;
+
+    IF ROW_COUNT() != 0 AND (cur_state = 'pending' or cur_state = 'active') THEN
+      INSERT INTO instances_free_cores_mcpu (name, free_cores_mcpu, token)
+      VALUES (in_instance_name, -in_cores_mcpu, rand_token)
+      ON DUPLICATE KEY UPDATE
+         free_cores_mcpu = free_cores_mcpu - in_cores_mcpu
 
       SET delta_cores_mcpu = -1 * in_cores_mcpu;
     END IF;
@@ -1004,6 +1019,10 @@ BEGIN
   DECLARE cur_cores_mcpu INT;
   DECLARE cur_end_time BIGINT;
   DECLARE delta_cores_mcpu INT DEFAULT 0;
+  DECLARE rand_token INT;
+
+  SELECT n_tokens INTO cur_n_tokens FROM globals LOCK IN SHARE MODE;
+  SET rand_token = FLOOR(RAND() * cur_n_tokens);
 
   START TRANSACTION;
 
@@ -1025,9 +1044,10 @@ BEGIN
   SELECT state INTO cur_instance_state FROM instances WHERE name = in_instance_name LOCK IN SHARE MODE;
 
   IF cur_instance_state = 'active' AND cur_end_time IS NULL THEN
-    UPDATE instances_free_cores_mcpu
-    SET free_cores_mcpu = free_cores_mcpu + cur_cores_mcpu
-    WHERE instances_free_cores_mcpu.name = in_instance_name;
+    INSERT INTO instances_free_cores_mcpu (name, free_cores_mcpu, token)
+    VALUES (in_instance_name, cur_cores_mcpu, rand_token)
+    ON DUPLICATE KEY UPDATE
+       free_cores_mcpu = free_cores_mcpu + in_cores_mcpu
 
     SET delta_cores_mcpu = cur_cores_mcpu;
   END IF;
@@ -1153,6 +1173,10 @@ BEGIN
   DECLARE cur_end_time BIGINT;
   DECLARE delta_cores_mcpu INT DEFAULT 0;
   DECLARE expected_attempt_id VARCHAR(40);
+  DECLARE rand_token INT;
+
+  SELECT n_tokens INTO cur_n_tokens FROM globals LOCK IN SHARE MODE;
+  SET rand_token = FLOOR(RAND() * cur_n_tokens);
 
   START TRANSACTION;
 
@@ -1174,9 +1198,10 @@ BEGIN
 
   SELECT state INTO cur_instance_state FROM instances WHERE name = in_instance_name LOCK IN SHARE MODE;
   IF cur_instance_state = 'active' AND cur_end_time IS NULL THEN
-    UPDATE instances_free_cores_mcpu
-    SET free_cores_mcpu = free_cores_mcpu + cur_cores_mcpu
-    WHERE instances_free_cores_mcpu.name = in_instance_name;
+    INSERT INTO instances_free_cores_mcpu (name, free_cores_mcpu, token)
+    VALUES (in_instance_name, cur_cores_mcpu, rand_token)
+    ON DUPLICATE KEY UPDATE
+       free_cores_mcpu = free_cores_mcpu + cur_cores_mcpu
 
     SET delta_cores_mcpu = delta_cores_mcpu + cur_cores_mcpu;
   END IF;
@@ -1192,11 +1217,14 @@ BEGIN
       delta_cores_mcpu,
       'input attempt id does not match expected attempt id' as message;
   ELSEIF cur_job_state = 'Ready' OR cur_job_state = 'Creating' OR cur_job_state = 'Running' THEN
-    UPDATE batches, jobs
+    UPDATE jobs
     SET jobs.state = new_state,
         jobs.status = new_status,
         jobs.attempt_id = in_attempt_id,
+    WHERE jobs.batch_id = in_batch_id AND
+          jobs.job_id = in_job_id;
 
+    UPDATE batches
         batches.n_completed = batches.n_completed + 1,
         batches.n_cancelled = batches.n_cancelled + (new_state = 'Cancelled'),
         batches.n_failed    = batches.n_failed    + (new_state = 'Error' OR new_state = 'Failed'),
@@ -1204,9 +1232,7 @@ BEGIN
 
         batches.time_completed = IF(n_completed = batches.n_jobs, new_timestamp, batches.time_completed),
         batches.`state` = IF(n_completed = batches.n_jobs, 'complete', batches.`state`)
-    WHERE jobs.batch_id = in_batch_id AND
-          jobs.job_id = in_job_id AND
-          batches.id = in_batch_id;
+    WHERE batches.id = in_batch_id;
 
     UPDATE jobs
       INNER JOIN `job_parents`
