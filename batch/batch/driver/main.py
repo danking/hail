@@ -1056,9 +1056,11 @@ async def on_startup(app):
 
     row = await db.select_and_fetchone(
         '''
-SELECT instance_id, internal_token, frozen FROM globals;
+SELECT instance_id, internal_token, n_tokens, frozen FROM globals;
 '''
     )
+
+    app['n_tokens'] = row['n_tokens']
 
     instance_id = row['instance_id']
     log.info(f'instance_id {instance_id}')
