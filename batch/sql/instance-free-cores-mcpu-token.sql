@@ -73,17 +73,19 @@ BEGIN
     INSERT INTO attempts (batch_id, job_id, attempt_id, instance_name)
     VALUES (in_batch_id, in_job_id, in_attempt_id, in_instance_name)
     ON DUPLICATE KEY UPDATE batch_id = batch_id;
+    -- ROW_COUNT() depends on the previous insert
+    IF ROW_COUNT() != 0 THEN
+      SELECT `state` INTO cur_state
+      FROM instances
+      WHERE name = in_instance_name
+      LOCK IN SHARE MODE;
 
-    SELECT `state` INTO cur_state
-    FROM instances
-    WHERE name = in_instance_name
-    LOCK IN SHARE MODE;
-
-    IF ROW_COUNT() != 0 AND (cur_state = 'pending' or cur_state = 'active') THEN
-      INSERT INTO instances_free_cores_mcpu (name, free_cores_mcpu, token)
-      VALUES (in_instance_name, -in_cores_mcpu, rand_token)
-      ON DUPLICATE KEY UPDATE
-         free_cores_mcpu = free_cores_mcpu - in_cores_mcpu;
+      IF cur_state = 'pending' OR cur_state = 'active' THEN
+        INSERT INTO instances_free_cores_mcpu (name, free_cores_mcpu, token)
+        VALUES (in_instance_name, -in_cores_mcpu, rand_token)
+        ON DUPLICATE KEY UPDATE
+           free_cores_mcpu = free_cores_mcpu - in_cores_mcpu;
+      END IF;
 
       SET delta_cores_mcpu = -1 * in_cores_mcpu;
     END IF;

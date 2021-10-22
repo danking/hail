@@ -63,7 +63,7 @@ class Pool(InstanceCollection):
         async for record in self.db.select_and_fetchall(
                 '''
 SELECT instances.*,
-       SUM(instances_free_cores_mcpu.free_cores_mcpu) as free_cores_mcpu
+       CAST(COALESCE(SUM(instances_free_cores_mcpu.free_cores_mcpu), 0) AS SIGNED) as free_cores_mcpu
 FROM instances
 INNER JOIN instances_free_cores_mcpu
 ON instances.name = instances_free_cores_mcpu.name
