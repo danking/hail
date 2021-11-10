@@ -298,12 +298,13 @@ users:
 
 
 class Branch(Code):
-    def __init__(self, owner: str, repo: str, branch: str, sha: str, extra_config: Dict[str, str]):
+    def __init__(self, owner: str, repo: str, branch: str, sha: str, extra_config: Dict[str, str], namespace: str):
         self._owner = owner
         self._repo = repo
         self._branch = branch
         self._sha = sha
         self._extra_config = extra_config
+        self.namespace = namespace
 
     def short_str(self) -> str:
         return f'br-{self._owner}-{self._repo}-{self._branch}'
@@ -342,6 +343,9 @@ async def main():
         '--extra-code-config', dest='extra_code_config', default='{}', help='Extra code config in JSON format.'
     )
     parser.add_argument(
+        '--namespace', default='default', help='The namespace to deploy into. Must be either default or a dev namespace.'
+    )
+    parser.add_argument(
         'branch', help='Github branch to run.  It should be the same branch bootstrap.py is being run from.'
     )
     parser.add_argument('sha', help='SHA of the git commit to run.  It should match the branch.')
@@ -361,8 +365,11 @@ async def main():
 
     extra_code_config = json.loads(args.extra_code_config)
 
-    scope = 'deploy'
-    code = Branch(owner, repo_name, branch_name, args.sha, extra_code_config)
+    if args.namespace == 'default':
+        scope = 'deploy'
+    else:
+        scope = 'dev'
+    code = Branch(owner, repo_name, branch_name, args.sha, extra_code_config, args.namespace)
 
     steps = [s.strip() for s in args.steps.split(',')]
 
