@@ -82,7 +82,7 @@ deploy_unmanaged() {
 bootstrap() {
     if [ -z "$1" ] || [ -z "$2" ]; then
         echo "Usage: bootstrap <REPO_ORG>/hail:<BRANCH> <DEPLOY_STEP>"
-        exit 1
+        return 1
     fi
     HAIL_BRANCH=$1
     DEPLOY_STEP=$2
