@@ -3,6 +3,9 @@ import os
 import json
 
 
+from hailtop.config import get_deploy_config
+
+
 class AzureConfig:
     subscription_id: str
     resource_group: str

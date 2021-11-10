@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export HAIL="$HOME/hail"
+export HAIL="$HOME/projects/hail"
 
 get_global_config_field() {
     kubectl get secret global-config --template={{.data.$1}} | base64 --decode
@@ -101,6 +101,6 @@ bootstrap() {
     else
         extra_code_config=""
     fi
-    python3 ci/bootstrap.py $extra_code_config $HAIL_BRANCH $(git rev-parse HEAD) $DEPLOY_STEP
+    python3 ci/bootstrap.py $extra_code_config $HAIL_BRANCH $(git rev-parse HEAD) $DEPLOY_STEP --namespace dking
     cd -
 }

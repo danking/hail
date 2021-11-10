@@ -73,6 +73,7 @@ async def docker_run(*args: str):
 
     outerr = await check_shell_output(f'docker wait {cid}')
     exit_code = int(outerr[0].decode('ascii').strip())
+    print(f'Wait output: {outerr[0]!r}\n' f'Container error: {outerr[1]!r}')
     return cid, exit_code == 0
 
 
@@ -223,9 +224,12 @@ users:
 
                 secrets = j._secrets
                 if secrets:
-                    k8s_secrets = await asyncio.gather(
-                        *[k8s_cache.read_secret(secret['name'], secret['namespace'], 5) for secret in secrets]
-                    )
+                    try:
+                        k8s_secrets = await asyncio.gather(
+                            *[k8s_cache.read_secret(secret['name'], secret['namespace'], 5) for secret in secrets]
+                        )
+                    except Exception as exc:
+                        raise ValueError(secrets) from exc
 
                     for secret, k8s_secret in zip(secrets, k8s_secrets):
                         secret_host_path = f'{job_root}/secrets/{k8s_secret.metadata.name}'

@@ -27,7 +27,7 @@ deploy_config = get_deploy_config()
 
 CALLBACK_URL = deploy_config.url('ci', '/api/v1alpha/batch_callback')
 
-zulip_client = zulip.Client(config_file="/zulip-config/.zuliprc")
+zulip_client: Optional[zulip.Client] = None
 
 TRACKED_PRS = pc.Gauge('ci_tracked_prs', 'PRs currently being monitored by CI', ['build_state', 'review_state'])
 
@@ -37,6 +37,8 @@ def select_random_teammate(team):
 
 
 def send_zulip_deploy_failure_message(message):
+    if zulip_client is None:
+        zulip_client = zulip.Client(config_file="/zulip-config/.zuliprc")
     request = {
         'type': 'stream',
         'to': 'team',

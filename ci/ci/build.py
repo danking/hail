@@ -10,15 +10,33 @@ from hailtop.utils import flatten
 from .utils import generate_token
 from .environment import (
     DOCKER_PREFIX,
+    DOCKER_ROOT_IMAGE,
     DOMAIN,
     CI_UTILS_IMAGE,
     BUILDKIT_IMAGE,
     DEFAULT_NAMESPACE,
+    KUBERNETES_SERVER_URL,
     BUCKET,
     CLOUD,
 )
 from .globals import is_test_deployment
 from gear.cloud_config import get_global_config
+from hailtop.config import get_deploy_config
+
+
+def global_config() -> Dict[str, str]:
+    if get_deploy_config().location() != 'external':
+        return get_global_config()
+    return {
+        'docker_prefix': DOCKER_PREFIX,
+        'domain': DOMAIN,
+        'docker_root_image': DOCKER_ROOT_IMAGE,
+        'docker_prefix': DOCKER_PREFIX,
+        'kubernetes_server_url': KUBERNETES_SERVER_URL,
+        'default_namespace': DEFAULT_NAMESPACE,
+        'cloud':  CLOUD,
+    }
+
 
 log = logging.getLogger('ci')
 
@@ -166,7 +184,7 @@ class Step(abc.ABC):
 
     def input_config(self, code, scope):
         config = {}
-        config['global'] = get_global_config()
+        config['global'] = global_config()
         config['token'] = self.token
         config['deploy'] = scope == 'deploy'
         config['scope'] = scope
