@@ -244,9 +244,7 @@ class ServiceBackend(Backend):
 
     async def _rpc(self,
                    name: str,
-                   inputs: Callable[[afs.WritableStream, str], Awaitable[None]],
-                   *,
-                   needs_user_functions: bool = False):
+                   inputs: Callable[[afs.WritableStream, str], Awaitable[None]]):
         timings = Timings()
         token = secret_alnum_string()
         iodir = TemporaryDirectory(ensure_exists=False).name  # FIXME: actually cleanup
@@ -258,12 +256,6 @@ class ServiceBackend(Backend):
                         if v is not None:
                             await write_str(infile, k)
                             await write_str(infile, v)
-                    if not needs_user_functions:
-                        await write_int(infile, 0)
-                    else:
-                        await write_int(infile, len(self.functions))
-                        for fun in self.functions:
-                            await fun.serialize(infile)
                     await inputs(infile, token)
 
             with timings.step("submit batch"):
@@ -352,12 +344,15 @@ class ServiceBackend(Backend):
     async def _async_execute(self, ir, timed=False):
         async def inputs(infile, token):
             await write_int(infile, ServiceBackend.EXECUTE)
+            await write_int(infile, len(self.functions))
+            for fun in self.functions:
+                await fun.serialize(infile)
             await write_str(infile, tmp_dir())
             await write_str(infile, self.billing_project)
             await write_str(infile, self.remote_tmpdir)
             await write_str(infile, self.render(ir))
             await write_str(infile, token)
-        _, resp, timings = await self._rpc('execute(...)', inputs, needs_user_functions=True)
+        _, resp, timings = await self._rpc('execute(...)', inputs)
         typ = dtype(resp['type'])
         converted_value = typ._convert_from_json_na(resp['value'])
         if timed:
