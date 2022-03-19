@@ -455,7 +455,6 @@ class Tests(unittest.TestCase):
 
     logreg_functions = [hl.logistic_regression_rows, hl._logistic_regression_rows_nd] if backend_name == "spark" else [hl._logistic_regression_rows_nd]
 
-    @fails_service_backend(reason='not implemented error: register_ir_function')
     def test_weighted_linear_regression(self):
         covariates = hl.import_table(resource('regressionLinear.cov'),
                                      key='Sample',
