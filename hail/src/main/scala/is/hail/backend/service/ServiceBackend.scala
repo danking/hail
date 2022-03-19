@@ -13,6 +13,7 @@ import is.hail.backend.{Backend, BackendContext, BroadcastValue, ExecuteContext,
 import is.hail.expr.JSONAnnotationImpex
 import is.hail.expr.ir.lowering._
 import is.hail.expr.ir.{Compile, IR, IRParser, MakeTuple, SortField}
+import is.hail.expr.ir.functions.IRFunctionRegistry
 import is.hail.io.bgen.IndexBgen
 import is.hail.io.fs._
 import is.hail.io.plink.LoadPlink
@@ -392,22 +393,9 @@ class ServiceBackend(
   def getPersistedBlockMatrixType(backendContext: BackendContext, id: String): BlockMatrixType = ???
 
   def loadReferencesFromDataset(
-    tmpdir: String,
-    sessionId: String,
-    billingProject: String,
-    remoteTmpDir: String,
-    path: String,
-    flags: mutable.Map[String, String]
-  ): String = serviceBackendExecuteContext(
-    "ServiceBackend.loadReferencesFromDataset",
-    tmpdir,
-    sessionId,
-    billingProject,
-    remoteTmpDir,
-    flags
-  ) { ctx =>
-    ReferenceGenome.fromHailDataset(ctx.fs, path)
-  }
+    ctx: ExecuteContext,
+    path: String
+  ): String = ReferenceGenome.fromHailDataset(ctx.fs, path)
 
   def parseVCFMetadata(
     tmpdir: String,
@@ -566,7 +554,6 @@ class ServiceBackendSocketAPI2(
   private[this] val PARSE_VCF_METADATA = 8
   private[this] val INDEX_BGEN = 9
   private[this] val IMPORT_FAM = 10
-  private[this] val GOODBYE = 254
 
   private[this] val dummy = new Array[Byte](8)
 
@@ -637,200 +624,233 @@ class ServiceBackendSocketAPI2(
       flags.update(flagName, flagValue)
       nFlagsRemaining -= 1
     }
+
     val cmd = readInt()
 
-    (cmd: @switch) match {
-      case LOAD_REFERENCES_FROM_DATASET =>
-        val tmpdir = readString()
-        val billingProject = readString()
-        val remoteTmpDir = readString()
-        val path = readString()
-        try {
-          val result = backend.loadReferencesFromDataset(tmpdir, sessionId, billingProject, remoteTmpDir, path, flags)
-          writeBool(true)
-          writeString(result)
-        } catch {
-          case t: Throwable =>
-            writeBool(false)
-            writeString(formatException(t))
-        }
+    val tmpdir = readString()
+    val billingProject = readString()
+    val remoteTmpDir = readString()
 
-      case VALUE_TYPE =>
-        val tmpdir = readString()
-        val billingProject = readString()
-        val remoteTmpDir = readString()
-        val s = readString()
-        try {
-          val result = backend.valueType(tmpdir, sessionId, billingProject, remoteTmpDir, s, flags)
-          writeBool(true)
-          writeString(result)
-        } catch {
-          case t: Throwable =>
-            writeBool(false)
-            writeString(formatException(t))
-        }
-
-      case TABLE_TYPE =>
-        val tmpdir = readString()
-        val billingProject = readString()
-        val remoteTmpDir = readString()
-        val s = readString()
-        try {
-          val result = backend.tableType(tmpdir, sessionId, billingProject, remoteTmpDir, s, flags)
-          writeBool(true)
-          writeString(result)
-        } catch {
-          case t: Throwable =>
-            writeBool(false)
-            writeString(formatException(t))
-        }
-
-      case MATRIX_TABLE_TYPE =>
-        val tmpdir = readString()
-        val billingProject = readString()
-        val remoteTmpDir = readString()
-        val s = readString()
-        try {
-          val result = backend.matrixTableType(tmpdir, sessionId, billingProject, remoteTmpDir, s, flags)
-          writeBool(true)
-          writeString(result)
-        } catch {
-          case t: Throwable =>
-            writeBool(false)
-            writeString(formatException(t))
-        }
-
-      case BLOCK_MATRIX_TYPE =>
-        val tmpdir = readString()
-        val billingProject = readString()
-        val remoteTmpDir = readString()
-        val s = readString()
-        try {
-          val result = backend.blockMatrixType(tmpdir, sessionId, billingProject, remoteTmpDir, s, flags)
-          writeBool(true)
-          writeString(result)
-        } catch {
-          case t: Throwable =>
-            writeBool(false)
-            writeString(formatException(t))
-        }
-
-      case REFERENCE_GENOME =>
-        val tmpdir = readString()
-        val billingProject = readString()
-        val remoteTmpDir = readString()
-        val name = readString()
-        try {
-          val result = backend.referenceGenome(tmpdir, sessionId, billingProject, remoteTmpDir, name, flags)
-          writeBool(true)
-          writeString(result)
-        } catch {
-          case t: Throwable =>
-            writeBool(false)
-            writeString(formatException(t))
-        }
-
-      case EXECUTE =>
-        val tmpdir = readString()
-        val billingProject = readString()
-        val remoteTmpDir = readString()
-        val code = readString()
-        val token = readString()
-        try {
-          val result = backend.execute(tmpdir, sessionId, billingProject, remoteTmpDir, code, token, flags)
-          writeBool(true)
-          writeString(result)
-        } catch {
-          case t: Throwable =>
-            writeBool(false)
-            writeString(formatException(t))
-        }
-
-      case PARSE_VCF_METADATA =>
-        val tmpdir = readString()
-        val billingProject = readString()
-        val remoteTmpDir = readString()
-        val path = readString()
-        try {
-          val result = backend.parseVCFMetadata(tmpdir, sessionId, billingProject, remoteTmpDir, path, flags)
-          writeBool(true)
-          writeString(result)
-        } catch {
-          case t: Throwable =>
-            writeBool(false)
-            writeString(formatException(t))
-        }
-
-      case IMPORT_FAM =>
-        val tmpdir = readString()
-        val billingProject = readString()
-        val remoteTmpDir = readString()
-        val path = readString()
-        val quantPheno = readBool()
-        val delimiter = readString()
-        val missing = readString()
-        try {
-          val result = backend.importFam(tmpdir, sessionId, billingProject, remoteTmpDir, path, quantPheno, delimiter, missing)
-          writeBool(true)
-          writeString(result)
-        } catch {
-          case t: Throwable =>
-            writeBool(false)
-            writeString(formatException(t))
-        }
-
-      case INDEX_BGEN =>
-        val tmpdir = readString()
-        val billingProject = readString()
-        val remoteTmpDir = readString()
-        val nFiles = readInt()
-        val files = new Array[String](nFiles)
-        var i = 0
-        while (i < nFiles) {
-          files(i) = readString()
-          i += 1
-        }
-        val nIndexFiles = readInt()
-        val indexFileMap = mutable.Map[String, String]()
-        i = 0
-        while (i < nIndexFiles) {
-          val k = readString()
-          val v = readString()
-          indexFileMap(k) = v
-          i += 1
-        }
-        val nContigRecoding = readInt()
-        val contigRecoding = mutable.Map[String, String]()
-        i = 0
-        while (i < nContigRecoding) {
-          val k = readString()
-          val v = readString()
-          contigRecoding(k) = v
-          i += 1
-        }
-        val skipInvalidLoci = readBool()
-
-        try {
-          val result = backend.indexBgen(
+    try {
+      val result = (cmd: @switch) match {
+        case LOAD_REFERENCES_FROM_DATASET =>
+          val path = readString()
+          serviceBackendExecuteContext(
+            "ServiceBackend.loadReferencesFromDataset",
             tmpdir,
             sessionId,
             billingProject,
             remoteTmpDir,
-            files,
-            indexFileMap.toMap,
-            contigRecoding.toMap,
-            skipInvalidLoci
-          )
-          writeBool(true)
-          writeString("null")
-        } catch {
-          case t: Throwable =>
-            writeBool(false)
-            writeString(formatException(t))
-        }
+            flags
+          ) { backend.loadReferencesFromDataset(_, path) }
+        case VALUE_TYPE =>
+          val s = readString()
+          serviceBackendExecuteContext(
+            "ServiceBackend.valueType",
+            tmpdir,
+            sessionId,
+            billingProject,
+            remoteTmpDir,
+            flags
+          ) { backend.valueType(_, s) }
 
-      case GOODBYE =>
-        writeInt(GOODBYE)
+        case TABLE_TYPE =>
+          val tmpdir = readString()
+          val billingProject = readString()
+          val remoteTmpDir = readString()
+          val s = readString()
+          try {
+            val result = backend.tableType(tmpdir, sessionId, billingProject, remoteTmpDir, s, flags)
+            writeBool(true)
+            writeString(result)
+          } catch {
+            case t: Throwable =>
+              writeBool(false)
+              writeString(formatException(t))
+          }
+
+        case MATRIX_TABLE_TYPE =>
+          val tmpdir = readString()
+          val billingProject = readString()
+          val remoteTmpDir = readString()
+          val s = readString()
+          try {
+            val result = backend.matrixTableType(tmpdir, sessionId, billingProject, remoteTmpDir, s, flags)
+            writeBool(true)
+            writeString(result)
+          } catch {
+            case t: Throwable =>
+              writeBool(false)
+              writeString(formatException(t))
+          }
+
+        case BLOCK_MATRIX_TYPE =>
+          val tmpdir = readString()
+          val billingProject = readString()
+          val remoteTmpDir = readString()
+          val s = readString()
+          try {
+            val result = backend.blockMatrixType(tmpdir, sessionId, billingProject, remoteTmpDir, s, flags)
+            writeBool(true)
+            writeString(result)
+          } catch {
+            case t: Throwable =>
+              writeBool(false)
+              writeString(formatException(t))
+          }
+
+        case REFERENCE_GENOME =>
+          val tmpdir = readString()
+          val billingProject = readString()
+          val remoteTmpDir = readString()
+          val name = readString()
+          try {
+            val result = backend.referenceGenome(tmpdir, sessionId, billingProject, remoteTmpDir, name, flags)
+            writeBool(true)
+            writeString(result)
+          } catch {
+            case t: Throwable =>
+              writeBool(false)
+              writeString(formatException(t))
+          }
+
+        case EXECUTE =>
+          val tmpdir = readString()
+          val billingProject = readString()
+          val remoteTmpDir = readString()
+          val code = readString()
+          val token = readString()
+          var nFunctionsRemaining = readInt()
+          while (nFunctionsRemaining > 0) {
+            val name = readString()
+
+            val nTypeParameterNamesRemaining = readInt()
+            val typeParameterNames = new Array[String](nTypeParameterNamesRemaining)
+            var i = 0
+            while (i < nTypeParameterNamesRemaining) {
+              typeParameterNames(i) = readString()
+              i += 1
+            }
+
+            val nValueParameterNamesRemaining = readInt()
+            val valueParameterNames = new Array[String](nValueParameterNamesRemaining)
+            var i = 0
+            while (i < nValueParameterNamesRemaining) {
+              valueParameterNames(i) = readString()
+              i += 1
+            }
+
+            val nValueParameterTypesRemaining = readInt()
+            val valueParameterTypes = new Array[String](nValueParameterTypesRemaining)
+            var i = 0
+            while (i < nValueParameterTypesRemaining) {
+              valueParameterTypes(i) = readString()
+              i += 1
+            }
+
+            val returnType = readString()
+
+            val renderedBody = readString()
+          }
+          try {
+            val result = backend.execute(tmpdir, sessionId, billingProject, remoteTmpDir, code, token, flags)
+            writeBool(true)
+            writeString(result)
+          } catch {
+            case t: Throwable =>
+              writeBool(false)
+              writeString(formatException(t))
+          }
+
+        case PARSE_VCF_METADATA =>
+          val tmpdir = readString()
+          val billingProject = readString()
+          val remoteTmpDir = readString()
+          val path = readString()
+          try {
+            val result = backend.parseVCFMetadata(tmpdir, sessionId, billingProject, remoteTmpDir, path, flags)
+            writeBool(true)
+            writeString(result)
+          } catch {
+            case t: Throwable =>
+              writeBool(false)
+              writeString(formatException(t))
+          }
+
+        case IMPORT_FAM =>
+          val tmpdir = readString()
+          val billingProject = readString()
+          val remoteTmpDir = readString()
+          val path = readString()
+          val quantPheno = readBool()
+          val delimiter = readString()
+          val missing = readString()
+          try {
+            val result = backend.importFam(tmpdir, sessionId, billingProject, remoteTmpDir, path, quantPheno, delimiter, missing)
+            writeBool(true)
+            writeString(result)
+          } catch {
+            case t: Throwable =>
+              writeBool(false)
+              writeString(formatException(t))
+          }
+
+        case INDEX_BGEN =>
+          val tmpdir = readString()
+          val billingProject = readString()
+          val remoteTmpDir = readString()
+          val nFiles = readInt()
+          val files = new Array[String](nFiles)
+          var i = 0
+          while (i < nFiles) {
+            files(i) = readString()
+            i += 1
+          }
+          val nIndexFiles = readInt()
+          val indexFileMap = mutable.Map[String, String]()
+          i = 0
+          while (i < nIndexFiles) {
+            val k = readString()
+            val v = readString()
+            indexFileMap(k) = v
+            i += 1
+          }
+          val nContigRecoding = readInt()
+          val contigRecoding = mutable.Map[String, String]()
+          i = 0
+          while (i < nContigRecoding) {
+            val k = readString()
+            val v = readString()
+            contigRecoding(k) = v
+            i += 1
+          }
+          val skipInvalidLoci = readBool()
+
+          try {
+            val result = backend.indexBgen(
+              tmpdir,
+              sessionId,
+              billingProject,
+              remoteTmpDir,
+              files,
+              indexFileMap.toMap,
+              contigRecoding.toMap,
+              skipInvalidLoci
+            )
+            writeBool(true)
+            writeString("null")
+          } catch {
+            case t: Throwable =>
+              writeBool(false)
+              writeString(formatException(t))
+          }
+      }
+      writeBool(true)
+      writeString(result)
+    } catch {
+      case t: Throwable =>
+        writeBool(false)
+        writeString(formatException(t))
     }
   }
 }

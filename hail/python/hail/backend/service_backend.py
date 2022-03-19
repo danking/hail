@@ -1,7 +1,8 @@
-from typing import Dict, Optional, Callable, Awaitable, List, Mapping
+from typing import Dict, Optional, Callable, Awaitable, List, Mapping, Union, Tuple, Map
 import asyncio
 import struct
 import os
+from hail.expr.expressions.base_expression import Expression
 import orjson
 import logging
 import re
@@ -10,7 +11,7 @@ from pathlib import Path
 
 from hail.context import TemporaryDirectory, tmp_dir, TemporaryFilename
 from hail.utils import FatalError
-from hail.expr.types import dtype
+from hail.expr.types import HailType, dtype
 from hail.expr.table_type import ttable
 from hail.expr.matrix_type import tmatrix
 from hail.expr.blockmatrix_type import tblockmatrix
@@ -105,6 +106,42 @@ def yaml_literally_shown_str_representer(dumper, data):
 yaml.add_representer(yaml_literally_shown_str, yaml_literally_shown_str_representer)
 
 
+class IRFunction:
+    def __init__(self,
+                 name: str,
+                 type_parameter_names: Union[Tuple[str, ...], List[str]],
+                 value_parameter_names: Union[Tuple[str, ...], List[str]],
+                 value_parameter_types: Union[Tuple[HailType, ...], List[HailType]],
+                 return_type: HailType,
+                 body: Expression):
+        assert len(value_parameter_names) == len(value_parameter_types)
+        render = CSERenderer(stop_at_jir=True)
+        self._name = name
+        self._type_parameter_names = type_parameter_names
+        self._value_parameter_names = value_parameter_names
+        self._value_parameter_types = value_parameter_types
+        self._return_type = return_type
+        self._rendered_body = render(body._ir)
+
+    async def serialize(self, writer: afs.WritableStream):
+        await write_str(writer, self._name)
+
+        await write_int(writer, len(self._type_parameter_names))
+        for type_parameter_name in self._type_parameter_names:
+            await write_str(writer, type_parameter_name)
+
+        await write_int(writer, len(self._value_parameter_names))
+        for value_parameter_name in self._value_parameter_names:
+            await write_str(writer, value_parameter_name)
+
+        await write_int(writer, len(self._value_parameter_types))
+        for value_parameter_type in self._value_parameter_types:
+            await write_str(writer, value_parameter_type._parsable_string())
+
+        await write_str(writer, self._return_type._parsable_string())
+        await write_str(writer, self._rendered_body)
+
+
 class ServiceBackend(Backend):
     HAIL_BATCH_FAILURE_EXCEPTION_MESSAGE_RE = re.compile("is.hail.backend.service.HailBatchFailure: ([0-9]+)\n")
 
@@ -123,7 +160,6 @@ class ServiceBackend(Backend):
     PARSE_VCF_METADATA = 8
     INDEX_BGEN = 9
     IMPORT_FAM = 10
-    GOODBYE = 254
 
     @staticmethod
     async def create(*,
@@ -186,6 +222,7 @@ class ServiceBackend(Backend):
         self.user_local_reference_cache_dir = user_local_reference_cache_dir
         self.remote_tmpdir = remote_tmpdir
         self.flags = flags
+        self.functions: List[IRFunction] = {}
 
     @property
     def fs(self) -> FS:
@@ -198,6 +235,7 @@ class ServiceBackend(Backend):
     def stop(self):
         async_to_blocking(self._async_fs.close())
         async_to_blocking(self.async_bc.close())
+        self.functions = []
 
     def render(self, ir):
         r = CSERenderer()
@@ -206,7 +244,9 @@ class ServiceBackend(Backend):
 
     async def _rpc(self,
                    name: str,
-                   inputs: Callable[[afs.WritableStream, str], Awaitable[None]]):
+                   inputs: Callable[[afs.WritableStream, str], Awaitable[None]],
+                   *,
+                   needs_user_functions: bool = False):
         timings = Timings()
         token = secret_alnum_string()
         iodir = TemporaryDirectory(ensure_exists=False).name  # FIXME: actually cleanup
@@ -218,6 +258,12 @@ class ServiceBackend(Backend):
                         if v is not None:
                             await write_str(infile, k)
                             await write_str(infile, v)
+                    if not needs_user_functions:
+                        await write_int(infile, 0)
+                    else:
+                        await write_int(infile, len(self.functions))
+                        for fun in self.functions:
+                            await fun.serialize(infile)
                     await inputs(infile, token)
 
             with timings.step("submit batch"):
@@ -311,7 +357,7 @@ class ServiceBackend(Backend):
             await write_str(infile, self.remote_tmpdir)
             await write_str(infile, self.render(ir))
             await write_str(infile, token)
-        _, resp, timings = await self._rpc('execute(...)', inputs)
+        _, resp, timings = await self._rpc('execute(...)', inputs, needs_user_functions=True)
         typ = dtype(resp['type'])
         converted_value = typ._convert_from_json_na(resp['value'])
         if timed:
@@ -513,8 +559,21 @@ class ServiceBackend(Backend):
         _, resp, _ = await self._rpc('import_fam(...)', inputs)
         return resp
 
-    def register_ir_function(self, name, type_parameters, argument_names, argument_types, return_type, body):
-        raise NotImplementedError("ServiceBackend does not support 'register_ir_function'")
+    def register_ir_function(self,
+                             name: str,
+                             type_parameter_names: Union[Tuple[str, ...], List[str]],
+                             value_parameter_names: Union[Tuple[str, ...], List[str]],
+                             value_parameter_types: Union[Tuple[HailType, ...], List[HailType]],
+                             return_type: HailType,
+                             body: Expression):
+        self.functions.append(IRFunction(
+            name,
+            type_parameter_names,
+            value_parameter_names,
+            value_parameter_types,
+            return_type,
+            body
+        ))
 
     def persist_expression(self, expr):
         # FIXME: should use context manager to clean up persisted resources
@@ -522,7 +581,7 @@ class ServiceBackend(Backend):
         write_expression(expr, fname)
         return read_expression(fname)
 
-    def set_flags(self, **flags: Mapping[str, str]):
+    def set_flags(self, **flags: str):
         self.flags.update(flags)
 
     def get_flags(self, *flags) -> Mapping[str, str]:

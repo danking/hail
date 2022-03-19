@@ -82,6 +82,38 @@ object IRFunctionRegistry {
       })
   }
 
+  def pyRegisterIRForServiceBackend(
+    ctx: ExecuteContext,
+    name: String,
+    typeParamStrs: java.util.ArrayList[String],
+    argNames: java.util.ArrayList[String],
+    argTypeStrs: java.util.ArrayList[String],
+    returnType: String,
+    bodyStr: String
+  ): Unit = {
+    requireJavaIdentifier(name)
+
+    val typeParameters = typeParamStrs.asScala.map(IRParser.parseType).toFastIndexedSeq
+    val valueParameterTypes = argTypeStrs.asScala.map(IRParser.parseType).toFastIndexedSeq
+    val refMap = argNames.zip(valueParameterTypes).toMap
+    val IRParser.parse_value_ir(
+      bodyStr,
+      IRParserEnvironment(ctx, refMap, Map()))
+
+    userAddedFunctions += ((name, (body.typ, typeParameters, valueParameterTypes)))
+    addIR(
+      name,
+      typeParameters,
+      valueParameterTypes,
+      IRParser.parseType(returnType),
+      false,
+      { (_, args, _) =>
+        Subst(body,
+          BindingEnv(Env[IR](argNames.asScala.zip(args): _*)))
+      }
+    )
+  }
+
   def removeIRFunction(
     name: String,
     returnType: Type,

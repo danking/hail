@@ -1,7 +1,8 @@
-from typing import Mapping
+from typing import Mapping, List, Union, Tuple
 import abc
 from ..fs.fs import FS
 from ..expr import Expression
+from ..expr.types import HailType
 
 
 class Backend(abc.ABC):
@@ -122,7 +123,13 @@ class Backend(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def register_ir_function(self, name, type_parameters, argument_names, argument_types, return_type, body):
+    def register_ir_function(self,
+                             name: str,
+                             type_parameter_names: Union[Tuple[str, ...], List[str]],
+                             value_parameter_names: Union[Tuple[str, ...], List[str]],
+                             value_parameter_types: Union[Tuple[HailType, ...], List[HailType]],
+                             return_type: HailType,
+                             body: Expression):
         pass
 
     @abc.abstractmethod
