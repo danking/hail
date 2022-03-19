@@ -109,7 +109,7 @@ yaml.add_representer(yaml_literally_shown_str, yaml_literally_shown_str_represen
 class IRFunction:
     def __init__(self,
                  name: str,
-                 type_parameter_names: Union[Tuple[str, ...], List[str]],
+                 type_parameters: Union[Tuple[HailType, ...], List[HailType]],
                  value_parameter_names: Union[Tuple[str, ...], List[str]],
                  value_parameter_types: Union[Tuple[HailType, ...], List[HailType]],
                  return_type: HailType,
@@ -117,7 +117,7 @@ class IRFunction:
         assert len(value_parameter_names) == len(value_parameter_types)
         render = CSERenderer(stop_at_jir=True)
         self._name = name
-        self._type_parameter_names = type_parameter_names
+        self._type_parameters = type_parameters
         self._value_parameter_names = value_parameter_names
         self._value_parameter_types = value_parameter_types
         self._return_type = return_type
@@ -126,9 +126,9 @@ class IRFunction:
     async def serialize(self, writer: afs.WritableStream):
         await write_str(writer, self._name)
 
-        await write_int(writer, len(self._type_parameter_names))
-        for type_parameter_name in self._type_parameter_names:
-            await write_str(writer, type_parameter_name)
+        await write_int(writer, len(self._type_parameters))
+        for type_parameter in self._type_parameters:
+            await write_str(writer, type_parameter._parsable_string())
 
         await write_int(writer, len(self._value_parameter_names))
         for value_parameter_name in self._value_parameter_names:
@@ -561,14 +561,14 @@ class ServiceBackend(Backend):
 
     def register_ir_function(self,
                              name: str,
-                             type_parameter_names: Union[Tuple[str, ...], List[str]],
+                             type_parameters: Union[Tuple[HailType, ...], List[HailType]],
                              value_parameter_names: Union[Tuple[str, ...], List[str]],
                              value_parameter_types: Union[Tuple[HailType, ...], List[HailType]],
                              return_type: HailType,
                              body: Expression):
         self.functions.append(IRFunction(
             name,
-            type_parameter_names,
+            type_parameters,
             value_parameter_names,
             value_parameter_types,
             return_type,

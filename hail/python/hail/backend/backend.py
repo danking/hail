@@ -125,7 +125,7 @@ class Backend(abc.ABC):
     @abc.abstractmethod
     def register_ir_function(self,
                              name: str,
-                             type_parameter_names: Union[Tuple[str, ...], List[str]],
+                             type_parameters: Union[Tuple[HailTyppe, ...], List[HailType]],
                              value_parameter_names: Union[Tuple[str, ...], List[str]],
                              value_parameter_types: Union[Tuple[HailType, ...], List[HailType]],
                              return_type: HailType,
