@@ -222,7 +222,7 @@ class ServiceBackend(Backend):
         self.user_local_reference_cache_dir = user_local_reference_cache_dir
         self.remote_tmpdir = remote_tmpdir
         self.flags = flags
-        self.functions: List[IRFunction] = {}
+        self.functions: List[IRFunction] = []
 
     @property
     def fs(self) -> FS:
@@ -344,14 +344,14 @@ class ServiceBackend(Backend):
     async def _async_execute(self, ir, timed=False):
         async def inputs(infile, token):
             await write_int(infile, ServiceBackend.EXECUTE)
-            await write_int(infile, len(self.functions))
-            for fun in self.functions:
-                await fun.serialize(infile)
             await write_str(infile, tmp_dir())
             await write_str(infile, self.billing_project)
             await write_str(infile, self.remote_tmpdir)
             await write_str(infile, self.render(ir))
             await write_str(infile, token)
+            await write_int(infile, len(self.functions))
+            for fun in self.functions:
+                await fun.serialize(infile)
         _, resp, timings = await self._rpc('execute(...)', inputs)
         typ = dtype(resp['type'])
         converted_value = typ._convert_from_json_na(resp['value'])
