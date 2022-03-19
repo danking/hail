@@ -607,6 +607,7 @@ class ServiceBackendSocketAPI2(
                   returnType,
                   renderedBody
                 )
+                nFunctionsRemaining -= 1
               }
               backend.execute(ctx, code, token)
             } finally {
