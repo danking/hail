@@ -415,8 +415,6 @@ class ServiceBackendSocketAPI2(
   private[this] val out: OutputStream,
   private[this] val sessionId: String
 ) extends Thread {
-  import ServiceBackendSocketAPI2._
-
   private[this] val LOAD_REFERENCES_FROM_DATASET = 1
   private[this] val VALUE_TYPE = 2
   private[this] val TABLE_TYPE = 3
