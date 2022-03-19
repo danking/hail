@@ -436,13 +436,15 @@ class ServiceBackend(
     files: Array[String],
     indexFileMap: Map[String, String],
     contigRecoding: Map[String, String],
-    skipInvalidLoci: Boolean
+    skipInvalidLoci: Boolean,
+    flags: mutable.Map[String, String]
   ): Unit = serviceBackendExecuteContext(
     "ServiceBackend.indexBgen",
     tmpdir,
     sessionId,
     billingProject,
-    remoteTmpDir
+    remoteTmpDir,
+    flags
   ) { ctx =>
     IndexBgen(ctx, files, indexFileMap, None, contigRecoding, skipInvalidLoci)
     info(s"Number of BGEN files indexed: ${ files.size }")
@@ -781,7 +783,8 @@ class ServiceBackendSocketAPI2(
             files,
             indexFileMap.toMap,
             contigRecoding.toMap,
-            skipInvalidLoci
+            skipInvalidLoci,
+            flags
           )
           writeBool(true)
           writeString("null")
