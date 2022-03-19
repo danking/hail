@@ -138,3 +138,13 @@ class Backend(abc.ABC):
     def get_flags(self, *flags) -> Mapping[str, str]:
         """Mapping of Hail flags."""
         pass
+
+    @abc.abstractmethod
+    def set_flags(self, **flags: Mapping[str, str]):
+        """Set Hail flags."""
+        pass
+
+    @abc.abstractmethod
+    def get_flags(self, *flags) -> Mapping[str, str]:
+        """Mapping of Hail flags."""
+        pass
