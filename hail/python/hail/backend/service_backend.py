@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Callable, Awaitable, List, Mapping, Union, Tuple, Map
+from typing import Dict, Optional, Callable, Awaitable, List, Mapping, Union, Tuple
 import asyncio
 import struct
 import os
