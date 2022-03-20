@@ -85,6 +85,7 @@ class VCFTests(unittest.TestCase):
             mt = hl.import_vcf(resource('malformed.vcf'))
             mt._force_count_rows()
 
+    @fails_service_backend()
     @fails_local_backend()
     def test_not_identical_headers(self):
         t = new_temp_file(extension='vcf')
@@ -753,6 +754,7 @@ class PLINKTests(unittest.TestCase):
         self.assertTrue(mt._same(mt_imported))
         self.assertTrue(mt.aggregate_rows(hl.agg.all(mt.cm_position == 15.0)))
 
+    @fails_service_backend()
     @fails_local_backend()
     def test_import_plink_empty_fam(self):
         mt = get_dataset().filter_cols(False)
@@ -761,6 +763,7 @@ class PLINKTests(unittest.TestCase):
         with self.assertRaisesRegex(FatalError, "Empty FAM file"):
             hl.import_plink(bfile + '.bed', bfile + '.bim', bfile + '.fam')
 
+    @fails_service_backend()
     @fails_local_backend()
     def test_import_plink_empty_bim(self):
         mt = get_dataset().filter_rows(False)
@@ -769,6 +772,7 @@ class PLINKTests(unittest.TestCase):
         with self.assertRaisesRegex(FatalError, "BIM file does not contain any variants"):
             hl.import_plink(bfile + '.bed', bfile + '.bim', bfile + '.fam')
 
+    @fails_service_backend()
     def test_import_plink_a1_major(self):
         mt = get_dataset()
         bfile = '/tmp/sample_plink'
@@ -854,7 +858,6 @@ class PLINKTests(unittest.TestCase):
         plink = hl.import_plink(bfile + '.bed', bfile + '.bim', bfile + '.fam', block_size=16)
         self.assertEqual(plink.aggregate_cols(hl.agg.count()), 489)
 
-    @fails_local_backend()
     def test_import_plink_skip_invalid_loci(self):
         mt = hl.import_plink(resource('skip_invalid_loci.bed'),
                              resource('skip_invalid_loci.bim'),
@@ -2109,7 +2112,6 @@ class ImportTableTests(unittest.TestCase):
         ht2 = hl.import_table(resource('sampleAnnotations.tsv'))
         assert ht._same(ht2)
 
-    @fails_service_backend()
     def test_error_with_context(self):
         with pytest.raises(FatalError, match='offending line'):
             ht = hl.import_table(resource('tsv_errors.tsv'), types={'col1': 'int32'})
