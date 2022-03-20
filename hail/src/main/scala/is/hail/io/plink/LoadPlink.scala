@@ -361,8 +361,10 @@ class MatrixPLINKReader(
         val rvb = new RegionValueBuilder(region)
 
         val is = fs.open(bed)
-        TaskContext.get.addTaskCompletionListener[Unit] { (context: TaskContext) =>
-          is.close()
+        if (TaskContext.get != null) {
+          TaskContext.get.addTaskCompletionListener[Unit] { (context: TaskContext) =>
+            is.close()
+          }
         }
         var offset: Long = 0
 
