@@ -289,7 +289,8 @@ class PlinkVariant(
   val index: Int,
   val locusAlleles: Any,
   val cmPos: Double,
-  val rsid: String)
+  val rsid: String
+) extends Serializable
 
 class MatrixPLINKReader(
   val params: MatrixPLINKReaderParameters,
