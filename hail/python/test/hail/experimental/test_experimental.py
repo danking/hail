@@ -117,7 +117,6 @@ class Tests(unittest.TestCase):
 
 
     @pytest.mark.unchecked_allocator
-    @fails_service_backend(reason='hangs >5 minutes; last message is "all results compelte" in ServiceBackend.parallelizeAndComputeWithIndex')
     def test_ld_score_regression(self):
 
         ht_scores = hl.import_table(
