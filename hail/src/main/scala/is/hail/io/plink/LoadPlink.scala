@@ -315,8 +315,6 @@ class MatrixPLINKReader(
   }
 
   def executeGeneric(ctx: ExecuteContext): GenericTableValue = {
-    val fsBc = ctx.fsBc
-
     val localA2Reference = params.a2Reference
     val variantsBc = ctx.backend.broadcast(variants)
     val localNSamples = nSamples
@@ -361,7 +359,7 @@ class MatrixPLINKReader(
 
         val rvb = new RegionValueBuilder(region)
 
-        val is = fsBc.value.open(bed)
+        val is = fs.open(bed)
         TaskContext.get.addTaskCompletionListener[Unit] { (context: TaskContext) =>
           is.close()
         }
