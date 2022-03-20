@@ -312,14 +312,16 @@ class ServiceBackend(Backend):
                         short_message = await read_str(outfile)
                         expanded_message = await read_str(outfile)
                         error_id = await read_int(outfile)
+                        if error_id == -1:
+                            error_id = None
                         maybe_batch_id = ServiceBackend.HAIL_BATCH_FAILURE_EXCEPTION_MESSAGE_RE.match(expanded_message)
-                        if error_id:
+                        if error_id is not None:
                             assert maybe_batch_id is None, str((short_message, expanded_message, error_id))
                             assert ir is not None
                             self._handle_fatal_error_from_backend(
                                 fatal_error_from_java_error_triplet(short_message, expanded_message, error_id),
                                 ir)
-                        if maybe_batch_id:
+                        if maybe_batch_id is not None:
                             assert error_id is None, str((short_message, expanded_message, error_id))
                             batch_id = maybe_batch_id.groups()[0]
                             b2 = await self.async_bc.get_batch(batch_id)
