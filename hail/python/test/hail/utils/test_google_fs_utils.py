@@ -258,7 +258,7 @@ class Tests(unittest.TestCase):
             pass
         except FatalError as err:
             java_nio_error_message = 'DirectoryNotEmptyException: Cannot delete a non-empty directory'
-            hadoop_error_message = f'Directory {subdir1subdir2} is not empty'
+            hadoop_error_message = f'Directory {subdir1subdir2.rstrip("/")} is not empty'
             assert java_nio_error_message in err.args[0] or hadoop_error_message in err.args[0]
         else:
             assert False
@@ -272,7 +272,7 @@ class Tests(unittest.TestCase):
         assert fs.exists(f'{subdir1}a')
         assert fs.exists(subdir1subdir1)
         assert fs.exists(f'{subdir1subdir1}a')
-        assert fs.exists(subdir1subdir2)
+        # subdir1subdir2: will exist in cloud, but not local, so do not test for it
         assert not fs.exists(f'{subdir1subdir2}a')
         assert fs.exists(subdir1subdir3)
         assert fs.exists(f'{subdir1subdir3}a')
@@ -286,7 +286,7 @@ class Tests(unittest.TestCase):
         assert fs.exists(f'{subdir1}a')
         assert not fs.exists(subdir1subdir1)
         assert not fs.exists(f'{subdir1subdir1}a')
-        assert fs.exists(subdir1subdir2)
+        # subdir1subdir2: will exist in cloud, but not local, so do not test for it
         assert not fs.exists(f'{subdir1subdir2}a')
         assert fs.exists(subdir1subdir3)
         assert fs.exists(f'{subdir1subdir3}a')
