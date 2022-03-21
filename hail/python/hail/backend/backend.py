@@ -1,4 +1,4 @@
-from typing import Mapping, List, Union, Tuple, Any
+from typing import Mapping, List, Union, Tuple, Any, Dict, Optional
 import abc
 from ..fs.fs import FS
 from ..expr import Expression
@@ -115,7 +115,12 @@ class Backend(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def index_bgen(self, files, index_file_map, rg, contig_recoding, skip_invalid_loci):
+    def index_bgen(self,
+                   files: List[str],
+                   index_file_map: Dict[str, str],
+                   referenceGenomeName: Optional[str],
+                   contig_recoding: Dict[str, str],
+                   skip_invalid_loci: bool):
         pass
 
     @abc.abstractmethod
