@@ -630,9 +630,6 @@ class ServiceBackendSocketAPI2(
             backend.importFam(_, path, quantPheno, delimiter, missing)
           )
         case INDEX_BGEN =>
-          val tmpdir = readString()
-          val billingProject = readString()
-          val remoteTmpDir = readString()
           val nFiles = readInt()
           val files = new Array[String](nFiles)
           var i = 0
