@@ -15,7 +15,7 @@ import is.hail.expr.ir.lowering._
 import is.hail.expr.ir.{Compile, IR, IRParser, MakeTuple, SortField}
 import is.hail.io.bgen.IndexBgen
 import is.hail.io.fs._
-import is.hail.io.plink.LoadPlin
+import is.hail.io.plink.LoadPlink
 import is.hail.io.vcf.LoadVCF
 import is.hail.linalg.BlockMatrix
 import is.hail.services._
@@ -437,13 +437,15 @@ class ServiceBackend(
     path: String,
     quantPheno: Boolean,
     delimiter: String,
-    missing: String
+    missing: String,
+    flags: mutable.Map[String, String]
   ): String = serviceBackendExecuteContext(
     "ServiceBackend.importFam",
     tmpdir,
     sessionId,
     billingProject,
-    remoteTmpDir
+    remoteTmpDir,
+    flags
   ) { ctx =>
     LoadPlink.importFamJSON(ctx.fs, path, quantPheno, delimiter, missing)
   }
@@ -773,7 +775,7 @@ class ServiceBackendSocketAPI2(
         val delimiter = readString()
         val missing = readString()
         try {
-          val result = backend.importFam(tmpdir, sessionId, billingProject, remoteTmpDir, path, quantPheno, delimiter, missing)
+          val result = backend.importFam(tmpdir, sessionId, billingProject, remoteTmpDir, path, quantPheno, delimiter, missing, flags)
           writeBool(true)
           writeString(result)
         } catch {
