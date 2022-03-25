@@ -56,7 +56,7 @@ from hailtop.utils import (
 from ..batch_format_version import BatchFormatVersion
 from ..cloud.azure.worker.worker_api import AzureWorkerAPI
 from ..cloud.gcp.worker.worker_api import GCPWorkerAPI
-from ..cloud.resource_utils import is_valid_storage_request, storage_gib_to_bytes, worker_memory_per_core_bytes
+from ..cloud.resource_utils import is_valid_storage_request, storage_gib_to_bytes, worker_memory_per_core_mib
 from ..file_store import FileStore
 from ..globals import HTTP_CLIENT_MAX_SIZE, RESERVED_STORAGE_GB_PER_CORE, STATUS_FORMAT_VERSION
 from ..publicly_available_images import publicly_available_images
