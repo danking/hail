@@ -133,7 +133,7 @@ class ServiceBackend(Backend):
                      remote_tmpdir: Optional[str] = None,
                      flags: Optional[Dict[str, str]] = None,
                      driver_memory: Optional[str] = None):
-        assert driver_memory in ('standard', 'highmem')
+        assert driver_memory is None or driver_memory in ('standard', 'highmem')
         del skip_logging_configuration
 
         if billing_project is None:
@@ -226,7 +226,7 @@ class ServiceBackend(Backend):
     async def _rpc(self,
                    name: str,
                    inputs: Callable[[afs.WritableStream, str], Awaitable[None]],
-                   driver_memory: Optional[str] = driver_memory):
+                   driver_memory: Optional[str] = None):
         timings = Timings()
         token = secret_alnum_string()
         iodir = TemporaryDirectory(ensure_exists=False).name  # FIXME: actually cleanup
@@ -330,11 +330,11 @@ class ServiceBackend(Backend):
                             raise FatalError(orjson.dumps(message).decode('utf-8'))
                         raise FatalError(f'batch id was {b.id}\n' + jstacktrace)
 
-    def execute(self, ir, timed=False, *, driver_memory: Optional[str]):
+    def execute(self, ir, timed=False, *, driver_memory: Optional[str] = None):
         return async_to_blocking(self._async_execute(ir, timed=timed, driver_memory=driver_memory))
 
     async def _async_execute(self, ir, timed=False, *, driver_memory: Optional[str]):
-        assert driver_memory in ('standard', 'highmem')
+        assert driver_memory is None or driver_memory in ('standard', 'highmem')
 
         async def inputs(infile, token):
             await write_int(infile, ServiceBackend.EXECUTE)
@@ -343,7 +343,7 @@ class ServiceBackend(Backend):
             await write_str(infile, self.remote_tmpdir)
             await write_str(infile, self.render(ir))
             await write_str(infile, token)
-        _, resp, timings = await self._rpc('execute(...)', inputs, , driver_memory=driver_memory)
+        _, resp, timings = await self._rpc('execute(...)', inputs, driver_memory=driver_memory)
         typ = dtype(resp['type'])
         converted_value = typ._convert_from_json_na(resp['value'])
         if timed:
