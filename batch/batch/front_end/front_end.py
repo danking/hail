@@ -762,8 +762,8 @@ WHERE user = %s AND id = %s AND NOT deleted;
                 if spec['process']['type'] == 'jvm':
                     if 'cpu' in resources:
                         raise web.HTTPBadRequest(reason='jvm jobs may not specify cpu')
-                    if 'memory' in resources and resources['memory'] != 'standard':
-                        raise web.HTTPBadRequest(reason='jvm jobs may not specify memory')
+                    if 'memory' in resources and resources['memory'] not in ('standard', 'highmem'):
+                        raise web.HTTPBadRequest(reason='jvm jobs may only specify `standard` or `highmem` memory')
                     if 'storage' in resources:
                         raise web.HTTPBadRequest(reason='jvm jobs may not specify storage')
                     if machine_type is not None:
