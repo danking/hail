@@ -7,6 +7,7 @@ import logging
 import os
 import random
 import re
+import math
 import shutil
 import signal
 import sys
@@ -55,7 +56,7 @@ from hailtop.utils import (
 from ..batch_format_version import BatchFormatVersion
 from ..cloud.azure.worker.worker_api import AzureWorkerAPI
 from ..cloud.gcp.worker.worker_api import GCPWorkerAPI
-from ..cloud.resource_utils import is_valid_storage_request, storage_gib_to_bytes
+from ..cloud.resource_utils import is_valid_storage_request, storage_gib_to_bytes, worker_memory_per_core_bytes
 from ..file_store import FileStore
 from ..globals import HTTP_CLIENT_MAX_SIZE, RESERVED_STORAGE_GB_PER_CORE, STATUS_FORMAT_VERSION
 from ..publicly_available_images import publicly_available_images
@@ -1855,25 +1856,33 @@ class JVM:
     FINISH_CANCELLED = 3
     FINISH_JVM_EOS = 4
 
+    VALID_WORKER_TYPES = ('standard', 'D', 'highmem', 'E')
+
     @classmethod
-    async def create_process(cls, socket_file: str) -> BufferedOutputProcess:
+    async def create_process(cls, socket_file: str, megabytes: int) -> BufferedOutputProcess:
         # JVM and Hail both treat MB as 1024 * 1024 bytes.
         # JVMs only start in standard workers which have 3.75 GiB == 3840 MiB per core.
         # We only allocate 3700 MiB so that we stay well below the machine's max memory.
         # We allocate 60% of memory per core to off heap memory: 1480 + 2220 = 3700.
+        off_heap_megabytes = math.floor(megabytes * 0.60)
+        on_heap_megabytes = megabytes - off_heap_megabytes
         return await BufferedOutputProcess.create(
             'java',
-            '-Xmx1480M',
+            f'-Xmx{on_heap_megabytes}M',
             '-cp',
             f'/jvm-entryway:/jvm-entryway/junixsocket-selftest-2.3.3-jar-with-dependencies.jar:{JVM.SPARK_HOME}/jars/*',
             'is.hail.JVMEntryway',
             socket_file,
-            env={'HAIL_WORKER_OFF_HEAP_MEMORY_PER_CORE_MB': '2220'},
+            env={'HAIL_WORKER_OFF_HEAP_MEMORY_PER_CORE_MB': off_heap_megabytes},
         )
 
     @classmethod
-    async def create_process_and_connect(cls, index: int, socket_file: str) -> Tuple[BufferedOutputProcess, str]:
-        process = await cls.create_process(socket_file)
+    async def create_process_and_connect(cls,
+                                         index: int,
+                                         socket_file: str,
+                                         megabytes: int
+                                         ) -> Tuple[BufferedOutputProcess, str]:
+        process = await cls.create_process(socket_file, megabytes)
         try:
             attempts = 0
             delay = 0.25
@@ -1907,8 +1916,10 @@ class JVM:
             raise
 
     @classmethod
-    async def create(cls, index: int):
+    async def create(cls, index: int, worker_type: str):
         assert worker is not None
+
+        megabytes = worker_memory_per_core_mib(CLOUD, worker_type)
 
         while True:
             try:
@@ -1918,7 +1929,7 @@ class JVM:
                 output_file = root_dir + '/output'
                 should_interrupt = asyncio.Event()
                 await blocking_to_async(worker.pool, os.mkdir, root_dir)
-                process, startup_output = await cls.create_process_and_connect(index, socket_file)
+                process, startup_output = await cls.create_process_and_connect(index, socket_file, megabytes)
                 log.info(f'JVM-{index}: startup output: {startup_output}')
                 return cls(index, socket_file, root_dir, output_file, should_interrupt, process)
             except ConnectionRefusedError:
@@ -2066,19 +2077,21 @@ class Worker:
         self._jvms: List[JVM] = []
 
     async def _initialize_jvms(self):
-        if instance_config.worker_type() in ('standard', 'D'):
-            self._jvms = await asyncio.gather(*[JVM.create(i) for i in range(CORES)])
+        if instance_config.worker_type() in JVM.VALID_WORKER_TYPES:
+            self._jvms = await asyncio.gather(*[
+                JVM.create(i, instance_config.worker_type()) for i in range(CORES)
+            ])
         log.info(f'JVMs initialized {self._jvms}')
 
     async def borrow_jvm(self) -> JVM:
-        if instance_config.worker_type() not in ('standard', 'D'):
+        if instance_config.worker_type() not in JVM.VALID_WORKER_TYPES:
             raise ValueError(f'JVM jobs not allowed on {instance_config.worker_type()}')
         await asyncio.shield(self._jvm_initializer_task)
         assert self._jvms
         return self._jvms.pop()
 
     def return_jvm(self, jvm: JVM):
-        if instance_config.worker_type() not in ('standard', 'D'):
+        if instance_config.worker_type() not in JVM.VALID_WORKER_TYPES:
             raise ValueError(f'JVM jobs not allowed on {instance_config.worker_type()}')
         jvm.reset()
         self._jvms.append(jvm)
