@@ -131,7 +131,9 @@ class ServiceBackend(Backend):
                      skip_logging_configuration: Optional[bool] = None,
                      disable_progress_bar: bool = True,
                      remote_tmpdir: Optional[str] = None,
-                     flags: Optional[Dict[str, str]] = None):
+                     flags: Optional[Dict[str, str]] = None,
+                     driver_memory: Optional[str] = None):
+        assert driver_memory in ('standard', 'highmem')
         del skip_logging_configuration
 
         if billing_project is None:
@@ -163,6 +165,7 @@ class ServiceBackend(Backend):
             user_local_reference_cache_dir=user_local_reference_cache_dir,
             remote_tmpdir=remote_tmpdir,
             flags=flags or {},
+            driver_memory=driver_memory
         )
 
     def __init__(self,
@@ -174,7 +177,9 @@ class ServiceBackend(Backend):
                  batch_attributes: Dict[str, str],
                  user_local_reference_cache_dir: Path,
                  remote_tmpdir: str,
-                 flags: Dict[str, str]):
+                 flags: Dict[str, str],
+                 driver_memory: Optional[str]
+                 ):
         self.billing_project = billing_project
         self._sync_fs = sync_fs
         self._async_fs = async_fs
@@ -185,6 +190,8 @@ class ServiceBackend(Backend):
         self.user_local_reference_cache_dir = user_local_reference_cache_dir
         self.remote_tmpdir = remote_tmpdir
         self.flags = flags
+        self.driver_memory = driver_memory
+
         if "use_new_shuffle" not in self.flags:
             self.flags["use_new_shuffle"] = "1"
 
@@ -218,7 +225,8 @@ class ServiceBackend(Backend):
 
     async def _rpc(self,
                    name: str,
-                   inputs: Callable[[afs.WritableStream, str], Awaitable[None]]):
+                   inputs: Callable[[afs.WritableStream, str], Awaitable[None]],
+                   driver_memory: Optional[str] = driver_memory):
         timings = Timings()
         token = secret_alnum_string()
         iodir = TemporaryDirectory(ensure_exists=False).name  # FIXME: actually cleanup
@@ -239,14 +247,21 @@ class ServiceBackend(Backend):
                     batch_attributes = {**batch_attributes, 'name': name}
                 bb = self.async_bc.create_batch(token=token, attributes=batch_attributes)
 
-                j = bb.create_jvm_job([
-                    ServiceBackend.DRIVER,
-                    os.environ['HAIL_SHA'],
-                    os.environ['HAIL_JAR_URL'],
-                    batch_attributes['name'],
-                    iodir + '/in',
-                    iodir + '/out',
-                ], mount_tokens=True, resources={'preemptible': False, 'memory': 'standard'})
+                j = bb.create_jvm_job(
+                    [
+                        ServiceBackend.DRIVER,
+                        os.environ['HAIL_SHA'],
+                        os.environ['HAIL_JAR_URL'],
+                        batch_attributes['name'],
+                        iodir + '/in',
+                        iodir + '/out',
+                    ],
+                    mount_tokens=True,
+                    resources={
+                        'preemptible': False,
+                        'memory': self.driver_memory or driver_memory or 'standard'
+                    }
+                )
                 b = await bb.submit(disable_progress_bar=self.disable_progress_bar)
 
             with timings.step("wait batch"):
@@ -315,10 +330,12 @@ class ServiceBackend(Backend):
                             raise FatalError(orjson.dumps(message).decode('utf-8'))
                         raise FatalError(f'batch id was {b.id}\n' + jstacktrace)
 
-    def execute(self, ir, timed=False):
-        return async_to_blocking(self._async_execute(ir, timed=timed))
+    def execute(self, ir, timed=False, *, driver_memory: Optional[str]):
+        return async_to_blocking(self._async_execute(ir, timed=timed, driver_memory=driver_memory))
 
-    async def _async_execute(self, ir, timed=False):
+    async def _async_execute(self, ir, timed=False, *, driver_memory: Optional[str]):
+        assert driver_memory in ('standard', 'highmem')
+
         async def inputs(infile, token):
             await write_int(infile, ServiceBackend.EXECUTE)
             await write_str(infile, tmp_dir())
@@ -326,7 +343,7 @@ class ServiceBackend(Backend):
             await write_str(infile, self.remote_tmpdir)
             await write_str(infile, self.render(ir))
             await write_str(infile, token)
-        _, resp, timings = await self._rpc('execute(...)', inputs)
+        _, resp, timings = await self._rpc('execute(...)', inputs, , driver_memory=driver_memory)
         typ = dtype(resp['type'])
         converted_value = typ._convert_from_json_na(resp['value'])
         if timed:

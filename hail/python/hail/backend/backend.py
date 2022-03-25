@@ -14,10 +14,10 @@ class Backend(abc.ABC):
         pass
 
     @abc.abstractmethod
-    async def _async_execute(self, ir, timed=False):
+    async def _async_execute(self, ir, timed=False, **kwargs):
         pass
 
-    def execute_many(self, *irs, timed=False):
+    def execute_many(self, *irs, timed=False, **kwargs):
         from ..ir import MakeTuple  # pylint: disable=import-outside-toplevel
         return [self.execute(MakeTuple([ir]), timed=timed)[0] for ir in irs]
 
