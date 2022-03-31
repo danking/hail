@@ -1660,11 +1660,10 @@ async def ui_get_job(request, userdata, batch_id):
     app = request.app
     job_id = int(request.match_info['job_id'])
 
-    job, attempts, job_log, resource_usage = await asyncio.gather(
+    job, attempts, job_log = await asyncio.gather(
         _get_job(app, batch_id, job_id),
         _get_attempts(app, batch_id, job_id),
         _get_job_log(app, batch_id, job_id),
-        _get_job_resource_usage(app, batch_id, job_id),
     )
 
     job['duration'] = humanize_timedelta_msecs(job['duration'])

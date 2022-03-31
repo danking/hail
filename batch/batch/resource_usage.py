@@ -39,10 +39,10 @@ class ResourceUsageMonitor:
         self.last_time_ns: Optional[int] = None
         self.last_cpu_ns: Optional[int] = None
 
-        self.out = open(output_file_path, 'wb')  # pylint: disable=consider-using-with
-        self.write_header()
+        # self.out = open(output_file_path, 'wb')  # pylint: disable=consider-using-with
+        # self.write_header()
 
-        self.task: Optional[asyncio.Future] = None
+        # self.task: Optional[asyncio.Future] = None
 
     def write_header(self):
         data = ResourceUsageMonitor.version_to_bytes()
@@ -92,12 +92,12 @@ class ResourceUsageMonitor:
         self.out.flush()
 
     async def __aenter__(self):
-        self.task = asyncio.ensure_future(
-            retry_long_running(f'monitor {self.container_name} resource usage', periodically_call, 5, self.measure)
-        )
+        # self.task = asyncio.ensure_future(
+        #     retry_long_running(f'monitor {self.container_name} resource usage', periodically_call, 5, self.measure)
+        # )
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if self.task is not None:
-            self.task.cancel()
-        self.out.close()
+        # if self.task is not None:
+        #     self.task.cancel()
+        # self.out.close()
