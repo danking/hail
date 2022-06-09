@@ -42,12 +42,7 @@ namespace hail {
 
   TEST_CASE(test_value_int_tuple) {
     HeapAllocator heap;
-    ArenaAllocator arena(heap);
     TypeContext tc(heap);
-
-    auto vint32 = cast<VInt32>(tc.get_vtype(tc.tint32));
-
-    auto region = std::make_shared<ArenaAllocator>(heap);
     IRContext xc(heap);
 
     Module *m = xc.make_module();
@@ -55,6 +50,7 @@ namespace hail {
     std::vector<const Type *> param_types;
     const Type *return_type = tc.ttuple({tc.tint32, tc.tint32});
 
+    auto vint32 = cast<VInt32>(tc.get_vtype(tc.tint32));
     Value i(vint32, 5);
 
     Function *f = xc.make_function(m, "main", param_types, return_type);
@@ -75,6 +71,7 @@ namespace hail {
 
     auto compiled = jit.compile(heap, tc, m, param_vtypes, return_vtype);
 
+    auto region = std::make_shared<ArenaAllocator>(heap);
     auto return_value = compiled.invoke(region, {});
   }
 

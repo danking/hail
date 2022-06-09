@@ -81,10 +81,11 @@ private:
 
 public:
   Function(IRContextToken,
-	   Module *module,
-	   std::string name,
-	   std::vector<const Type *> parameter_types,
-	   const Type *return_type);
+           Module *module,
+           std::string name,
+           std::vector<const Type *> parameter_types,
+           const Type *return_type
+           );
   ~Function();
 
   void remove();
