@@ -1,0 +1,21 @@
+[package]
+name = "fs"
+version = "0.1.0"
+edition = "2021"
+authors = ["Hail Team <hail-team@broadinstitute.org>"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "fs"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.16.5", features = ["extension-module"] }
+pyo3-asyncio = { version = "0.16", features = ["attributes", "async-std-runtime", "tokio-runtime"] }
+tokio = { version = "1.0",  default-features = false, features = ["macros", "rt"] }
+cloud-storage = "0.11.1"
+async-trait = { version = "0.1.48", default-features = false }
+serde = { version = "1", default-features = false, features = ["derive"] }
+serde_json = { version = "1", default-features = false }
+reqwest = { version = "0.11", default-features = false, features = ["json", "stream"] }
