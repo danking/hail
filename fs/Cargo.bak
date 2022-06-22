@@ -1,0 +1,8 @@
+[package]
+name = "hailfs"
+version = "0.0.1"
+authors = ["Hail Team <hail-team@broadinstitute.org>"]
+
+[lib]
+name = "hailfs"
+path = "src/lib.rs"
