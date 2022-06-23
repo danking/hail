@@ -37,7 +37,6 @@ impl PyGoogleStorageAsyncFS {
                     pyo3_asyncio::tokio::future_into_py(py, async move {
                         let bucket = &url[5..(5+first_slash)];
                         let path = &url[(6+first_slash)..];
-                        println!("{} {} {}", url, bucket, path);
                         match inner.lock().await.client.object().download(bucket, path).await {
                             Ok(bytes) => {
                                 Ok(bytes)
