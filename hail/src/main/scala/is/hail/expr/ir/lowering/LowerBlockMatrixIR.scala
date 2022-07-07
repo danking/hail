@@ -1188,6 +1188,87 @@ object LowerBlockMatrixIR {
             })
           }
         }
+
+      case x@SparsePCRelate(gIR, vIR, sIR, uIR) =>
+        val g = lower(gIR)
+        val v = lower(vIR)
+        val s = lower(sIR)
+        val u = lower(uIR)
+        val IndexedSeq(nRows, nCols) = gIR.typ.shape
+        val newCtxType = TTuple(
+          s.ctxType,
+          u.ctxType,
+          u.ctxType,
+          TArray(TTuple(v.ctxType, g.ctxType, g.ctxType)))
+        new BlockMatrixStage(
+          FastIndexedSeq(g, v, s, u).map(_.letBindings).flatten,
+          FastIndexedSeq(g, v, s, u).map(_.broadcastVals).flatten,
+          newCtxType
+        ) {
+          def blockContext(idx: (Int, Int)): IR = {
+            val (i, j) = idx
+            MakeTuple.ordered(FastSeq(
+              s.blockContext(1 -> 1),
+              u.blockContext(1 -> i),
+              u.blockContext(1 -> j),
+              MakeArray(
+                Array.tabulate[Option[IR]](gIR.typ.nRowBlocks) { k =>
+                  Some(MakeTuple.ordered(FastSeq(
+                    v.blockContext(k -> 1),
+                    g.blockContext(k -> i),
+                    g.blockContext(k -> j)
+                  )))
+                }.flatten[IR],
+                newCtxType
+              )
+            ))
+          }
+
+          def blockBody(ctxRef: Ref): IR = {
+            val sCtx = GetTupleElement(ctxRef, 0)
+            val uLCtx = GetTupleElement(ctxRef, 1)
+            val uRCtx = GetTupleElement(ctxRef, 2)
+            val innerProductContextStreamIR = ToStream(GetTupleElement(ctxRef, 3))
+            bindIR(NDArrayMatMul(vIR, s.blockBody(sCtx))) { vsIR =>
+              bindIR(NDArrayMatMul(vsIR, u.blockBody(uLCtx))) { muLIR =>
+                bindIR(NDArrayMatMul(vsIR, u.blockBody(uRCtx))) { muRIR =>
+                  streamAggIR(innerProductContextStreamIR) { element =>
+                    aggBindIR(GetTupleElement(element, 0)) { vCtx =>
+                      aggBindIR(GetTupleElement(element, 1)) { gLCtx =>
+                        aggBindIR(GetTupleElement(element, 2)) { gRCtx =>
+                          bindIR(v.blockBody(vCtx)) { vIR =>
+                            ApplyAggOp(
+                              NDArrayMultiplyAdd()
+                            )(
+                              blockBody(gLCtx) - muLIR,
+                              blockBody(gRCtx) - muRIR,
+                            )
+                            ApplyAggOp(
+                              NDArrayMultiplyAdd()
+                            )(
+                              Apply("sqrt",
+                                FastIndexedSeq(),
+                                FastIndexedSeq(muLIR - (muLIR * muLIR)),
+                                muLIR.typ,
+                                ErrorIDs.NO_ERROR
+                              ),
+                              Apply("sqrt",
+                                FastIndexedSeq(),
+                                FastIndexedSeq(muRIR  - (muRIR * muRIR)),
+                                muRIR.typ,
+                                ErrorIDs.NO_ERROR
+                              )
+                            )
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
     }
   }
 }

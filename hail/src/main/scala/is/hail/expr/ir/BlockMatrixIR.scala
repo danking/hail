@@ -527,6 +527,59 @@ case class BlockMatrixDot(left: BlockMatrixIR, right: BlockMatrixIR) extends Blo
   }
 }
 
+case class SparsePCRelate(
+  g: BlockMatrixIR,
+  v: BlockMatrixIR,
+  s: BlockMatrixIR,
+  u: BlockMatrixIR
+) extends BlockMatrixIR {
+  override lazy val typ: BlockMatrixType = {
+    val blockSize = g.typ.blockSize
+    assert(!g.typ.isRowVector)
+    val IndexedSeq(nRows, nCols) = g.typ.shape
+    val (tensorShape, isRowVector) = BlockMatrixIR.matrixShapeToTensorShape(nCols, nCols)
+
+    val (vR, vC) = BlockMatrixIR.tensorShapeToMatrixShape(v)
+    val (sR, sC) = BlockMatrixIR.tensorShapeToMatrixShape(s)
+    val (uR, uC) = BlockMatrixIR.tensorShapeToMatrixShape(u)
+    assert(vR == nRows)
+    assert(vC == sR)
+    assert(sR == sC)
+    assert(sC == uR)
+    assert(uC == nCols)
+    val k = vC
+    assert(g.typ.elementType == v.typ.elementType)
+    assert(v.typ.elementType == s.typ.elementType)
+    assert(s.typ.elementType == u.typ.elementType)
+
+    BlockMatrixType(
+      g.typ.elementType,
+      tensorShape,
+      isRowVector,
+      blockSize,
+      BlockMatrixSparsity.dense
+    )
+  }
+
+  lazy val children: IndexedSeq[BaseIR] = Array(g, v, s, u)
+
+  def copy(newChildren: IndexedSeq[BaseIR]): BlockMatrixDot = {
+    assert(newChildren.length == 4)
+    BlockMatrixDot(
+      newChildren(0).asInstanceOf[BlockMatrixIR],
+      newChildren(1).asInstanceOf[BlockMatrixIR],
+      newChildren(2).asInstanceOf[BlockMatrixIR],
+      newChildren(3).asInstanceOf[BlockMatrixIR]
+    )
+  }
+
+  val blockCostIsLinear: Boolean = false
+
+  override protected[ir] def execute(ctx: ExecuteContext): BlockMatrix = {
+    throw RuntimeException()
+  }
+}
+
 case class BlockMatrixBroadcast(
   child: BlockMatrixIR,
   inIndexExpr: IndexedSeq[Int],
