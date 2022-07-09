@@ -1,3 +1,4 @@
+use reqwest;
 use pyo3::prelude::*;
 use pyo3::types::*;
 use pyo3::exceptions::PyValueError;
@@ -11,19 +12,12 @@ use std::fs::File;
 use std::io::BufReader;
 
 
-/// Formats the sum of two numbers as string.
-#[pyfunction]
-fn sum_as_string(a: usize, b: usize) -> PyResult<String> {
-    Ok((a + b).to_string())
-}
-
 struct GoogleStorageAsyncFS {
     client: Client,
 }
 
 #[pyclass(name = "GoogleStorageAsyncFS")]
 struct PyGoogleStorageAsyncFS(Arc<Mutex<GoogleStorageAsyncFS>>);
-
 
 #[pymethods]
 impl PyGoogleStorageAsyncFS {
@@ -137,7 +131,7 @@ impl TokenCache for Token {
 
         let path = match std::env::var("GOOGLE_APPLICATION_CREDENTIALS") {
             Ok(file) => { Ok(file) }
-            Err(e) => {
+            Err(_e) => {
                 match std::env::var("HOME") {
                     Ok(home) => { Ok(home + "/.config/gcloud/application_default_credentials.json") }
                     Err(e) => { Err(e) }
@@ -178,13 +172,73 @@ fn create_client() -> PyResult<PyGoogleStorageAsyncFS> {
     return Ok(PyGoogleStorageAsyncFS(Arc::new(Mutex::new(GoogleStorageAsyncFS { client: client }))));
 }
 
+struct HTTPAsyncFS {
+    client: reqwest::Client,
+}
+
+#[pyclass(name = "HTTPAsyncFS")]
+struct PyHTTPAsyncFS(Arc<Mutex<HTTPAsyncFS>>);
+
+struct HTTPAsyncFSStream {
+    resp: reqwest::Response,
+}
+
+#[pyclass(name = "HTTPAsyncFSStream")]
+struct PyHTTPAsyncFSStream(Arc<Mutex<HTTPAsyncFSStream>>);
+
+#[pymethods]
+impl PyHTTPAsyncFS {
+    pub fn open<'p>(&self, py: Python<'p>, url: &'p PyString) -> PyResult<&'p PyAny> {
+        let url: String = url.extract()?;
+        let inner = self.0.clone();
+        pyo3_asyncio::tokio::future_into_py(py, async move {
+            let resp = inner.lock().await.client.get(url).send().await;
+            return match resp {
+                Ok(resp) => {
+                    Ok(PyHTTPAsyncFSStream(Arc::new(Mutex::new(HTTPAsyncFSStream { resp: resp }))))
+                }
+                Err(e) => {
+                    Err(PyValueError::new_err("HTTP error ".to_owned() + &e.to_string()))
+                }
+            }
+        })
+    }
+}
+
+#[pymethods]
+impl PyHTTPAsyncFSStream {
+    pub fn chunk<'p>(&self, py: Python<'p>) -> PyResult<&'p PyAny> {
+        let inner = self.0.clone();
+        pyo3_asyncio::tokio::future_into_py(py, async move {
+            let maybe_bytes = inner.lock().await.resp.chunk().await;
+            match maybe_bytes {
+                Ok(Some(maybe_bytes)) => {
+                    Ok(Some(maybe_bytes.to_vec()))
+                }
+                Ok(None) => {
+                    Ok(None)
+                }
+                Err(e) => {
+                    Err(PyValueError::new_err("HTTP error ".to_owned() + &e.to_string()))
+                }
+            }
+        })
+    }
+}
+
+#[pyfunction]
+fn create_http_client() -> PyResult<PyHTTPAsyncFS> {
+    let client = reqwest::Client::new();
+    return Ok(PyHTTPAsyncFS(Arc::new(Mutex::new(HTTPAsyncFS { client: client }))));
+}
+
 
 /// A Python module implemented in Rust. The name of this function must match
 /// the `lib.name` setting in the `Cargo.toml`, else Python will not be able to
 /// import the module.
 #[pymodule]
 fn fs(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(sum_as_string, m)?)?;
     m.add_function(wrap_pyfunction!(create_client, m)?)?;
+    m.add_function(wrap_pyfunction!(create_http_client, m)?)?;
     Ok(())
 }
