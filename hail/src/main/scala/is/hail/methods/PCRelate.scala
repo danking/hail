@@ -169,15 +169,6 @@ case class PCRelate(
   private[this] def cacheWhen(statisticsLevel: StatisticSubset)(ctx: ExecuteContext, m: M): M =
     if (statistics >= statisticsLevel) writeRead(ctx, m) else m
 
-  def computeResult2(ctx: ExecuteContext, _blockedG: M, pcs: BDM[Double]): Result[M] = {
-    import breeze.linalg._
-    val pcsWithIntercept = BDM.horzcat(BDM.ones[Double](pcs.rows, 1), pcs)
-    val qr.QR(q, r) = qr.reduced(pcsWithIntercept)
-    val halfBeta = writeRead(ctx, (inv(2.0 * r) * q.t).matrixMultiply(blockedG.T))
-    writeRead(ctx, pcsWithIntercept.matrixMultiply(halfBeta).T)
-
-  }
-
   def computeResult(ctx: ExecuteContext, _blockedG: M, pcs: BDM[Double]): Result[M] = {
     val blockedG = _blockedG.cache()
     val preMu = this.mu(ctx, blockedG, pcs)

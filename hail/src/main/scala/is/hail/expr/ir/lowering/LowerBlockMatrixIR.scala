@@ -1183,17 +1183,17 @@ object LowerBlockMatrixIR {
             StreamAgg(tupleNDArrayStream, streamElementName, {
               AggLet(leftName, GetTupleElement(streamElementRef, 0),
                 AggLet(rightName, GetTupleElement(streamElementRef, 1),
-              ApplyAggOp(NDArrayMultiplyAdd())(left.blockBody(leftRef),
-                right.blockBody(rightRef)), isScan=false), isScan=false)
+                  ApplyAggOp(NDArrayMultiplyAdd())(left.blockBody(leftRef),
+                    right.blockBody(rightRef)), isScan=false), isScan=false)
             })
           }
         }
 
-      case x@SparsePCRelate(gIR, vIR, sIR, uIR) =>
+      case x@SparsePCRelate(gIR, uIR, sIR, vIR) =>
         val g = lower(gIR)
-        val v = lower(vIR)
-        val s = lower(sIR)
         val u = lower(uIR)
+        val s = lower(sIR)
+        val v = lower(vIR)
         val IndexedSeq(nRows, nCols) = gIR.typ.shape
         val newCtxType = TTuple(
           s.ctxType,
@@ -1202,26 +1202,56 @@ object LowerBlockMatrixIR {
           TArray(TTuple(v.ctxType, g.ctxType, g.ctxType)))
         new BlockMatrixStage(
           FastIndexedSeq(g, v, s, u).map(_.letBindings).flatten,
-          FastIndexedSeq(g, v, s, u).map(_.broadcastVals).flatten,
+          FastIndexedSeq(g, v, s, u).map(_.broadcastVals).flatten.toArray,
           newCtxType
         ) {
           def blockContext(idx: (Int, Int)): IR = {
             val (i, j) = idx
             MakeTuple.ordered(FastSeq(
-              s.blockContext(1 -> 1),
-              u.blockContext(1 -> i),
-              u.blockContext(1 -> j),
+              // FIXME: assert that s is a single block and/or make it a vector?
+              s.blockContext(0 -> 0),
+              u.blockContext(0 -> i),
+              u.blockContext(0 -> j),
               MakeArray(
                 Array.tabulate[Option[IR]](gIR.typ.nRowBlocks) { k =>
                   Some(MakeTuple.ordered(FastSeq(
-                    v.blockContext(k -> 1),
+                    v.blockContext(k -> 0),
                     g.blockContext(k -> i),
                     g.blockContext(k -> j)
                   )))
                 }.flatten[IR],
-                newCtxType
+                TArray(newCtxType)
               )
             ))
+          }
+
+          def ndsubtract(x: IR, y: IR): IR =
+            invoke("sub", x.typ, x, y)
+
+          def ndpointwisemul(x: IR, y: IR): IR =
+            invoke("mul", x.typ, x, y)
+
+          def ndsqrt(x: IR): IR =
+            invoke("sqrt", x.typ, x)
+
+          def ndpointwisediv(x: IR, y: IR): IR =
+            invoke("div", x.typ, x, y)
+
+          def max(x: IR, y: IR): IR =
+            invoke("max", x.typ, x, y)
+
+          def min(x: IR, y: IR): IR =
+            invoke("min", x.typ, x, y)
+
+          def ndtranspose(x: IR): IR = {
+            val ndt = x.typ.asInstanceOf[TNDArray]
+            NDArrayReindex(x, Array.tabulate(ndt.nDims)(i => ndt.nDims - i - 1).toFastIndexedSeq)
+          }
+
+          def trace(message: String, v: IR): IR = {
+            bindIR(v) { x =>
+              ConsoleLog(invoke("concat", TString, Str(message), invoke("str", TString, x)), x),
+            }
           }
 
           def blockBody(ctxRef: Ref): IR = {
@@ -1229,36 +1259,49 @@ object LowerBlockMatrixIR {
             val uLCtx = GetTupleElement(ctxRef, 1)
             val uRCtx = GetTupleElement(ctxRef, 2)
             val innerProductContextStreamIR = ToStream(GetTupleElement(ctxRef, 3))
-            bindIR(NDArrayMatMul(vIR, s.blockBody(sCtx))) { vsIR =>
-              bindIR(NDArrayMatMul(vsIR, u.blockBody(uLCtx))) { muLIR =>
-                bindIR(NDArrayMatMul(vsIR, u.blockBody(uRCtx))) { muRIR =>
+            val numerDenomIR = bindIR(bindIR(sCtx)(s.blockBody _)) { sIR =>
+              bindIR(NDArrayMatMul(bindIR(uLCtx)(u.blockBody _), sIR, ErrorIDs.NO_ERROR)) { uLIR =>
+                bindIR(NDArrayMatMul(bindIR(uRCtx)(u.blockBody _), sIR, ErrorIDs.NO_ERROR)) { uRIR =>
                   streamAggIR(innerProductContextStreamIR) { element =>
                     aggBindIR(GetTupleElement(element, 0)) { vCtx =>
                       aggBindIR(GetTupleElement(element, 1)) { gLCtx =>
                         aggBindIR(GetTupleElement(element, 2)) { gRCtx =>
-                          bindIR(v.blockBody(vCtx)) { vIR =>
-                            ApplyAggOp(
-                              NDArrayMultiplyAdd()
-                            )(
-                              blockBody(gLCtx) - muLIR,
-                              blockBody(gRCtx) - muRIR,
-                            )
-                            ApplyAggOp(
-                              NDArrayMultiplyAdd()
-                            )(
-                              Apply("sqrt",
-                                FastIndexedSeq(),
-                                FastIndexedSeq(muLIR - (muLIR * muLIR)),
-                                muLIR.typ,
-                                ErrorIDs.NO_ERROR
-                              ),
-                              Apply("sqrt",
-                                FastIndexedSeq(),
-                                FastIndexedSeq(muRIR  - (muRIR * muRIR)),
-                                muRIR.typ,
-                                ErrorIDs.NO_ERROR
-                              )
-                            )
+                          aggBindIR(v.blockBody(vCtx)) { vIR =>
+                            aggBindIR(NDArrayMatMul(uLIR, vIR, ErrorIDs.NO_ERROR)) { muLIR =>
+                              aggBindIR(NDArrayMatMul(uRIR, vIR, ErrorIDs.NO_ERROR)) { muRIR =>
+                                MakeTuple.ordered(FastSeq(
+                                  ApplyAggOp(
+                                    NDArrayMultiplyAdd()
+                                  )(
+                                    ndtranspose(NDArrayMap(
+                                      ndsubtract(g.blockBody(gLCtx), muLIR),
+                                      "x",
+                                      min(F64(0.0), Ref("x", TFloat64)))),
+                                    NDArrayMap(
+                                      ndsubtract(g.blockBody(gRCtx), muRIR),
+                                      "x",
+                                      min(F64(0.0), Ref("x", TFloat64))),
+                                  ),
+                                  ApplyAggOp(
+                                    NDArrayMultiplyAdd()
+                                  )(
+                                    ndtranspose(
+                                      ndsqrt(NDArrayMap(
+                                        ndpointwisemul(
+                                          muLIR,
+                                          NDArrayMap(muLIR, "x", ApplyBinaryPrimOp(Subtract(), F64(2.0), Ref("x", TFloat64)))),
+                                        "x",
+                                        max(F64(0.0), Ref("x", TFloat64))))),
+                                    ndsqrt(NDArrayMap(
+                                      ndpointwisemul(
+                                        muRIR,
+                                        NDArrayMap(muRIR, "x", ApplyBinaryPrimOp(Subtract(), F64(2.0), Ref("x", TFloat64)))),
+                                      "x",
+                                      max(F64(0.0), Ref("x", TFloat64))))
+                                  )
+                                ))
+                              }
+                            }
                           }
                         }
                       }
@@ -1266,6 +1309,12 @@ object LowerBlockMatrixIR {
                   }
                 }
               }
+            }
+            bindIR(numerDenomIR) { numerDenom =>
+              ndpointwisediv(
+                GetTupleElement(numerDenom, 0),
+                GetTupleElement(numerDenom, 1)
+              )
             }
           }
         }

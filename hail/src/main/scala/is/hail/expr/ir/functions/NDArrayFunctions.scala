@@ -38,6 +38,17 @@ object  NDArrayFunctions extends RegistryFunctions {
       }
     }
 
+    {
+      val nDimVar = NatVariable()
+      val i = genUID()
+      registerIR1(
+        "sqrt", TNDArray(TFloat64, nDimVar), TNDArray(TFloat64, nDimVar)
+      ) { (_, a, errorID) =>
+        val elementType = a.typ.asInstanceOf[TNDArray].elementType
+        NDArrayMap(a, i, invoke("sqrt", elementType, errorID, Ref(i, elementType)))
+      }
+    }
+
     def linear_triangular_solve(ndCoef: SNDArrayValue, ndDep: SNDArrayValue, lower: SBooleanValue, outputPt: PType, cb: EmitCodeBuilder, region: Value[Region], errorID: Value[Int]): (SNDArrayValue, Value[Int]) = {
       val ndCoefColMajor = LinalgCodeUtils.checkColMajorAndCopyIfNeeded(ndCoef, cb, region)
       val ndDepColMajor = LinalgCodeUtils.checkColMajorAndCopyIfNeeded(ndDep, cb, region)

@@ -2094,6 +2094,13 @@ object IRParser {
           left <- blockmatrix_ir(env.onlyRelational)(it)
           right <- blockmatrix_ir(env.onlyRelational)(it)
         } yield BlockMatrixDot(left, right)
+      case "SparsePCRelate" =>
+        for {
+          g <- blockmatrix_ir(env)(it)
+          u <- blockmatrix_ir(env)(it)
+          s <- blockmatrix_ir(env)(it)
+          v <- blockmatrix_ir(env)(it)
+        } yield SparsePCRelate(g, u, s, v)
       case "BlockMatrixBroadcast" =>
         val inIndexExpr = int32_literals(it)
         val shape = int64_literals(it)

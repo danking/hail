@@ -529,9 +529,9 @@ case class BlockMatrixDot(left: BlockMatrixIR, right: BlockMatrixIR) extends Blo
 
 case class SparsePCRelate(
   g: BlockMatrixIR,
-  v: BlockMatrixIR,
+  u: BlockMatrixIR,
   s: BlockMatrixIR,
-  u: BlockMatrixIR
+  v: BlockMatrixIR
 ) extends BlockMatrixIR {
   override lazy val typ: BlockMatrixType = {
     val blockSize = g.typ.blockSize
@@ -539,18 +539,17 @@ case class SparsePCRelate(
     val IndexedSeq(nRows, nCols) = g.typ.shape
     val (tensorShape, isRowVector) = BlockMatrixIR.matrixShapeToTensorShape(nCols, nCols)
 
-    val (vR, vC) = BlockMatrixIR.tensorShapeToMatrixShape(v)
-    val (sR, sC) = BlockMatrixIR.tensorShapeToMatrixShape(s)
     val (uR, uC) = BlockMatrixIR.tensorShapeToMatrixShape(u)
-    assert(vR == nRows)
-    assert(vC == sR)
-    assert(sR == sC)
-    assert(sC == uR)
-    assert(uC == nCols)
+    val (sR, sC) = BlockMatrixIR.tensorShapeToMatrixShape(s)
+    val (vR, vC) = BlockMatrixIR.tensorShapeToMatrixShape(v)
+    assert(uR == nRows, (nRows, uR, uC, sR, sC, vR, vC, nCols))
+    assert(uC == sR, (nRows, uR, uC, sR, sC, vR, vC, nCols))
+    assert(sC == vR, (nRows, uR, uC, sR, sC, vR, vC, nCols))
+    assert(vC == nCols, (nRows, uR, uC, sR, sC, vR, vC, nCols))
     val k = vC
-    assert(g.typ.elementType == v.typ.elementType)
-    assert(v.typ.elementType == s.typ.elementType)
-    assert(s.typ.elementType == u.typ.elementType)
+    assert(g.typ.elementType == u.typ.elementType)
+    assert(u.typ.elementType == s.typ.elementType)
+    assert(s.typ.elementType == v.typ.elementType)
 
     BlockMatrixType(
       g.typ.elementType,
@@ -561,11 +560,11 @@ case class SparsePCRelate(
     )
   }
 
-  lazy val children: IndexedSeq[BaseIR] = Array(g, v, s, u)
+  lazy val children: IndexedSeq[BaseIR] = Array(g, u, s, v)
 
-  def copy(newChildren: IndexedSeq[BaseIR]): BlockMatrixDot = {
+  def copy(newChildren: IndexedSeq[BaseIR]): SparsePCRelate = {
     assert(newChildren.length == 4)
-    BlockMatrixDot(
+    SparsePCRelate(
       newChildren(0).asInstanceOf[BlockMatrixIR],
       newChildren(1).asInstanceOf[BlockMatrixIR],
       newChildren(2).asInstanceOf[BlockMatrixIR],
@@ -576,7 +575,7 @@ case class SparsePCRelate(
   val blockCostIsLinear: Boolean = false
 
   override protected[ir] def execute(ctx: ExecuteContext): BlockMatrix = {
-    throw RuntimeException()
+    throw new RuntimeException()
   }
 }
 

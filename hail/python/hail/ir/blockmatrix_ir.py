@@ -1,6 +1,6 @@
 import hail as hl
 from hail.expr.blockmatrix_type import tblockmatrix
-from hail.expr.types import tarray
+from hail.expr.types import tarray, tndarray
 from .blockmatrix_reader import BlockMatrixReader
 from .base_ir import BlockMatrixIR, IR
 from hail.typecheck import typecheck_method, sequenceof, nullable
@@ -123,32 +123,32 @@ class BlockMatrixDot(BlockMatrixIR):
                             self.left.typ.block_size)
 
 
-class BlockMatrixSparsePCRelate(BlockMatrixIR):
-    @typecheck_method(g=BlockMatrixIR, v=BlockMatrixIR, s=BlockMatrixIR, u=BlockMatrixIR)
-    def __init__(self, g, v, s, u):
-        super().__init__(g, v, s, u)
+class SparsePCRelate(BlockMatrixIR):
+    @typecheck_method(g=BlockMatrixIR, u=BlockMatrixIR, s=BlockMatrixIR, v=BlockMatrixIR)
+    def __init__(self, g, u, s, v):
+        super().__init__(g, u, s, v)
         self.g = g
-        self.v = v
-        self.s = s
         self.u = u
+        self.s = s
+        self.v = v
 
     def _compute_type(self, deep_typecheck):
         self.g.compute_type(deep_typecheck)
-        self.v.compute_type(deep_typecheck)
-        self.s.compute_type(deep_typecheck)
         self.u.compute_type(deep_typecheck)
+        self.s.compute_type(deep_typecheck)
+        self.v.compute_type(deep_typecheck)
         n_rows, n_cols = tensor_shape_to_matrix_shape(self.g)
-        vR, vC = tensor_shape_to_matrix_shape(self.v)
-        sR, sC = tensor_shape_to_matrix_shape(self.s)
         uR, uC = tensor_shape_to_matrix_shape(self.u)
-        assert vR == n_rows
-        assert vC == sR
-        assert sC == uR
-        assert uC == n_cols
+        sR, sC = tensor_shape_to_matrix_shape(self.s)
+        vR, vC = tensor_shape_to_matrix_shape(self.v)
+        assert uR == n_rows, (n_rows, uR, uC, sR, sC, vR, vC, n_cols)
+        assert uC == sR, (n_rows, uR, uC, sR, sC, vR, vC, n_cols)
+        assert sC == vR, (n_rows, uR, uC, sR, sC, vR, vC, n_cols)
+        assert vC == n_cols, (n_rows, uR, uC, sR, sC, vR, vC, n_cols)
 
-        assert self.g.typ.element_type  == self.v.typ.element_type
-        assert self.v.typ.element_type  == self.s.typ.element_type
-        assert self.s.typ.element_type  == self.u.typ.element_type
+        assert self.g.typ.element_type  == self.u.typ.element_type
+        assert self.u.typ.element_type  == self.s.typ.element_type
+        assert self.s.typ.element_type  == self.v.typ.element_type
 
         tensor_shape, is_row_vector = _matrix_shape_to_tensor_shape(
             n_cols, n_cols)
@@ -402,7 +402,7 @@ class ValueToBlockMatrix(BlockMatrixIR):
     def _compute_type(self, deep_typecheck):
         self.child.compute_type(deep_typecheck, {}, None)
         child_type = self.child.typ
-        if isinstance(child_type, tarray):
+        if isinstance(child_type, (tarray, tndarray)):
             element_type = child_type._element_type
         else:
             element_type = child_type

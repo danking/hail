@@ -70,9 +70,14 @@ object CanLowerEfficiently {
         case TableToTableApply(_, WrappedMatrixToTableFunction(_: LocalLDPrune, _, _, _)) =>
         case t: TableToTableApply => fail(s"TableToTableApply")
         case t: BlockMatrixToTableApply => fail(s"BlockMatrixToTableApply")
-        case t: BlockMatrixToTable => fail(s"BlockMatrixToTable has no lowered implementation")
+        case t: BlockMatrixToTable => // fail(s"BlockMatrixToTable has no lowered implementation")
+
+        case x: SparsePCRelate =>
+        case x: BlockMatrixRead =>
+        case x: ValueToBlockMatrix =>
 
         case x: BlockMatrixAgg => fail(s"BlockMatrixAgg needs to do tree aggregation")
+        case x: BlockMatrixBroadcast =>
         case x: BlockMatrixIR => fail(s"BlockMatrixIR lowering not yet efficient/scalable")
         case x: BlockMatrixWrite => fail(s"BlockMatrixIR lowering not yet efficient/scalable")
         case x: BlockMatrixMultiWrite => fail(s"BlockMatrixIR lowering not yet efficient/scalable")

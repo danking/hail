@@ -600,3 +600,19 @@ def _pc_relate_bm(call_expr: CallExpression,
     col_keys = hl.literal(mt.select_cols().key_cols_by().cols().collect(),
                           dtype=hl.tarray(mt.col_key.dtype))
     return ht.key_by(i=col_keys[hl.int32(ht.i)], j=col_keys[hl.int32(ht.j)])
+
+
+def fast_pc_relate(mt, *, minimum_kinship=1/8):
+    from hail.methods.pca import _reduced_svd, _make_tsm
+
+    u, s, v = _reduced_svd(_make_tsm(mt.GT.n_alt_alleles(), block_size=1024), k=2, compute_U=True)
+    u = hl.linalg.BlockMatrix.from_ndarray(u)
+    s = hl.linalg.BlockMatrix.from_numpy(np.diag(hl.eval(s)))
+    v = hl.linalg.BlockMatrix.from_ndarray(v).T
+    g = hl.linalg.BlockMatrix.from_entry_expr(mt.GT.n_alt_alleles())
+
+    kin = hl.linalg.BlockMatrix(hl.ir.blockmatrix_ir.SparsePCRelate(g._bmir, u._bmir, s._bmir, v._bmir))
+    kin = kin.entries()
+    kin = kin.rename({'entry': 'kin'})
+    kin = kin.filter(kin.kin > minimum_kinship)
+    return kin  # this should really get checkpointed before anything expensive is done
