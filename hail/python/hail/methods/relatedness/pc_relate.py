@@ -603,6 +603,7 @@ def _pc_relate_bm(call_expr: CallExpression,
 
 
 def fast_pc_relate(mt, *, minimum_kinship=1/8):
+    import nump as np
     from hail.methods.pca import _reduced_svd, _make_tsm
 
     u, s, v = _reduced_svd(_make_tsm(mt.GT.n_alt_alleles(), block_size=1024), k=2, compute_U=True)
