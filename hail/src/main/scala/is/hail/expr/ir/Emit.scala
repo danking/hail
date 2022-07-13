@@ -1559,16 +1559,16 @@ class Emit[C](
               val leftDataAddress = leftPVal.firstDataAddress
               val rightDataAddress = rightPVal.firstDataAddress
 
-              val M = cb.memoize(lShape(lSType.nDims - 2))
-              val N = cb.memoize(rShape(rSType.nDims - 1))
-              val K = cb.memoize(lShape(lSType.nDims - 1))
+              val M = lShape(lSType.nDims - 2)
+              val N = rShape(rSType.nDims - 1)
+              val K = lShape(lSType.nDims - 1)
 
-              val LDA = cb.memoize(leftIsColumnMajor.mux(M, K))
-              val LDB = cb.memoize(rightIsColumnMajor.mux(K, N))
-              val LDC = cb.memoize(M)
+              val LDA = leftIsColumnMajor.mux(M, K)
+              val LDB = rightIsColumnMajor.mux(K, N)
+              val LDC = M
 
-              val TRANSA = cb.memoize(leftIsColumnMajor.mux("N", "T"))
-              val TRANSB = cb.memoize(rightIsColumnMajor.mux("N", "T"))
+              val TRANSA: Code[String] = leftIsColumnMajor.mux("N", "T")
+              val TRANSB: Code[String] = rightIsColumnMajor.mux("N", "T")
 
               val (answerFirstElementAddr, answerFinisher) = outputPType.constructDataFunction(
                 IndexedSeq(M, N),
@@ -1576,45 +1576,6 @@ class Emit[C](
                 cb,
                 region)
 
-              cb.println(const("LDB < MAX(K, 1)")
-                .concat(" ")
-                .concat(TRANSA)
-                .concat(" ")
-                .concat(TRANSB)
-                .concat(" ")
-                .concat(M.toS)
-                .concat(" ")
-                .concat(N.toS)
-                .concat(" ")
-                .concat(K.toS)
-                .concat(" ")
-                .concat(LDA.toS)
-                .concat(" ")
-                .concat(LDB.toS)
-                .concat(" ")
-                .concat(LDC.toS))
-              cb.ifx(
-                LDB < (K > 1).mux(K, 1),
-                cb._fatal(
-                  const("LDB < MAX(K, 1)")
-                    .concat(" ")
-                    .concat(TRANSA)
-                    .concat(" ")
-                    .concat(TRANSB)
-                    .concat(" ")
-                    .concat(M.toS)
-                    .concat(" ")
-                    .concat(N.toS)
-                    .concat(" ")
-                    .concat(K.toS)
-                    .concat(" ")
-                    .concat(LDA.toS)
-                    .concat(" ")
-                    .concat(LDB.toS)
-                    .concat(" ")
-                    .concat(LDC.toS)
-                )
-              )
               cb.ifx((M.get cne 0L) && (N.get cne 0L) && (K.get cne 0L), {
                 cb.append(lSType.elementType.virtualType match {
                   case TFloat32 =>

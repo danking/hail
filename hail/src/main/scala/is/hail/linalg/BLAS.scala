@@ -94,7 +94,6 @@ object BLAS {
     val betaDouble = new DoubleByReference(BETA)
     val LDCInt = new IntByReference(LDC)
 
-    println(s"M=$M N=$N K=$K LDA=$LDA LDB=$LDB LDC=$LDC")
     libraryInstance.get.dgemm(TRANSA, TRANSB, mInt, nInt, kInt, alphaDouble, A, LDAInt, B, LDBInt, betaDouble, C, LDCInt)
   }
 

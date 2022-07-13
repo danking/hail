@@ -1839,7 +1839,6 @@ private class BlockMatrixMultiplyRDD(l: BlockMatrix, r: BlockMatrix)
     val b = if (_b.majorStride < math.max(if (_b.isTranspose) _b.cols else _b.rows, 1)) _b.copy else _b
 
     import com.github.fommil.netlib.BLAS.{getInstance => blas}
-    println("BlockMatrix.fma")
     blas.dgemm(
       if (a.isTranspose) "T" else "N",
       if (b.isTranspose) "T" else "N",
