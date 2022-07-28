@@ -1637,6 +1637,10 @@ class Tests(unittest.TestCase):
         test_stat(10, 100, 100, 0)
         test_stat(40, 400, 20, 12)
 
+    def test_balding_nichols_model_phased(self):
+        
+
+
     @fails_service_backend()
     @fails_local_backend()
     def test_skat(self):
