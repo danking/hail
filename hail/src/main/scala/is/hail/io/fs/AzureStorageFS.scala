@@ -24,37 +24,62 @@ import scala.collection.mutable.ArrayBuffer
 
 
 object AzureStorageFS {
-  private val pathRegex = "/([^/]+)(.*)".r
+  private[this] val hailAZPathRegex = "/([^/]+)(.*)".r
+  private[this] val wasbsAuthorityRegex = "([^.@]+)@([^.]+)\\.blob\\.core\\.windows\\.net".r
 
   private val log = Logger.getLogger(getClass.getName)
 
-  val schemes: Array[String] = Array("hail-az")
+  val schemes: Array[String] = Array("hail-az", "wasbs", "abfss")
 
   def getAccountContainerPath(filename: String): (String, String, String) = {
     val uri = new URI(filename).normalize()
 
     val scheme = uri.getScheme
+    val validSchemesStr = schemes.mkString(", ")
     if (scheme == null || !schemes.contains(scheme)) {
-      throw new IllegalArgumentException(s"invalid scheme, expected hail-az: $scheme")
+      throw new IllegalArgumentException(s"invalid scheme, expected ${validSchemesStr}: $scheme")
     }
-
-    val account = uri.getAuthority
-    if (account == null) {
-      throw new IllegalArgumentException(s"Invalid path, expected hail-az://accountName/containerName/blobPath: $filename")
-    }
-
-    val (container, path) = pathRegex.findFirstMatchIn(uri.getPath) match {
-      case Some(filenameMatch) =>
-        val container = filenameMatch.group(1)
-        val path = filenameMatch.group(2)
-        if (path != "") {
-          assert(path.startsWith("/"))
-          (container, path.substring(1))
-        } else {
-          (container, "")
+    scheme match {
+      case "hail-az" =>
+        val account = uri.getAuthority
+        if (account == null) {
+          throw new IllegalArgumentException(s"Invalid path, expected hail-az://accountName/containerName/blobPath: $filename")
         }
-      case None =>
-          fatal(s"filename $filename is not in the correct format. hail-az://account/container/blobPath")
+
+        val (container, path) = hailAZPathRegex.findFirstMatchIn(uri.getPath) match {
+          case Some(filenameMatch) =>
+            val container = filenameMatch.group(1)
+            val path = filenameMatch.group(2)
+            if (path != "") {
+              assert(path.startsWith("/"))
+              (container, path.substring(1))
+            } else {
+              (container, "")
+            }
+          case None =>
+            fatal(s"filename $filename is not in the correct format. hail-az://account/container/blobPath")
+        }
+      case "wasbs" =>
+        val account = uri.getAuthority
+        if (account == null) {
+          throw new IllegalArgumentException(s"Invalid path, expected wasbs://containerName@accountName.blob.core.windows.net/blobPath: $filename")
+        }
+
+        val (container, path) = wasbsAuthorityRegex.findAllMatchIn(uri.getAuthority) match {
+          case Some(filenameMatch) =>
+            val container = filenameMatch.group(1)
+            val path = filenameMatch.group(2)
+            if (path != "") {
+              assert(path.startsWith("/"))
+              (container, path.substring(1))
+            } else {
+              (container, "")
+            }
+          case None =>
+            fatal(s"filename $filename is not in the correct format. hail-az://account/container/blobPath")
+        }
+        "wasbs://containerName@accountName.blob.core.windows.net/blobPath, or " +
+        "abfss://fileSystem@accountName.dfs.core.windows.net/blobPath>. Given: "
     }
 
     (account, container, path)

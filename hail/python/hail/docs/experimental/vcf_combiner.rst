@@ -13,7 +13,7 @@ Running the Hail GVCF combiner
 ------------------------------
 
 The :func:`.run_combiner` function is the primary entry point to running the Hail GVCF
-combiner. A typical script for running the combiner on Google Cloud Dataproc using
+combiner. A typical script for running the combiner on genomes on Google Cloud Dataproc using
 ``hailctl dataproc`` might look like the below::
 
 
@@ -29,7 +29,12 @@ combiner. A typical script for running the combiner on Google Cloud Dataproc usi
 
     output_file = 'gs://path/to/combined/output.mt'  # output destination
     temp_bucket = 'gs://my-temp-bucket'  # bucket for storing intermediate files
-    hl.experimental.run_combiner(inputs, out_file=output_file, tmp_path=temp_bucket, reference_genome='GRCh38')
+    hl.experimental.run_combiner(
+        inputs,
+        out_file=output_file,
+        tmp_path=temp_bucket,
+        reference_genome='GRCh38',
+        use_genome_default_intervals=True)
 
 
 A command-line tool is also provided as a convenient wrapper around this function. This

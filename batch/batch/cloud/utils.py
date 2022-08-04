@@ -35,7 +35,7 @@ def _acceptable_query_jar_url_prefix() -> str:
     assert query_storage_uri[-1] != '/', (query_storage_uri, jar_subfolder)
 
     parsed = urlparse(acceptable_query_jar_url_prefix)
-    assert parsed.scheme in {'hail-az', 'gs'}, (query_storage_uri, jar_subfolder)
+    assert parsed.scheme in {'hail-az', 'gs', 'wasbs', 'abfss'}, (query_storage_uri, jar_subfolder)
 
     return acceptable_query_jar_url_prefix
 
