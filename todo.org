@@ -1,0 +1,3663 @@
+* annual reviews
+- gather feedback from peers
+- set up a talk before the annual review is submitted
+- do it by may 27th
+- give facts as feedback, not emotions and feelings
+* Hail 2022 Vision
+** Query on Batch (QOB)
+Our absolute number one priority is a fully functional Hail Batch Backend for Hail Query.
+
+This has a number of important benefits:
+1. Reunify the goals and priorities of the two teams.
+2. Enable Hail team (not Dataproc) to profit from *our work* buiding Hail.
+3. Improve operational experience for gnomAD, improve support experience for Hail team.
+4. Enable Hail to scale to 100,000+ cores.
+5. Break free of Spark scatter-gather, enabling the DAGs necessary for Big Linear Algebra.
+6. Enable caching of blob storage via a scalable preemptible-tolerant cache service.
+7. Align incentives towards native code: containerized binaries >>> JVM bytecode.
+8. Provide a zero-operational-burden data store for portals.
+
+The path there:
+1. [INPROGRESS] Preemptible-safe shuffle.
+2. [INPROGRESS] Sufficiently fast scheduling to run all the tests.
+3. [INPROGRESS] Lower all remaining operations.
+4. Quality of life improvements (e.g. automatic upload of referenced local files).
+5. Reduce JVMJob no-op job round trip time by an order of magnitude.
+6. Implement driver-side code as a resumable, persistent state machine.
+7. Develop the cache service as necessary to serve the needs of Hail Query
+8. Develop a solution that does not require an always-on k8s cluster.
+
+The Intermediate Goal:
+1. 2022Q1: Query on Batch for large, non-interactive batches (e.g. gnomAD v4).
+
+Soft announcement target: 2022-04-04 Hail Team ATGU Lab Meeting.
+
+** Tight integration of QoB and Batch
+Once we have QoB, we can push hard on deep integration between Batch and Query. This is a powerful
+and completely novel system. None of our competitors can schedule both arbitrary binaries with
+dataframe jobs.
+
+Benefits:
+1. SAIGE-all-the-intervals and REGENIE can be implemented as pip-installable Hail scripts.
+2. Enable fully-automated, continuous analysis: go from gVCF to p-values in one failure-resilient,
+   resumable Hail Batch.
+
+The path there:
+1. Support dynamically elaborated DAGs (e.g. Hail Query) in one Batch (i.e. open batches).
+2. Batch library support for common patterns of communication between Query and binaries.
+
+** Query User Experience
+All of the above is naught if we don't provide the users what they need. Improving the user
+experience is an iterative process that should involve conversations with users and not-yet-users. A
+few areas, some of which we're working on, that need improvement:
+- plotting
+- friendly, efficient interface for dictionaries with finite key-sets
+- general (sliding) windowed aggregations
+- new methods (e.g. REGENIE, LMMs, etc.)
+
+** Datasets API / Annotation DB Excellence
+
+Get gnomAD and SEQR using the annotation DB. If we build something they like to use, then we've
+built something everyone will like.
+
+** Batch Operational Excellence
+
+1. Squash the filesystem corruption / not executable / not existent issue.
+2. Completely eliminate Docker.
+3. Billing granularity must be shorter than 24 hours.
+
+* Daily TODOs & Logs
+** 2022-07-15 [1/5]
+- [ ] *** team meeting plan ***
+
+- [ ] https://hail.zulipchat.com/#narrow/stream/300487-Hail-Batch-Dev/topic/Azure.20public.20blobs
+
+- [ ] AxAoU: what are the next steps for me
+- [ ] 100 sample VDS for Lee L
+
+- [ ] konrad single cell
+- [ ] hana
+- [ ] broad-e workshop
+- [ ] hail team welcome workshop tutorial
+- [ ] broad-hail annotation db datasets
+- [ ] respond to Steve Vinter
+- [ ] curate backlog
+
+** 2022-07-07 [8/14]
+- [X] chineze & jidapa how to write a programming language
+- [X] grace gupta decline
+- [X] bill for June's Batch work
+- [X] GVS joint calling script: are we on track?
+- [X] journal voucher for konrad, ben, lisa, taylor
+- [X] akum's script
+- [X] fix ukbb-rg
+- [X] email about patrick c
+- [ ] import_plink & wide table benchmarks
+- [ ] codegen for moderately wide tables https://hail.zulipchat.com/#narrow/stream/123010-Hail-Query-0.2E2-support/topic/Class.20too.20large.3A.20__C124collect_distributed_array.20.284k.20cols.29
+- [ ] modify the VM size in AKS
+
+
+xsafds12341
+fdshgla4322!
+
+** 2022-07-06 [/]
+- [ ] investigate blobfuse2 as a replacement for blobfuse https://github.com/Azure/azure-storage-fuse/tree/main
+
+** 2022-06-22 [/]
+- [ ] welcome workshop: Let's impose our vision for the future of Hail! Need team to support this.
+- [ ] ATGU journal club: when is Hail scheduled next?
+
+** 2022-06-21 [/]
+- [ ] annotation db seqr stuff updates
+- [ ] Daniel: I had to modify the deploy_steps in azure ci-config; how do I make this a durable change?
+
+** 2022-06-17 [/]
+- [ ] Akum wants a process by July 8th, are we on track for that? Talk to Tim.
+
+** 2022-06-15 [/]
+- [ ] annotation db seqr stuff updates
+
+** 2022-06-14 [3/31]
+- [ ] investigate Wenhan's QoB issues
+
+*** Wenhan's QoB issues
+Among other things, she needs a naive_coalesce that works.
+** 2022-06-10 [3/34]
+- [X] jlanglie's billing project
+- [ ] ben's critiques, requester pays, fail after n fails
+- [ ] sparse king
+- [ ] import_plink should avoid seeking in the cloud
+
+- [X] Document for Hail on Terra
+- [X] Document for Lizzie
+
+- [ ] chris jelly
+- [ ] alternative interview strategies?
+
+- [ ] C++ compiler infrastructure assessment
+- [ ] use context managers in worker.py
+- [ ] run the benchmarks on the service
+- [ ] create hailgenetics/hail:slim image which pulls quickly
+- [ ] wrap up my resources revamp PR
+  - clean up resources so we can have remote / non-remote resources.
+  - we should support =j.call(f, (b.read_input(x),))=
+- [ ] delete a bunch of test repos
+- [ ] eliminate hailgenetics/hail from copying
+- [ ] annotation db seqr stuff
+
+- [ ] accrued costs bug https://ci.azure.hail.is/batches/24857/jobs/102
+- [ ] fix certificates once and for all https://github.com/hail-is/hail/pull/10188
+- [ ] michael franklin, leo, vlad now have broad accounts, lets make them developers
+- [ ] leo: sops
+- [ ] need to deal with the hailctl config vs hailctl dev config
+- [ ] database pool selection: https://github.com/populationgenomics/hail/pull/197
+- [ ] need to import GCP into terraform
+
+- [ ] publish a rendered Dockerfile with our hailgenetics images
+- [ ] support `http(s)://` paths in hailtop.aiotools.copy: https://github.com/populationgenomics/hail-elasticsearch-pipelines/blob/main/batch_seqr_loader/batch_workflow.py#L737-L738
+- [ ] have a new "release" option
+
+- [ ] Julia https://hail.zulipchat.com/#narrow/stream/123010-Hail-Query-0.2E2-support/topic/BlockMissingException.20using.20vds.2Einterval_coverage/near/283347479
+- [ ] CJ
+  - [ ] schedule time to meet with team
+  - [ ] think about projects
+  - [ ] talk to carla about contract work
+- [ ] ben's batch wrapper idea https://hail.zulipchat.com/#narrow/stream/223457-Hail-Batch-support/topic/batch.20wrapper.20idea/near/279530214
+- [ ] follow up with Zack Bloom
+- [ ] batch: can we somehow limit the total consumption of any one batch e.g. can we say a single
+      batch cannot use more than 50% of our quota
+- [ ] batch: can we somehow force a particular pool (email AUS),
+- [ ] batch: get many jobs at once
+- [ ] always have notebook friendly hail status bar
+*** QoB eventually
+- [ ] master QoB plan document
+- [ ] we need a real broadcast strategy that does not require serializing the value into the function
+- [ ] remove hailcontext from workers
+- [ ] AzureBlobStorageFS
+*** VQSR
+- [ ] Why is VQSR such a pain for DSP? Why shouldn't we just run this ourselves? Why do they build beta versions all the time?
+- [ ] VQSR: Gnomad has a function default_compute_info to compute sites-VCF with VQSR input features
+*** Meetings
+**** Meeting with Lee L
+Hail Batch in Terra App is coming.
+
+End of 2022.
+
+Lee likes the idea of Hail Batch because of the researcher friction of Hail Query conversion
+followed by a pipeline.
+
+** 2022-06-09 [3/31]
+- [ ] chris jelly
+- [X] how many variants are used in PCA: 80,000
+- [ ] alternative interview strategies?
+
+
+- [X] assess cost
+  jackie is digging into this, I think we have some ideas
+- [X] reliable cost accounting system
+  jackie has a new tableau based thing which should give us better visibility
+
+- [ ] C++ compiler infrastructure assessment
+- [ ] use context managers in worker.py
+- [ ] run the benchmarks on the service
+- [ ] create hailgenetics/hail:slim image which pulls quickly
+- [ ] wrap up my resources revamp PR
+  - clean up resources so we can have remote / non-remote resources.
+  - we should support =j.call(f, (b.read_input(x),))=
+- [ ] delete a bunch of test repos
+- [ ] eliminate hailgenetics/hail from copying
+- [ ] annotation db seqr stuff
+
+- [ ] accrued costs bug https://ci.azure.hail.is/batches/24857/jobs/102
+- [ ] fix certificates once and for all https://github.com/hail-is/hail/pull/10188
+- [ ] michael franklin, leo, vlad now have broad accounts, lets make them developers
+- [ ] leo: sops
+- [ ] need to deal with the hailctl config vs hailctl dev config
+- [ ] database pool selection: https://github.com/populationgenomics/hail/pull/197
+- [ ] need to import GCP into terraform
+
+- [ ] publish a rendered Dockerfile with our hailgenetics images
+- [ ] support `http(s)://` paths in hailtop.aiotools.copy: https://github.com/populationgenomics/hail-elasticsearch-pipelines/blob/main/batch_seqr_loader/batch_workflow.py#L737-L738
+- [ ] have a new "release" option
+
+- [ ] Julia https://hail.zulipchat.com/#narrow/stream/123010-Hail-Query-0.2E2-support/topic/BlockMissingException.20using.20vds.2Einterval_coverage/near/283347479
+- [ ] CJ
+  - [ ] schedule time to meet with team
+  - [ ] think about projects
+  - [ ] talk to carla about contract work
+- [ ] ben's batch wrapper idea https://hail.zulipchat.com/#narrow/stream/223457-Hail-Batch-support/topic/batch.20wrapper.20idea/near/279530214
+- [ ] follow up with Zack Bloom
+- [ ] batch: can we somehow limit the total consumption of any one batch e.g. can we say a single
+      batch cannot use more than 50% of our quota
+- [ ] batch: can we somehow force a particular pool (email AUS),
+- [ ] batch: get many jobs at once
+- [ ] always have notebook friendly hail status bar
+*** QoB eventually
+- [ ] master QoB plan document
+- [ ] we need a real broadcast strategy that does not require serializing the value into the function
+- [ ] remove hailcontext from workers
+- [ ] AzureBlobStorageFS
+*** VQSR
+- [ ] Why is VQSR such a pain for DSP? Why shouldn't we just run this ourselves? Why do they build beta versions all the time?
+- [ ] VQSR: Gnomad has a function default_compute_info to compute sites-VCF with VQSR input features
+** 2022-06-07 [0/0]
+** 2022-06-06 [1/1]
+- [X] perf review: submit manager's reviews
+** 2022-05-02 [11/47]
+- [X] alessandro's question about terra app
+- [ ] database pool selection: https://github.com/populationgenomics/hail/pull/197
+- [X] restart meeting
+- [X] zulip patrick s to take over for tim
+- [X] jackie's thread on zulip
+- [ ] how many variants are used in PCA?
+- [X] panukb ld matrix dan will follow up on the thread
+- [X] #1 PRIORITY:::: CZI GRANT
+- [ ] Julia https://hail.zulipchat.com/#narrow/stream/123010-Hail-Query-0.2E2-support/topic/BlockMissingException.20using.20vds.2Einterval_coverage/near/283347479
+- [ ] CJ
+  - [ ] schedule time to meet with team
+  - [ ] think about projects
+  - [ ] talk to carla about contract work
+- [X] 1:1s with chris & patrick
+- [X] chris jelly
+- [ ] awg retrospective thoughts by may 29
+- [X] schedule review with Tim for next thursday the 12th
+- [ ] ben's batch wrapper idea https://hail.zulipchat.com/#narrow/stream/223457-Hail-Batch-support/topic/batch.20wrapper.20idea/near/279530214
+- [ ] follow up with Zack Bloom
+- [ ] delete memory
+- [X] three scenarios for whitney dodds (May 1st)
+  - be clear about pain points for broad, e.g. gnomAD team needs support
+  - jesse souweine, stacey donneley, laura hofstader, juliana leung, bill kubasek, john dench
+- [ ] batch: can we somehow limit the total consumption of any one batch e.g. can we say a single
+      batch cannot use more than 50% of our quota
+- [ ] batch: can we somehow force a particular pool (email AUS),
+- [ ] batch: get many jobs at once
+- [ ] perf review: self-evaluations due by may 2nd 2022
+- [X] take home test for gene
+- [ ] geom_point needs to support different kinds of points
+- [ ] always have notebook friendly hail status bar
+- [ ] always run job to cancel child batches
+- [ ] random strings in the JVM worker jobs
+- [ ] leo: sops
+- [ ] use context managers in worker.py
+- [ ] investigate blobfuse2 as a replacement for blobfuse https://github.com/Azure/azure-storage-fuse/tree/main
+- [ ] run the benchmarks on the service
+- [ ] michael franklin, leo, vlad now have broad accounts, lets make them developers
+- [ ] fix certificates once and for all https://github.com/hail-is/hail/pull/10188
+- [ ] theHailClassLoaderForSparkWorkers use TaskContext.get != null to assert workers only
+- [ ] carolin hl.Struct methods do not show up in docs
+- [ ] need to see all pending jobs in addition to ready jobs
+- [ ] need to deal with the hailctl config vs hailctl dev config
+- [ ] eliminate hailgenetics/hail from copying
+- [ ] accrued costs bug https://ci.azure.hail.is/batches/24857/jobs/102
+- [ ] we should support =j.call(f, (b.read_input(x),))=
+- [ ] delete a bunch of test repos
+- [ ] have a new "release" option
+- [ ] support `http(s)://` paths in hailtop.aiotools.copy: https://github.com/populationgenomics/hail-elasticsearch-pipelines/blob/main/batch_seqr_loader/batch_workflow.py#L737-L738
+- [ ] create hailgenetics/hail:slim image which pulls quickly
+- [ ] clean up resources so we can have remote / non-remote resources.
+- [ ] publish a rendered Dockerfile with our hailgenetics images
+- [ ] need to import GCP into terraform
+*** QoB eventually
+- [ ] master QoB plan document
+- [ ] we need a real broadcast strategy that does not require serializing the value into the function
+- [ ] remove hailcontext from workers
+- [ ] AzureBlobStorageFS
+*** VQSR
+- [ ] Why is VQSR such a pain for DSP? Why shouldn't we just run this ourselves? Why do they build beta versions all the time?
+- [ ] VQSR: Gnomad has a function default_compute_info to compute sites-VCF with VQSR input features
+*** azure
+- [ ] 8767: batch completes before billing limit triggers https://ci.azure.hail.is/batches/14125/jobs/104
+- [ ] 14125 (same as another issue that I can't find right now): wait returns a cost that does not include all jobs. https://ci.azure.hail.is/batches/8767/jobs/104
+** 2022-04-27 [2/62]
+- [ ] hiring: aaron fairbanks
+- [X] czi slides
+- [ ] brainstorm meetings condensation
+- [ ] batch: can we somehow limit the total consumption of any one batch e.g. can we say a single
+      batch cannot use more than 50% of our quota
+- [ ] batch: can we somehow force a particular pool (email AUS),
+- [ ] batch: get many jobs at once
+- [ ] make sure QoB on Azure comes soon
+- [ ] perf review: self-evaluations due by may 2nd 2022
+- [ ] take home test for gene
+- [ ] konrad bugs
+- [X] release 0.2.94
+- [ ] logistic regression: expose max iter
+- [ ] geom_point needs to support different kinds of points
+- [ ] pervasively eliminate new_temp_file
+- [ ] daniel's comments on the globbing PR
+- [ ] always have notebook friendly hail status bar
+- [ ] https://github.com/hail-is/hail/pull/11712
+- [ ] https://github.com/hail-is/hail/pull/11626 change to RE pattern
+- [ ] always run job to cancel child batches
+- [ ] random strings in the JVM worker jobs
+- [ ] leo: sops
+- [ ] hail business plan
+- [ ] use context managers in worker.py
+- [ ] TJ joint calling pipeline
+- [ ] in April, do a bootstrap of the Hail system
+- [ ] investigate blobfuse2 as a replacement for blobfuse https://github.com/Azure/azure-storage-fuse/tree/main
+- [ ] run the benchmarks on the service
+- [ ] aks upgrade to 1.21
+- [ ] daniel 1:1 regularly
+- [ ] copy performance
+- [ ] jackie's document about the mini-batch
+- [ ] multiregional  costs
+- [ ] alec/awg
+- [ ] get list of failing tests
+- [ ] check on Carolin's
+- [ ] should we have cloud profiles
+- [ ] michael franklin, leo, vlad now have broad accounts, lets make them developers
+- [ ] send the VEP branch to the australians they might adopt it
+- [ ] reschedule the hail batch monthly check-in one hour later
+- [ ] https://github.com/hail-is/hail/pull/11345
+- [ ] fix certificates once and for all https://github.com/hail-is/hail/pull/10188
+- [ ] theHailClassLoaderForSparkWorkers use TaskContext.get != null to assert workers only
+- [ ] carolin hl.Struct methods do not show up in docs
+- [ ] PR for daniel g
+- [ ] need to see all pending jobs in addition to ready jobs
+- [ ] need to deal with the hailctl config vs hailctl dev config
+- [ ] document the batch permissions
+- [ ] eliminate hailgenetics/hail
+- [ ] deadlock issue
+- [ ] jinja2 pinned to >=3 https://hail.zulipchat.com/#narrow/stream/300487-Hail-Batch.20Dev/topic/markupsafe.20error/near/272490155
+- [ ] accrued costs bug https://ci.azure.hail.is/batches/24857/jobs/102
+- [ ] https://github.com/hail-is/hail/pull/11352
+- [ ] lindo
+- [ ] set azure billing alerts over to jackie
+- [ ] we should support =j.call(f, (b.read_input(x),))=
+- [ ] delete a bunch of test repos
+- [ ] have a new "release" option
+- [ ] support `http(s)://` paths in hailtop.aiotools.copy: https://github.com/populationgenomics/hail-elasticsearch-pipelines/blob/main/batch_seqr_loader/batch_workflow.py#L737-L738
+- [ ] create hailgenetics/hail:slim image which pulls quickly
+- [ ] clean up resources so we can have remote / non-remote resources.
+- [ ] publish a rendered Dockerfile with our hailgenetics images
+- [ ] need to import GCP into terraform
+*** QoB eventually
+- [ ] master QoB plan document
+- [ ] we need a real broadcast strategy that does not require serializing the value into the function
+- [ ] remove hailcontext from workers
+- [ ] AzureBlobStorageFS
+*** VQSR
+- [ ] Why is VQSR such a pain for DSP? Why shouldn't we just run this ourselves? Why do they build beta versions all the time?
+- [ ] VQSR: Gnomad has a function default_compute_info to compute sites-VCF with VQSR input features
+*** azure
+- [ ] 8767: batch completes before billing limit triggers https://ci.azure.hail.is/batches/14125/jobs/104
+- [ ] 14125 (same as another issue that I can't find right now): wait returns a cost that does not include all jobs. https://ci.azure.hail.is/batches/8767/jobs/104
+
+** TODO 2022-04-25 [3/76]
+Copying over all my tasks from 02-08 when I got swamped and gave up on daily tasks.
+
+- [ ] hiring: aaron fairbanks
+- [ ] three scenarios for whitney dodds (May 1st)
+  - be clear about pain points for broad, e.g. gnomAD team needs support
+  - jesse souweine, stacey donneley, laura hofstader, juliana leung, bill kubasek, john dench
+- [ ] czi slides
+- [ ] brainstorm meetings condensation
+- [ ] batch: can we somehow limit the total consumption of any one batch e.g. can we say a single
+      batch cannot use more than 50% of our quota
+- [ ] batch: can we somehow force a particular pool (email AUS),
+- [ ] batch: get many jobs at once
+- [X] Vlad has VEP on Batch working! (send vlad an email)
+- [ ] make sure QoB on Azure comes soon
+- [ ] perf review: self-evaluations due by may 2nd 2022
+- [ ] take home test for gene
+- [ ] konrad bugs
+- [ ] release 0.2.94
+- [ ] logistic regression: expose max iter
+- [ ] geom_point needs to support different kinds of points
+- [ ] pervasively eliminate new_temp_file
+- [ ] daniel's comments on the globbing PR
+- [ ] always have notebook friendly hail status bar
+- [ ] https://github.com/hail-is/hail/pull/11712
+- [ ] https://github.com/hail-is/hail/pull/11626 change to RE pattern
+- [ ] always run job to cancel child batches
+- [ ] random strings in the JVM worker jobs
+- [ ] leo: sops
+- [ ] hail business plan
+- [ ] use context managers in worker.py
+- [ ] TJ joint calling pipeline
+- [ ] in April, do a bootstrap of the Hail system
+- [ ] investigate blobfuse2 as a replacement for blobfuse https://github.com/Azure/azure-storage-fuse/tree/main
+- [ ] run the benchmarks on the service
+- [ ] aks upgrade to 1.21
+- [ ] daniel 1:1 regularly
+- [ ] copy performance
+- [ ] jackie's document about the mini-batch
+- [ ] multiregional  costs
+- [ ] alec/awg
+- [ ] get list of failing tests
+- [ ] check on Carolin's
+- [ ] should we have cloud profiles
+- [ ] michael franklin, leo, vlad now have broad accounts, lets make them developers
+- [ ] send the VEP branch to the australians they might adopt it
+- [ ] reschedule the hail batch monthly check-in one hour later
+- [ ] https://github.com/hail-is/hail/pull/11345
+- [ ] fix certificates once and for all https://github.com/hail-is/hail/pull/10188
+- [ ] theHailClassLoaderForSparkWorkers use TaskContext.get != null to assert workers only
+- [ ] carolin hl.Struct methods do not show up in docs
+- [ ] PR for daniel g
+- [ ] need to see all pending jobs in addition to ready jobs
+- [ ] need to deal with the hailctl config vs hailctl dev config
+- [ ] document the batch permissions
+- [ ] eliminate hailgenetics/hail
+- [ ] deadlock issue
+- [ ] jinja2 pinned to >=3 https://hail.zulipchat.com/#narrow/stream/300487-Hail-Batch.20Dev/topic/markupsafe.20error/near/272490155
+- [ ] accrued costs bug https://ci.azure.hail.is/batches/24857/jobs/102
+- [ ] https://github.com/hail-is/hail/pull/11352
+- [ ] lindo
+- [ ] set azure billing alerts over to jackie
+- [ ] we should support =j.call(f, (b.read_input(x),))=
+- [ ] delete a bunch of test repos
+- [X] WONTDO: google doc about title/matrix for ameeta
+  - ameeta is leaving the broad anyway (and so are we!)
+- [ ] have a new "release" option
+- [X] create a deploy wheel and use it in hailgenetics/hail (or just pip install the right version??)
+  - this was done a while ago
+- [ ] support `http(s)://` paths in hailtop.aiotools.copy: https://github.com/populationgenomics/hail-elasticsearch-pipelines/blob/main/batch_seqr_loader/batch_workflow.py#L737-L738
+- [ ] create hailgenetics/hail:slim image which pulls quickly
+- [ ] clean up resources so we can have remote / non-remote resources.
+- [ ] publish a rendered Dockerfile with our hailgenetics images
+- [ ] need to import GCP into terraform
+*** QoB eventually
+- [ ] master QoB plan document
+- [ ] we need a real broadcast strategy that does not require serializing the value into the function
+- [ ] remove hailcontext from workers
+- [ ] AzureBlobStorageFS
+- [X] containerize JVM
+- [X] pipe logs to disk
+- [X] segregate logs per user
+- [X] user exceptions should not be logged in worker.py
+- [X] exceptions need to become HailException (or w/e) on the client-side so that errors pass
+- [X] use john's encoding protocol when serializing values back to the client-side.
+*** VQSR
+- [ ] Why is VQSR such a pain for DSP? Why shouldn't we just run this ourselves? Why do they build beta versions all the time?
+- [ ] VQSR: Gnomad has a function default_compute_info to compute sites-VCF with VQSR input features
+*** azure
+- [X] 1) we frequently insert jobs twice 2) writing the spec to the cloud is either not idempotent or is not happening https://ci.azure.hail.is/batches/17249/jobs/167
+- [ ] 8767: batch completes before billing limit triggers https://ci.azure.hail.is/batches/14125/jobs/104
+- [ ] 14125 (same as another issue that I can't find right now): wait returns a cost that does not include all jobs. https://ci.azure.hail.is/batches/8767/jobs/104
+- [X] azure private instance test is failing https://ci.azure.hail.is/batches/10775/jobs/47
+** DONE 2022-02-08 [35/35]
+Some of these tasks were completed after the eighth. I got under water around now and stopped
+creating new entries for each day.
+
+- [X] BLAS/LAPACK in the service
+- [X] jvm containerization
+- [X] Ben W on Azure Hail Batch
+- [X] highmems for drivers memory
+- [X] rebase and PR #10820 & #10792
+- [X] send to Sarah a description of what I need in an ERP system
+- [X] neale lab presentation
+- [X] Leo's elasticsearch export woes https://hail.zulipchat.com/#narrow/stream/123010-Hail-Query-0.2E2-support/topic/Error.20__C1188collect_distributed_array
+      moved into production issues
+- [X] Qidi
+- [X] share the Hail plan with Rohan
+- [X] ask Patrick S et al. about Factor Analysis, Variational Bayes, and Expectation Propagation
+- [X] KC's interval batch thing: can we do a query-on-batch job inside a python job?
+- [X] CZI grant https://chanzuckerberg.com/rfa/essential-open-source-software-for-science/?utm_campaign=Science&utm_medium=email&_hsmi=206150044&_hsenc=p2ANqtz-9fnI8l9V0uSE60wsQw1aH5SF884yfBPUvteRO8Me2Ziks2qk48IWO-B3ZNFtaRBq0-hUTTp3xLwrOKM1ntRF3JnPdF4pFrElT_9RDJkfUAsHC_iHw&utm_content=206150044&utm_source=hs_email
+- [X] feb/march bills
+- [X] back filling job description
+- [X] leo's 10 million rows collect
+- [X] staff meeting calendar event
+- [X] billing allert to jackie
+- [X] pm to grace
+- [X] PR review (Memory & CPU top priority)
+- [X] CI shepherd
+- [X] VRS review
+- [X] finish the deploy from John
+- [X] test copy too slow make many test copies
+- [X] ticket system
+- [X] jackie jvmentryway
+- [X] email brian patterson and bussys about quotes that are approved but not appearing in the report completed work list
+- [X] email finance after I finally submit completed work
+- [X] Patrick C should talk to Ameeta about the CS
+- [X] talk to carolin about next steps
+- [X] make list of one-day PRs
+- [X] schedule a meeting with Carolin to talk about energy and momentum from the presentation and how to ensure we stay at that level
+- [X] follow up with Steve Jahl
+- [X] awg: reading/watching/listening material on personal decisions people make
+- [X] repr of frozendict
+*** QoB PR
+- [X] remove mainclass from the API. hardcode a new mainclass that switches on Worker vs Driver
+** DONE 2022-02-07 [8/8]
+- [X] image of john c to carolin for slide, example of ggplot
+- [X] ** ahmed **
+- [X] check in on Greg Smith
+- [X] Mike Wilson post on zulip
+- [X] document what I learned from Daniel (build.yaml versioning, global-config versioning)
+- [X] contact steve jahl about ATGU SWE
+- [X] circle back to Michael Franklin https://hail.zulipchat.com/#narrow/stream/128581-Cloud-support/topic/Status.20of.20Azure.20support
+- [X] PR Review
+** 2022-01-25 [2/2]
+- [X] tim gift
+- [X] meetings with Chris & Patrick
+** 2022-01-24 [6/6]
+- [X] bills
+- [X] lindo gwaspy issue
+- [X] Greg Smith & MSFT check-in on this.
+- [X] grace:dan earlier meeting about matrices etc.
+- [X] 1:1s with Tim's folks
+- [X] check with carolin on the outline
+** 2022-01-27 [3/3]
+- [X] weigh in on blobfuse
+- [X] move protocol code out of worker.py
+- [X] stop event in bufferedoutputprocess
+** 2022-01-18 [3/3]
+- [X] Hana
+- [X] Chris is going to gnomad meetings?
+- [X] aleisha project
+** 2022-01-17 [0/0]
+** 2022-01-14 [0/0]
+** 2022-01-13 [3/3]
+- [X] AWG agenda feedback
+- [X] move jigold meeting to monday
+- [X] tim gift
+** 2022-01-12 [4/4]
+- [X] awg meeting day move
+- [X] systems cs paper
+- [X] vedant 1:1
+- [X] 2022 plan meeting prep
+** 2022-01-11 [3/3]
+- [X] horizontal concat PCA of 2 or more matrices
+- [X] CCDG bug
+- [X] schedule promotion meetings
+** 2022-01-06 [1/1]
+- [X] email team about the neale lab debrief
+** 2022-01-05 [0/0]
+** 2022-01-04 [1/1]
+- [X] prioritize azure things
+** 2022-01-03 todo [4/4]
+- [X] cloudflare as a replacement for ABS for datasets API https://blog.cloudflare.com/introducing-r2-object-storage/
+- [X] potential summer internship prep
+- [X] mgh tests
+- [X] PRs
+** uncategorized todo
+*** DONE half-hour post-neale-lab meeting debrief
+*** DONE bereavement card to kumar
+*** DONE create three google docs
+*** DONE [DK] Review PR for billing #11092
+*** DONE carolin class
+WONTDO
+*** DONE meeting with Gib (follow up on email to claire)
+*** TODO clean up interval aggs and make a PyPI package
+*** TODO finalize the AsyncFS API
+*** DONE prepare let's talk lunch discussion points
+*** DONE let's talk lunch calendar event and zoom link
+*** DONE wenhan dp over 20 thing
+*** DONE send out let's talk lunch discussion points
+*** DONE Hana & SEQR
+*** DONE SAP quotes
+moved to daily logs
+<2021-12-01>
+*** DONE hackathon 16th of November
+*** DONE matumbaa on systems cs
+*** DONE money stuff for emma extension
+*** DONE BISP interface excel sheet creation from flat files
+*** DONE Patrick C HMDR, how much time do we have
+<2021-11-30 16:00>
+
+More time will be available for this in March
+*** DONE get Vedant a slot at the neale lab meeting
+*** DONE schedule a meeting for Vedant to talk to Hail about his co-op
+*** DONE john's seqr doc
+*** DONE hailtop.aiotools.delete
+*** DONE hailctl hdinsight & hailtop.aiotools in dataproc code
+*** TODO UKB Round 3 public
+*** DONE annotation dataset super group
+*** DONE GoogleStorageAsyncFS
+*** DONE Azure AD
+*** DONE msec_mcpu issue (and then https://github.com/hail-is/hail/pull/10985)
+*** DONE daniel & patrick s promotion
+*** TODO carolin performance chat
+<2022-01-05>
+*** DONE schedule hail-team support reminder emails
+*** DONE Chief Technological Officer
+*** DONE auth service principals
+*** DONE Konrad zulip
+John C is dealing with this.
+
+We just got another mysterious failure, maybe OOM as of friday night
+*** DONE wenhan ccdg exomes
+   Wenhan has a set of intervals and she needs to do a sum on these intervals
+*** DONE julia's encoding issue (files disappear on since 2021-10-21)
+   Someone needs to figure out what 0.2.77's file is broken.
+
+   Created with 0.2.62:
+   gs://gnomad-tmp/gnomad_v3.1.2_qc_data/vcf_prep.ht
+
+   Created with 0.2.77:
+   gs://gnomad-tmp/gnomad_v3.1.2_qc_data/vcf_prep2.ht
+*** DONE ccdg combiner (chris v)
+*** DONE craig meeting longer
+*** DONE greg smith update on azure
+*** DONE jigold comments & dg comments
+*** DONE Hail team data group copy tool
+*** DONE mane intro email
+*** DONE Sam's doc
+*** DONE Hail Team at ATGU Lab Meeting
+<2021-10-25>
+*** DONE Konrad Letter
+<2021-09-21>
+*** DONE Hana (john's message)
+*** DONE atgu leadership / awg conflict
+*** DONE rachael wanted to talk about her software architecture
+*** DONE check-in with Albert about his software architecture
+*** DONE broad overview of genetics presentation
+   <2021-09-22>
+*** DONE Ruchi's request for jigold to be on the panel
+*** DONE desk lamp
+*** DONE Carolin
+*** DONE instance config
+*** DONE pd-ssd data_disk_size_gb
+*** DONE fucking kill zone
+*** DONE small group project description
+*** DONE wzhou: slush fund for small experiments
+* summer internship ideas
+** import_google_sheet
+** hail copy tool
+- multiprocessing
+- ensure if a file starts it can always make forward progress (i.e. you don't have ~1000s of
+  in-flight files all waiting in a huge queue to get permission to run upload their last partition)
+** ggplot
+- error visualizations
+- 2d density visualizations
+- three variable
+- map (e.g. provide the UK map and plot binned birth lat-lon in UKB as heatmap)
+- box and violin plots
+- scale binned
+- faceting
+* Terra-Hail Integration
+** DONE Follow up with Kyle about 3rd party apps
+Meeting on 02-02-2022 about this; see notes under Azure heading.
+
+Last conversation with Kyle Vernest:
+
+Also, I know we haven't talked much about the 3rd Party App integrations yet, but happy to follow
+up at any time with what we're thinking and if we want to try anything out. Rob Title from our
+side has been focusing on the development of this, so he's a great resource.
+** DONE Follow up with Kyle about MTs in DRS
+Meeting on 02-02-2022 about this; see notes under Azure heading.
+* All of Us (AoU)
+** Hail / GVS meeting
+Reference ranges are stored in BigQuery now.
+
+GVS will produce reference ranges in sorted Avro files and sorted variant data in Avro files.
+
+"sorted Avro files -> Hail" is owned by Hail. Operation is owned by DSP
+
+May callset (deliver by April)
+
+*** deliverables
+- Hierarchically merge ~200k (and growing) array VCF
+  - Import from GVS ~200k (and growing) genomes
+  - Not a variant-by-variant output
+  - Batches of ~4000 samples, variant-by-variant
+- Somewhat like an intermediate step of the combiner
+- “Feature fixes / debugging”
+*** timeline
+- sizes
+- dates
+- contents
+*** What are the performance requirements?
+*** What is the support model?
+*** How do we update versions of Hail in their environment? Who does this?
+** Lee L. 1:1 <2021-11-30>
+GVS now has reference blocks. GVS can send reference blocks with Avro files.
+
+100k samples coming. Just GQs etc., no PLs.
+
+87k was 27 TB.
+
+Next release will include PLINK and MTs.
+
+Part-time swe for 1 year.
+
+March.
+
+DSP owns the ops.
+
+Minimum 100k, 150k or 200k. If 200k, then probably later than March.
+
+Might also have arrays. 300k arrays. We'll have to support them.
+
+- convert sparse mt from avros
+- feature fixes / debug
+- merge arrays
+* hail paper
+** paper readings
+NB: Chubby is 15 pages of content whereas the other two are 6-7.
+*** chubby
+**** High level framing of system
+#+begin_quote
+Building Chubby was an engineering effort requried to fill the needs mentioned above; it was not
+research. We claim no new algorithms or techniques. The purpose of htis paper is to describe what we
+did and why, rather than to advocate it.
+#+end_quote
+**** Motivations
+Googlers applied ad-hoc approaches to leader election which lead, in some systems, to unnecessary
+(but harmless) duplicated work and, in other systems, operator intervention (and thus loss of
+availability).
+**** Do they talk about users or not?
+Yes, quite a bit. The paper is very focused on how to build a system to serve the daily, practical
+needs of software engineers at Google.
+e.g.:
+- SWEs do not design for availability
+- SWEs do not want to choose a cache time out
+- SWEs are comforatble with locks but less comfortable with consensus
+- SWEs find inconsistent caching confusing
+- SWEs, in practice, will poll files
+**** What do they care about? What do they want readers to get out of the paper?
+They have an explicit Lessons learned section. I think this might reference to the "Center for Army
+Lessons Learned". It seems like they highlight a number of specific practical lessons in engineering
+distributed systems. They include many observations on the behaviors of SWEs.
+**** Structure - titles of sections and sizes
+Introduction
+Design
+Mechanisms for scaling
+Use, surprises and design errors
+Comparison with related work
+Summary
+Acknowledgements
+*** dremel
+**** High level framing of system
+Compares themselves to systems like Map Reduce. Highlights the need for users to have easy access to
+execute bursts of highly parallel computing. Describe many practical examples of use. Claim novelty
+for: storage format, query language, execution trees applied to db processing, and scale
+**** Motivations
+Large datasets have become quite common, but no tool exists that enables highly parallel computation
+across very large datasets.
+**** Do they talk about users or not?
+Much less than the Chubby paper. This paper does not discuss how the tool is used as much as the
+tool itself.
+**** What do they care about? What do they want readers to get out of the paper?
+I think they want folks to understand how to build a Dremel-like system.
+**** Structure - titles of sections and sizes
+Introduction
+Background
+Data Model
+Nested Columnar Storage
+Query Language
+Query Exection
+Experiments
+Observations
+Related Work
+Conclusions
+Acknowledgements
+*** spark
+**** High level framing of system
+Performance can be improved substantially for operations that reuse a working set of data by keeping
+the data in memory.
+**** Motivations
+#+begin_quote
+We believe that Spark is the first system to allow an efficient, general-purpose programming language
+to be used interactively to process large datasets on a cluster.
+#+end_quote
+
+Iterative jobs and interactive analytics both benefit from in-memory approaches. Spark tries to fill
+that niche.
+**** Do they talk about users or not?
+Even less than Dremel. Users really seem like just a motivator for them and never appear again.
+**** What do they care about? What do they want readers to get out of the paper?
+There is a big focus on demonstrating how Spark is better than Hadoop. About a page each for: programming model, examples, and implementation.
+**** Structure - titles of sections and sizes
+* gnomAD
+** TODO n+k relatedness needed by 2022Q2
+gnomAD plans to re-use the existing PC-space (will project new samples into the N samples' space)
+** gnomad v4 facts
+- 995k exomes. https://atgu.slack.com/archives/D7TSWLR39/p1638281553000700
+- includes ukb exomes
+** Grace 1:1 <2021-11-17>
+<2021-11-17>
+truly federated calling and qc is coming. all of us will let gnomad access their data directly. What
+will we do with the next project?
+
+Mike is struggling with scaling issues with phasing data. Mike thinks there are algorithmic issues,
+perhaps something about multi-threading. gnomAD will eventually want to phase everything. Do we have
+a story for dealing with extant tools that need to scale? Reconnect in the new year.
+
+KC regional missense constraint. Hail looping is the big difficulty here.
+
+Could we do some kind of co-hack time to bring gnomAD and Hail together.
+*** DONE should we join the TGG computational meetings once a year
+*** DONE talk to patrick about mike
+** Grace 1:1 <2021-09-16>
+<2021-09-16>
+*** What is your relationship (if any) to the Azure deal?
+   project 1: terra
+   project 2: aus/rare-disease
+   project 3: jukebox/biobank
+
+   no formal relationship with msft.
+
+   Heidi is involved in project 2. Maybe a CS will be involved in rare disease research. not
+   entirely clear.
+
+   grace will do jukebox analysis
+*** How is all of us coming along?
+   Lee Lichtenstein is formally in charge of QCing AoU data for the AoU consortium.
+
+   Grace wants to pull AoU into gnomAD. She wants to be able to ingest AoU.
+*** gnomad v4 updates
+**** n+k analysis
+***** DONE n+k relatedness needed by February 1
+     <2022-01-15>
+     This is actually needed Q1. I've moved to the gnomad list
+***** DONE check in with PC and PS about relatedness (I asked on zulip)
+     <2021-09-23>
+     How do we do n+k relatedness? we want the k x k and the n x k matrices, not an n+k x n+k matrix.
+     https://hail.zulipchat.com/#narrow/stream/123011-Hail-Query.20Dev/topic/relatedness
+**** VDS
+    Port existing gnomAD method functions into Hail.
+
+    Council wants a 38 aligned exome callset yesterday.
+
+    Concerns:
+    - getting automated testing is work
+    - getting code into hail-is/hail is work
+    - vds is inevitable because of the AoU
+
+    Grace needs a delivery before 2022.
+
+***** DONE Meet Tim, Julia, Grace, me, & Konrad, ask Whitney to find time
+**** readviz & KC
+    export a tsv per row for UKB exomes
+
+    select a subset of genotypes that will be shown in readviz.
+
+    create an exploded table of variant, sample, genotype.
+
+    Write each row of this table as an individual file.
+
+    There's some anonymization of the reads somehow.
+**** seqr team shared variant annotation resource
+    seqr has a variant resource. gnomAD has a distinct variant resource.
+
+    Hail format, fully QCed thing which you can pull up with one command.
+
+    They currently have a fully-joined table.
+
+    Table joins were "really slow" which prevented seqr from storing these as separate files.
+
+    scan the licenses to check for ones that don't allow transformation or re-hosting
+***** DONE slack with grace to get some direction on this
+** Meeting 2021-10-07
+Grace, Tim, Julia, Kristen, Wenhan, Chris, Me
+
+*** Agenda
+> The reblocked gVCFs for v4 are now ready for joint calling, and the gnomAD production team will
+> start to work on v4 full time beginning with next week's sprint, so I wanted to get the
+> conversation going amongst ourselves about how to create the callset and how we want to handle the
+> porting of the QC pipeline to VDS-compatible functions in the Hail repo.<br><br>Here are the
+> topics I suggest we discuss in a short meeting:
+
+- What inputs are required to create the official v4 VDS (as well as a smaller test VDS for
+  development work)
+
+- How to set up the collaboration between gnomAD production and Tim's team on the VDS porting effort
+  -- e.g., Slack vs. in-person communication, whether it makes sense to have a Hail team member join
+  gnomAD production standups, pair programming vs. asynchronous work
+
+- Dan and I both think we should work on the VDS porting first, and then tackle N+K design
+  afterwards (with Patrick Shultz consulting).
+*** Notes
+Tim notes that the new VDS should substantially improve densify costs when only looking at variant
+calls.
+
+Platform PCA is a concern. Tim notes that Batch can be used to work around shuffle-inducing Hail
+Query pipelines.
+*** Decisions
+- For VDS porting, we'll do pair programming initially
+*** Action Items
+- [ ] gnomAD will send inputs to Tim & Chris for joint calling.
+- [ ] (For Tim, from me) What's the deal with Platform PCA?
+- [ ] (from grace) keep notes of the not-yet-ready features that we want to address in v5.
+- [ ] Set up pair sessions to work through the code together.
+* Annotation Database / Datasets API
+** TODO annotation db use same partitioning for all tables
+** TODO annotation db load new datasets
+annotation db get datasets here into db: https://docs.google.com/spreadsheets/d/1e48UBlcZn7HCeac7KdhBvFrzjH513xH-RHBYcIJeHls/edit?userstoinvite=jgoodric@broadinstitute.org&actionButton=1#gid=0
+** DONE missing executable issue
+Jackie figured this out, it was a race condition with localizing the image
+** TODO mean dataset size for UKB
+Probably need to spam a shitload of jobs until I can reliably reproduce it.
+example: https://ci.hail.is/batches/356290/jobs/116
+** TODO datasets to MSFT
+https://docs.google.com/spreadsheets/d/1e48UBlcZn7HCeac7KdhBvFrzjH513xH-RHBYcIJeHls/edit?userstoinvite=jgoodric@broadinstitute.org&actionButton=1#gid=0
+* ideas/projects/work
+** Hail interaction with the rest of the Python ecosystem
+there's a matrix API for Python https://data-apis.org/array-api/latest/index.html
+
+Rechunker is an algorithm for transposition of big matrices https://rechunker.readthedocs.io/en/latest/algorithm.html
+** website
+*** pytorch
+#+begin_quote
+An open source machine learning framework that accelerates the path from research prototyping to
+production deployment.
+#+end_quote
+
+followed by "key features and capabilities" as four blocks of headlined text.
+
+*** pandas
+#+begin_quote
+pandas is a fast, powerful, flexible and easy to use open source data analysis and manipulation tool,
+built on top of the Python programming language.
+#+end_quote
+
+*** plink1
+#+begin_quote
+PLINK is a free, open-source whole genome association analysis toolset, designed to perform a range
+of basic, large-scale analyses in a computationally efficient manner.
+
+The focus of PLINK is purely on analysis of genotype/phenotype data, so there is no support for
+steps prior to this (e.g. study design and planning, generating genotype or CNV calls from raw
+data). Through integration with gPLINK and Haploview, there is some support for the subsequent
+visualization, annotation and storage of results.
+
+PLINK (one syllable) is being developed by Shaun Purcell whilst at the Center for Human Genetic
+Research (CHGR), Massachusetts General Hospital (MGH), and the Broad Institute of Harvard & MIT,
+with the support of others.
+#+end_quote
+
+*** plink2
+#+begin_quote
+This is a comprehensive update to Shaun Purcell's PLINK command-line program, developed by
+Christopher Chang with support from the NIH-NIDDK's Laboratory of Biological Modeling, the Purcell
+Lab, and others. (What's new?) (Credits.) (Methods paper.) (Usage questions should be sent to the
+plink2-users Google group, not Christopher's email.)
+#+end_quote
+** et cetera
+*** TODO clean up aws: we should only use the main AWS project (broad-hail) and not use that other S3 bucket: hail-test-dy5rg
+*** TODO database server config has unnecessary docker thing
+*** TODO cleanup handling of time
+I really think we should use integers everywhere.
+*** TODO azure *cannot* create use 128 kB chunks, that's way too small for a big file
+*** TODO god the transfer tool is so fucking slow.
+** Auth
+*** TODO redirect to auth/user not notebook
+*** TODO make sure we've thought through creating a new developer namespace
+*** TODO namespaced auth should not create (nor destroy) k8s namespaces for developers
+*** TODO create user api / single "bootstrap" user who creates accounts for everyone else
+** Query
+*** TODO VQSR in Batch
+1. Do we want this in Hail Batch?
+2. How do we support N+K
+https://app.slack.com/client/T033C0MM9/CNNTF97GE/thread/CNNTF97GE-1639760860.016200
+** Batch
+*** TODO eliminate CI batches page
+- [ ] improve batch page with client-side search
+- [ ] include the failing batch in a CI URL so we get the retry button & clarity on the source of failure
+*** TODO closing a billing project with open or running batches
+*** TODO build.py
+*** TODO allow user to enforce a region (e.g. because of co-localization of resources, or using a region on another continent from the Batch instance)
+*** TODO timed out jobs should be marked as such in the attempts table (currently they are marked "completed"
+*** TODO teach autoscaler to be aware of storage.googleapis.com/google_egress_bandwidth
+*** DONE permission denied / missing files issue
+https://github.com/coreos/bugs/issues/377
+https://github.com/moby/moby/issues/13971
+https://github.com/moby/moby/issues/9718
+
+these are all old versions of docker. we are using 20.10.6
+
+#+BEGIN_SRC
+In [2]: from hailtop.batch_client.aioclient import BatchClient
+   ...: from hailtop.utils import bounded_gather
+   ...: import asyncio
+   ...: bc = await BatchClient.create('test')
+   ...: batches = []
+   ...: for i in range(25):
+   ...:     for image in ['gcr.io/hail-vdc/service-base:nguva6oqecus', 'gcr.io/hail-vdc/base:jtgnxzxsxb47', 'gcr.io/hail-vdc/create_certs_image:gf1tcleb0lhi',
+   ...: 'gcr.io/hail-vdc/hail-build:vzdob0inz3fg', 'gcr.io/hail-vdc/hail-run:a0kkitytygga']:
+   ...:         b = bc.create_batch()
+   ...:         j = b.create_job(image, ['echo', 'test'])
+   ...:         batches.append(b)
+   ...:
+   ...: batches = await bounded_gather(*[lambda b=b: b.submit() for b in batches])
+   ...: await bounded_gather(*[lambda b=b: b.wait() for b in batches])
+#+END_SRC
+
+Jackie mentioned that cancellation is critical here.
+*** TODO in tests, use *configs* not fucking env vars everywhere
+*** TODO in batch pool executor & python-job, serialize functions separately from arguments (to save space) and write one big file from which jobs issue two range reads
+*** TODO cache for active instances
+*** TODO have a serious model of the eventual consistency of job durations / cost
+*** TODO Document and properly expose job private
+*** TODO Monitor and display CPU and memory usage
+*** TODO Faster VM startup. Amazon VMs start in just a few seconds, why can’t we?
+*** TODO fix jobdeletederror and disk cleanup
+*** TODO logs diet for Batch. Target: 10% of current usage (so 40GiB).
+*** TODO eliminate docker daemon
+*** TODO use a distinct GSA/Azure user for dev/PR namespace robot accounts
+*** TODO disk situation fix: use a distributed fs
+** ci
+*** TODO show job attributes at top of job page in table
+** copy tool
+*** Desired Copy tool features
+   - globbing
+   - delete contents of extant directory before copy
+   - avoid copying files that are the "same" (by name, by name & timestamp, by checksum, by etag)
+   - double slash warning
+*** DONE use orjson by default
+*** DONE "into"
+*** TODO CLI
+*** TODO multiprocessing
+*** DONE tqdm
+*** DONE use minimum copy part size across all FSes ~~pick copy part size by balancing preference for small parts against maximum file sizes~~
+** dreams
+*** dev doc website
+* security
+** DONE Key rotation meeting
+** DONE check in with daniel re: key rotations
+* finances
+** robert damian meeting <2021-11-17>
+<2021-11-17>
+makes quotes once per year
+
+create one annual value and fund that "today"
+
+as usage comes in each month, bill actual
+
+if you quoted more than you need, you just close the quote early.
+
+If you underestimated the quote, you can modify the quote.
+
+When usage changes dramatically he reruns his forecast for the whole year.
+
+If a CO ends early, you might want to forecast on a shorter timeline so that you don't encumber a
+bunch of money you'll never spend.
+** 2021-10-09
+Once we get confirmation from Lisa that SAP is correctly configured, then we may begin
+billing. (!!!)
+
+The financial month closes half way through the month. October finances will close mid-November. We
+plan to meet monthly for the first few months.
+** SAP Training Meeting
+Brian Patterson, Whitney, Carla Hammond, Daniel Warrington, Taylor Brown, Lisa Coskren
+
+"External" can mean a Broadie with money at a partner institution like MGH, MIT, etc. OR a
+third-party company like Biogen.
+
+Rob Damian? (BITS) does SAP/billing for BITS storage. He creates yearly quotes and then bills them
+monthly for actual usage.
+
+Process:
+1. Create Quote
+2. PI provides cost object
+3. Finance person approves cost object
+4. Report Completed Work
+5. Approve Reported Completed Work
+
+Report Completed Work cannot overbill the quote.
+
+The "billing" program which sends external quotes runs on the last day of every month.
+
+"billing contact email" can be used to CC external customers. This is only for external quotes. If
+the quote is external the customer does not want to receive emails, put the accounts payable
+department.
+
+One of the search tools can list quotes whose funding is set to expire soon. Closed cost objects
+cannot be billed against.
+
+Make sure to report work with the right date. A CLOSING cost object will accept work from before the
+close date.
+** facilities and administration
+   philanthropic is 83%
+   institutional is 7?%
+   government has a yearly changing rate
+
+   "total costs" includes f&a, direct costs is the actual money
+** DONE delete hail-annotationdb to save money
+** DONE delete gs://annotationdb gs://hail-datasets-tmp
+** DONE deal with active hold on nygc data in hail-datasets-tmp
+** DONE Cotton & Jeremy status
+** DONE delete gs://hail-common/datasets-raw
+** DONE delete gs://hail-common/datasets
+** DONE delete gs://hail-common/dartassets
+** DONE delete gs://hail-common/builds/0.1 and /0.2 for unused SHAs and SHAs after PR 6250
+** DONE restore gs://hail-common/builds/0.1/docs/hail-0.1-docs-5a6778710097.tar.gz
+** DONE discuss revenues in budget doc with Whitney
+** DONE consider attending this NIH grants thing https://nihvirtualseminar2021.vfairs.com/en/registration-form
+   interesting, but I just do not have time right now
+** DONE recharge center
+*** 2021-09-09 Whitney 1:1
+    We have a recharge center, but FSP has not yet approved our billing model. We plan to only recover
+    our cloud costs, not salary. Whitney has access to SAP.
+
+    We will back date bill on end of July. There are issues billing more than 90 days late. We will
+    also back date bill on end of August.
+
+    Whitney thinks that when we receive approval we can bill almost immediately.
+
+    June and before billing is basically lost.
+
+    Whitney is having a meeting with "Finance" to push the approval through. Lisa Coskren (sp?) is the
+    person we need to meet with to get the approval. She reports to Jessica Pereira who can grant the
+    approval.
+
+    Expenses and Revenues.
+** DONE cost model "backup"
+* Azure
+** Outstanding Issues
+*** TODO split Hail project into two cost objects
+One cost object for production haildev and one cost object for development use.
+** Workstream 2 Meeting
+Workstream 1 is variant discovery (seems more GATK, CNV calling, etc.)
+
+Variant interpretation. Seems like a lot of ML stuff. Focused on rare disease patient diagnosing.
+** Background
+Jeremiah "Miah" Wander. Biomedical engineer.
+Ron Paulsen. Program Manager. Background in semiconductor physics.
+Greg Smith. Engineer (25 years).
+Scott Saponas. Manager of the biomedical team.
+
+"collaboration"
+
+In addition to Azure on MSFT, MSFT has a research institution of ~2000 PhDs so we should work
+together on research. The first project is in popgen. Scaling up algorithms to work in the Cloud.
+The second project is DMac's work on rare disease diagnostic and reanalysis of projects. DMac "has
+embraced Azure".
+
+CosmosDB. Highly scalable SQL-queryable store. Good for wide tables.
+
+Synapse. SQL Server serverless/severful approach.
+
+Azure Batch. Genomics Service
+** Open Data Project Meeting
+   <2021-10-01>
+*** ukb rapid gwas
+    Additive MTs Male, Female, Both: 6.7 TiB
+    Additive TSV (one file per phenotype, per ex) 6.4 TiB
+    Dominance Male, Female, Both: 6.1 TiB
+    Dominance TSV (one file per phenotype, per ex) 5.5 TiB
+
+    mean size per tsv
+*** PanUKB
+    Meta Analysis 12.5 TiB
+    Full Results 12.8 TiB
+    LD matrix ~46.3 TiB
+** DONE size up GTEx, UKB Rapid GWAS, Pan-UKB
+   <2021-10-01>
+** DONE contact GTEx about hosting opportunity
+   <2021-10-01>
+** DONE schedule tech deep dive
+** DONE what is our work process
+** DONE should I get a professional mentor/coach
+   Just no time to figure this out right now. We've got Craig Lancaster on a monthly basis. Cotton
+   is on email again.
+** DONE prepare some material for Thursday tech deep dive
+** DONE ask scott saponas about data hosting
+** Miah 1:1 Meeting
+   The collaboration is a framework by which we can come up with new projects for low
+   overhead. "Project Two" is Generation Victoria project with Daniel MacArthur. Right now a lot of
+   infrastructure work. Further down the line, join the analysis of the Australia. DMac is very
+   interested in Hail Batch. "Project Eden" is mostly interested in Hail Query.
+
+   MSFT is broadly interested in Hail Query as well but that clearly has fewer underlying Azure
+   dependencies.
+
+   PR namespace isolation.
+
+   MSFT plans to get Broad non-employment appointments. Handful of weeks until there. Ron Paulson is
+   leading the charge on that paperwork.
+
+   MSFT wants a replicate Azure instance of Hail Batch.
+
+   MSFT wants reader access to our Azure instance of Hail Batch.
+
+   Greg has done bunch of work on Azure DevOps.
+
+   A tenant in Azure is an Azure Active Directory. This is identity management. A subscription is a
+   logical billing unit. Billing units can move homes to different Active Directory. MSFT will
+   probably have a separate tenant for their isolated Hail deployment. Hail will have a tenant for
+   the Hail deployment.
+*** Billing
+    We could become a service provider in Azure. We foot the Azure bill and then bill the user
+    directly for the consumption of the system.
+
+    Requester Pays is coming.
+
+    Azure Managed Application: We can get permission to deploy and manage things inside their
+    subscription. They get billed for it. This is an entire deployment of the Hail system.
+
+    Sandworm.
+*** DONE prepare for his agenda items
+    - Workstream planning
+    - DevOps & development/testing infrastructure and approaches (Jackie’s recent doc is a great starting point here)
+    - Billing / Payment
+      - How it works on GCP/Broad
+      - Strategies to consider for Azure
+    - Hail Batch security considerations for “enterprise” deployments
+*** DONE ask about requester pays in Azure (did I already send this email?)
+*** DONE coffee chat with Hail Query (late October)
+* leadership/administrative
+** AUS jobs
+large number of partitions in batch causes issues with processing speed
+
+can we combine multiple partitions
+
+- combine multiple partitions into one job: batch up as many partitions together "that makes sense".
+  - could we collapse partitions together until we hit a target number of bytes per job
+  - can we use adaptive chunking in response to a few submitted jobs
+- for daniel: consider both memory use and CPU in terms of optimizing QoB
+- driver uses too much RAM, can we improve that?
+- ping when the next release comes out for QoB on Azure
+- ! look into pool labels as a way to explicitly select
+- some optionality on lifetime of "standing worker" for pools
+
+** Hail-GVS <2022-05-31>
+<2022-05-31>
+
+Rori Cremer, Kristian Cibulski, George Grant, Miguel Covarrubias, Rebecca Asch, Akum Shergill, Lee
+Lichtenstein, Tim Poterba, Dan King
+
+2022Q4: 230,000 samples (October)
+2023  : 400,000 samples
+
+End of July for 150k genomes. (Self-imposed deadline).
+
+AoU runs operations for the joint-calling.
+
+AoU will try to get us 10K WGS in Avro.
+
+July 15th: consume Avro files and convert to VDS files python script to AoU
+
+Variants Team:
+- figure out operational needs e.g. how to start a cluster with 3,000 cores
+- send to Hail Avro files by end of next week
+- incorporate Hail script into production pipelines
+Hail Team:
+- send script to AoU by July 15th
+
+
+Docs
+
+"early November" need to deploy docs
+
+Genevieve Brandt, Jennifer Zhang are the docs and pipelines person
+
+Variants team, 2-3p every day meets and Tim could present the script there when we're ready.
+
+** production issues check-in <2022-05-24>
+<2022-05-24>
+
+*** need to eventually support: ht per col https://hail.zulipchat.com/#narrow/stream/123010-Hail-Query-0.2E2-support/topic/write.20one.20ht.20per.20column.20in.20mt/near/282830828
+
+*** gnomad v4 QoB
+- pca: will 1M columns work?
+- pcrelate: avoid with minhash or w/e
+- ld_prune: randomly project the samples to metasamples in much lower dimensional space
+
+*** leo's elasticsearch export woes https://hail.zulipchat.com/#narrow/stream/123010-Hail-Query-0.2E2-support/topic/Error.20__C1188collect_distributed_array
+tabling until AUS asks again
+
+*** interval coverage (julia)
+Chris has taken this over
+
+OOM kill on the driver not due to the shuffle in julia's interval coverage.
+
+hypothesis: spilling collect aggregator cannot spill data fast enough
+
+** production issues check-in <2022-05-10>
+<2022-05-10>
+
+*** gnomad v4 QoB
+- [ ] pca needs to work in the service on 1M samples
+- [ ] pc_relate needs to work in the service on 1M samples
+- [ ] ld_prune
+*** panukb ld matrix
+dan will follow up on the thread
+*** leo's elasticsearch export woes https://hail.zulipchat.com/#narrow/stream/123010-Hail-Query-0.2E2-support/topic/Error.20__C1188collect_distributed_array
+tabling until AUS asks again
+*** buffered aggregators fixed
+map-side combine still waiting on a fix for the PR's big
+
+*** [tim] interval coverage (julia)
+we have a PR for adaptive branching but also waiting on map-side combine
+
+** production issues check-in <2022-04-26>
+<2022-04-19>
+
+*** gnomad v4
+gnomad will probably hit memory limits even on highmems. partially due to memory inefficiencies in
+the lowered code.
+
+**** pc_relate
+(1,100,000 / 1024) ** 2 = ~1,160,000
+
+**** ld prune
+- local prune uses too coarse partitioning and therefore does too little and this gets worse as
+  number of rare variants grow
+- randomly project the genotype vectors and use that for ld prune correlations
+
+**** can we get the benchmark suite running on QoB
+*** Rahul's cartesian product
+told rahul what to do; no news
+*** leo's elasticsearch export woes https://hail.zulipchat.com/#narrow/stream/123010-Hail-Query-0.2E2-support/topic/Error.20__C1188collect_distributed_array
+we have a relatively easy fix for this.
+
+I asked vlad for information on priority for them.
+*** bad encoding https://hail.zulipchat.com/#narrow/stream/127527-team/topic/bad.20encoding
+fixed!
+*** buffered aggregators fixed
+this is broken in PR, will be fixed which then enables interval coverage
+*** [tim] interval coverage (julia)
+mem mangement issue here; tim is working on it; depends on buffered aggregators
+** Grace Tiao <2022-04-21>
+<2022-04-21>
+
+gnomad v4 is going to cost a lot.
+
+- pc relate will be really really bad and we need time to build alternatives
+
+  how much did pc relate cost? It will be at least 100x the cost if nothing goes wrong.
+
+
+
+** production issues check-in <2022-04-19>
+<2022-04-19>
+
+*** buffered aggregators fixed
+also a split multi issue
+*** wenhan broadcast fetch failure
+fixed!
+*** daniel lazarev tree matmul https://hail.zulipchat.com/#narrow/stream/123000-general/topic/SVD.20of.20large.20matrix.20in.20hail
+*** Rahul's cartesian product
+Dan will take this
+*** leo's elasticsearch export woes https://hail.zulipchat.com/#narrow/stream/123010-Hail-Query-0.2E2-support/topic/Error.20__C1188collect_distributed_array
+we should heap allocate the arguments when there's a ton of arguments
+*** bad encoding https://hail.zulipchat.com/#narrow/stream/127527-team/topic/bad.20encoding
+tim is working
+
+kyle shared a notebook
+*** [tim] interval coverage (julia)
+need map side combine to be fixed. just get julia using map side combine and the new shuffler.
+** Carolin Diaz 1:1 <2022-04-19>
+<2022-04-19>
+** production issues check-in <2022-04-05>
+<2022-04-05>
+
+*** wenhan broadcast fetch failure
+going to create a hail tasks thread with what we know now
+*** daniel lazarev tree matmul https://hail.zulipchat.com/#narrow/stream/123000-general/topic/SVD.20of.20large.20matrix.20in.20hail
+going to ask Daniel for more details
+*** Rahul's cartesian product
+https://hail.zulipchat.com/#narrow/stream/123010-Hail-Query-0.2E2-support/topic/cartesian.20product.20of.20300.20rows.20with.201000.20rows
+https://hail.zulipchat.com/#narrow/stream/123011-Hail-Query-Dev/topic/MT.20outer.20row.20joins
+*** leo's elasticsearch export woes https://hail.zulipchat.com/#narrow/stream/123010-Hail-Query-0.2E2-support/topic/Error.20__C1188collect_distributed_array
+we should heap allocate the arguments when there's a ton of arguments
+*** bad encoding https://hail.zulipchat.com/#narrow/stream/127527-team/topic/bad.20encoding
+
+*** wenhan's locus_windows
+*** [tim] interval coverage (julia)
+*** [tim] split multi
+*** [tim] kyle shared a notebook
+
+** Grace Tiao <2022-03-31>
+<2022-03-31>
+
+Julia would like to set up a tutorial to get started with QoB.
+- [ ] reach out to her
+
+- Simultaneous breaks early Q3 production coalesce
+
+
+- simultaneous breaks v4 timelines
+- CEO
+** production issues check-in <2022-03-29>
+<2022-03-29>
+
+*** interval coverage (julia)
+Tim is looking at this. Not sure what that is
+
+*** split multi
+tim assigned, no progress
+
+*** wenhan's locus_windows bug
+chris is investigating
+a collect in unlowered code returns out of order results
+
+*** file premature end
+tim assigned, no expected this week
+kyle shared a notebook
+kyle is unblocked by not using whole stage codegen
+
+** monthly hail batch check-in <2022-03-24>
+<2022-03-24>
+
+*** azure
+mid-April we'll have Azure supported
+
+*** cost control
+experiment with auto-pilot
+No Azure version of serverless kubernetes.
+Knative is a different alternative
+https://dapr.io
+
+*** hail batch + terra
+anthony phillapakis wants us to integrate with terra
+
+need a doc for this
+
+*** cpu and memory
+very exciting!
+
+can we have a roll up of overall CPU use for the batch
+
+reach out again when we're ready to design this.
+*** elasticsearch export
+how do we do this in the service
+
+could we just replace elasticsearch with Hail?
+
+*** memory usage for to_pandas
+40 million rows, 10 columns
+
+*** Error __C1188collect_distributed_array
+can we get this fixed post-haste
+
+** production issues check-in <2022-03-01>
+<2022-03-01>
+
+no new gnomad issues
+*** split multi
+tim assigned, no progress
+*** wenhan's locus_windows bug
+chris is investigating
+a collect in unlowered code returns out of order results
+*** file premature end
+tim assigned, no expected this week
+kyle shared a notebook
+kyle is unblocked by not using whole stage codegen
+** Ameeta <2022-03-22>
+<2022-03-22>
+
+*** rehire
+SWE, 105k
+may take >2 weeks; google form to bump priority
+*** 1:1s
+chat with everyone about how they're feeling vis-a-vis john
+*** deparature
+1. John has to submit a "resignation" on workday.
+2. I need to respond to the resignation. Approve paid out vacation pay.
+*** finding funding at the broad
+finding Broad-based funding
+** Kyle Vernest: Our Future Health <2022-03-15>
+<2022-03-15>
+
+*** use Hail
+we'll use Dataproc/HDInsight
+*** visualization
+looking for variant visualization stuff, directed them at matt s and seqr & gnomad browser
+** production issues check-in <2022-03-15>
+<2022-03-15>
+
+*** filter_intervals
+merged: https://github.com/hail-is/hail/pull/11345
+released in 0.2.90
+
+*** julia: interval coverage
+julia used bigger machines
+
+we should make a google bucket the default tmp dir
+
+*** julia's splitmulti/explode blowing memory on one partition
+Still needs investigation, but we've avoided it for now.
+
+Tim raised a question about filter alleles.
+
+*** Wenhan: locus windows and thus ld_prune fails with whole stage codegen off
+Still no progress
+
+*** wenhan: pc relate
+we will try to migrate to pc_relate implemented on Hail's LA.
+
+** ga4gh vrs <2022-03-03>
+<2022-03-03>
+
+*** questions
+- [ ] how many bytes are necessary to represent GA4GH VRS sequence identifier? Does it have a
+  compact binary format?
+
+*** notes
+- hail is pretty opinionated about chromosome names, but VRS is not
+
+- does allele normalization require an unbounded window?
+
+** production issues check-in <2022-03-01>
+<2022-03-01>
+
+*** filter_intervals
+fix: https://github.com/hail-is/hail/pull/11345
+https://hail.zulipchat.com/#narrow/stream/123010-Hail-Query.200.2E2.20support/topic/converting.20vds.20to.20vcf
+
+*** julia: interval coverage
+running out of HDFS. likely temporaries that need to be cleaned up
+
+*** wenhan: contamination on gnomad
+unexpectedly long time. idea: aggregation followed by shuffle. They're writing a columns
+table. Unkey the columns to maybe avoid the shuffle.
+
+*** julia's splitmulti/explode blowing memory on one partition
+Still need to dig into this.
+
+*** Wenhan: locus windows and thus ld_prune fails with whole stage codegen off
+still an issue
+
+*** wenhan: pc relate
+need to investigate memory use, is it more than expected
+
+*** requester pays for rahul
+handled, though there were a number of deploy issues
+
+*** lindo needs help with aggregator sample qc
+*** patrick c wants to run a larger window size of whitening
+Patrick successfully ran with 600. didn't see much difference from 300. decided not to run 1000.
+
+*** patrick c wants to compute a full GRM
+Got it working with 10k samples. Sounds like this might have been resolved.
+
+** seqr <2022-03-01>
+<2022-03-01>
+** monthly hail batch check-in <2022-02-24>
+<2022-02-24>
+
+Frantic weeks are coming in for aus genomics
+
+Hail Batch is online in Aus AZ!
+** production issues check-in <2022-02-22>
+<2022-02-22>
+
+after this meeting I heard that there is an issue with filter intervals, I think for VDS.
+https://hail.zulipchat.com/#narrow/stream/123010-Hail-Query.200.2E2.20support/topic/converting.20vds.20to.20vcf
+
+*** julia's splitmulti/explode blowing memory on one partition
+still not sure what's happening.
+
+Workaround: increase hail heap memory fraction 10%.
+
+*** Wenhan
+Locus windows fails if whole stage codegen is turned *off*.
+
+Workaround: turn whole stage codegen *on* for `ld_prune` then turn it off for the rest of the pipeline.
+
+*** requester pays for rahul
+I am on this
+
+*** lindo needs help with aggregator sample qc
+*** patrick c wants to run a larger window size of whitening
+*** patrick c wants to compute a full GRM
+** Finance meeting <2022-02-22>
+<2022-02-22>
+
+consultants don't pay F&A!!! (Carla said this)
+** Alicia:Dan:Lindo <2022-02-16>
+<2022-02-16>
+
+For data sequenced here at Broad, you pay one fee to go from spit to gVCFs, BAMs, CRAMs, and
+FASTQs. 600 USD per genome.
+
+When bringing in data sequenced *not* at Broad, you need to pay for the FASTQ -> gVCF. DSP typically
+charges 40 USD per genome.
+
+Low pass sequencing is expected to be ~150 USD. (e.g. PUMAS, other global projects)
+
+DSP is a bit frustrating to work with on development of the low pass sequencing project. They are
+not invested in this system.
+
+For low pass sequencing, you get a CRAM and a gVCF but they need to be reprocessed
+
+"reprocessing" means taking externally sequenced data and running it through a FASTQ->gVCF. Usually
+you start with a CRAM or a BAM.
+
+100s of 1,000s
+
+First samples arrive around May/June. Mid-Fall for first run. Talk to Ben about this.
+** relevant related thoughts from other meeting
+- [ ] Why is VQSR such a pain for DSP? Why shouldn't we just run this ourselves? Why do they build beta versions all the time?
+- [ ] VQSR: Gnomad has a function default_compute_info to compute sites-VCF with VQSR input features
+Talk to Tim and Konrad about what the strategy is:
+1. Do we want this in Hail Batch?
+2. How do we support N+K
+https://app.slack.com/client/T033C0MM9/CNNTF97GE/thread/CNNTF97GE-1639760860.016200
+
+** production issues check-in <2022-02-15>
+<2022-02-15>
+
+*** Julia reported something
+One partition is blowing memory.
+
+splitmulti
+
+current theory: explode has a memory leak
+*** Wenhan
+Breaks when whole stage codegen is turned *off*.
+
+When we do ld prune we get a list of locus windows. We aggregate locus expressions. Distributed and
+serial combop both show the issue.
+
+Main error:
+#+BEGIN_SRC
+hail.utils.java.HailUserError: Error summary: HailException: locus_windows: 'locus_expr' global position must be in ascending order. 24159522 was not less then or equal to 23854354
+#+END_SRC
+
+Whole stage codegen, two weeks ago, gave her a memory error.
+
+** Craig:Dan 1:1 <2022-02-11>
+<2022-02-11>
+- [ ] how does DSP deal with salary / matrix issues?
+** Carolin talk notes <2022-02-08>
+<2022-02-08>
+
+- better job search
+- job checkpointing
+** Carolin talk notes <2022-02-07>
+<2022-02-07>
+
+slide 8:
+- color of the second set of bullets is grey
+- "contains" is used too many times
+
+slide 13:
+- "run that data" should be "run the user's command" or "run the user's command to process the data"
+
+slide 15:
+- don't short image to img
+
+slide 27:
+- this is actually a Python dict, let's convert it to the JSON format. Just print the output of
+  `json.dumps` on that dictionary and use that instead.
+
+** PS:DK 1:1 <2022-02-07>
+<2022-02-07>
+
+Currently lowering interval joins.
+
+gonna use three-valued logic which means interval-keys with NA or keys with NA will never match a
+record in join.
+
+split-able randomness to allow repeatable randomness
+
+federated PCA
+*** DONE ask claire for federated pca slot
+*** system-cs reflections
+we were talking about viewing our system as a shared memory (aka NUMA) system.
+
+you want a processor to bring a large chunk of data into their local memory and then do as much
+compute as possible over that big piece of memory, perhaps streaming through small pieces of other
+input, amortize communication costs.
+
+we could use a data-aware scheduler, but those are very general and complex. linear algebra is
+highly structured. e.g. a group a shared input jobs.
+
+Allow for "vector" jobs which are parameterized by an integer or input of some sort. Allow the
+container to be re-used between jobs. use a fifo or something which sends argv.
+
+*** memory service
+we'll chat next week
+** Carla:Dan 1:1 <2022-02-07>
+<2022-02-07>
+Anyone can use the footrest and laptop stand, let Carla know.
+
+Carla will look into funding for a co-op May-August, September-December part-time.
+
+Let Carla know when billing is too much work.
+
+*** DONE set up a close out meeting with Kumar
+- [ ] ask about books that he borrowed
+
+Kumar leaves on the 28th so we need to get everything into other owners/buckets.
+
+He was 35% on SC Hail. In general, other funding becomes available unexpectedly. Kumar received some
+of that.
+*** replacing kumar
+Not going to be replaced. if we had a clear ask we could maybe get funding for this.
+*** clear cut funding
+In leadership meetings, keep asking for clear-cut funding tools so we can ensure.
+** Hail Batch and Terra Third Party Apps <2022-02-02>
+<2022-02-02>
+
+- Doug Voete, Terra architect, lots of experience with DRS.
+- How do folders work in DRS? A bundle exists today.
+
+DRS bundles: https://ga4gh.github.io/data-repository-service-schemas/preview/release/drs-1.2.0/docs/#operation/PostObject
+DRS docs (old): https://ga4gh.github.io/data-repository-service-schemas/preview/release/0.1/docs/#_getbundle
+DRS URIs / datatypes: https://ga4gh.github.io/data-repository-service-schemas/preview/release/drs-1.2.0/docs/#section/DRS-URIs
+
+Ruchi runs the data repo group in Terra. Ruchi can get us setup with the data repo. The data repo
+produces a DRS for everything that's uploaded.
+
+Gen3 university of chicago also has a DRS system.
+
+Alex Baumann possibly back up if we don't have bundle support
+
+https://api.firecloud.org/
+
+https://data.terra.bio/swagger-ui.html#/
+
+*** TODO DRS in general
+For hostname-based URIs, I issue a request for to /objects/{object_id}. In response I get one of
+these four things:
+
+1. public data no authentication: {"url": "someurl"}
+
+2. private data out-of-band, same JSON structure, so how do I distinguish this from (1)?
+
+3. private data with credentials included {"url": "someurl", "headers": ["X-Foo: bar"]}. Headers is
+   supposed to be array of string, but the examples are all just strings.
+
+4. "access id". the user returns an "access_id" field instead of an "access_url" field. Then I make
+   a second request to get an access URL? It doesn't seem like a second request is necessary, the
+   server knows the access_id since it gives it to me. Why have a second request?
+
+Heads up: I plan to implement this ourselves since we'll need it implemented in Java anyway for the
+Java-side of our code-base.
+*** TODO schedule a meeting with Kyle to sort out MTs in DRS
+*** TODO DRS for hierarchical structures, e.g. folders of folders of files
+Hail MTs are recursive file structures. How do we support that in DRS?
+*** TODO how to test DRS URIs
+*** TODO terra identities
+need to understand this more deeply
+*** TODO terra third party app
+"fedramp"(sp?) requirements.
+
+"app" can be put into a "workspace".
+
+"app" per user.
+
+user may have many workspaces.
+workspace may have many users.
+workspace == gcp project.
+
+app is either one-per-user-per-workspace or one-per-workspace.
+
+only one version of an app can be available at a time.
+
+hail has k8s and terraform. terraform has:
+- some buckets
+- some service accounts
+- some permissions
+
+the terraform stuff is no good
+
+the main issue is what service account do batch and auth use?
+
+change auth to fully delegate to terra auth
+
+How do we let laptop users submit a script to an API.
+
+for domain names we might need to have multiple external gateways to route to the right service.
+
+this is how ate a terra application: https://github.com/DataBiosphere/terra-app
+
+one per-user
+** PS 1:1 <2022-02-02>
+*** pca
+pca stuff wrapping up, but not ready for hmdr now. maybe in March?
+*** career talk
+data science feels a bit monotonous
+
+want to contribute to something reliable and productionized, like Hail
+
+a mix of SWE and DS seems good
+
+Write "real code" not just a Jupyter Notebook
+
+Keep doing math and stats.
+
+MLE
+
+Today's MIA was inspiring & very cool
+
+wants Sr. Associate track this year
+
+50k delta to industry
+*** DONE CB matrix
+*** DONE MLS matrix
+** Tim 1:1 <2022-02-01>
+Tim will likely be out this week.
+
+Outstanding bug is the encoder/decoder bug when reading from a corrupt file.
+
+Lots of debugging support in CCDG and gnomAD. We maybe had a minor issue with memory limits before,
+but the new scale is pushing the limits.
+
+We're limping along with 1M samples but we need a plan for more. Blocked?
+
+table key by and aggregate has memory issues.
+
+*** why shouldn't Hail take over CRAM -> VDS?
+DSP seems to always be using a development version of their pipeline.
+
+Why is there so much cost above the compute market rate? Tim thinks it is cost applied to people.
+
+Sam Novod & Laura G might help me understand the troubles with joint-calling.
+*** DONE get on the ATGU-DSP meeting
+** Ben/Claire/DK <2022-02-01>
+<2022-02-01>
+
+*** AUS Batch pipeline
+AUS can go from an arbitrary assemblage of CRAMs and gVCFs to a joint called MT entirely within
+batch, except for Structural Variant calling.
+
+But do we want to be responsible for issues when the GATK software itself is broken? Why does Laura
+seem to be so involved in running GATK? It seems like an operational nightmare from the outside.
+
+**** notes from Ben
+There are a gazillion flags in mapping and alignment. Quality score re-calibration what to do with
+duplicates.
+
+Sometimes a fragment will get imaged in one place and then migrate to another place and get imaged
+again. This happens when a fragment of genetic material gets dislodged and moved somewhere else.
+
+There are technical duplicates and biological duplicates. There are distributions over how common
+this is depending on what the target sequence is.
+
+The pipeline from short-reads to genome is largely caused by reference, base quality scores, and
+alignment than.
+
+Mapping and alignment is 80% of cost to a paper.
+
+Data generated at Broad is guaranteed by Broad-central. That's why TJ wants a CRAM -> joint-called
+VCF whereas Konrad, Julia, and Lindo want VQSR. TJ is importing externally generated data.
+
+Karen migas telomere to telomere. doesn't teach us anything about disease.
+
+***** DONE Follow up with TJ about what he needs
+***** DONE Follow up with AM, KK, & JG about what he needs
+*** Where do I and Hail go from here?
+We've a strong team, good technology, good hiring pipeline. We have contracted funding from
+Microsoft. We have a revenue stream from Hail Batch. We're cultivating philanthropy.
+
+By end of Q1, we will have a beta version of Hail Query which uses Hail Batch instead of Google
+Dataproc. That will drive even more revenue to Hail Batch.
+
+We have mentoring capacity on the team, but no financial resources to bring on new engineers.
+
+I need to understand two things: what is the future for me at the Institute and, relatedly, what is
+the future for the Hail team at the institute? How do I get more resources for the team? How do I
+grow within the organization?
+
+If the answer is a Hail platform, how do I start that process?
+
+If the answer is a spun out start-up, how do we make that work?
+**** ben's notes
+three questions:
+- resourcing of the team / business plan
+- personal well-being of me in this role
+- institutional future of Hail
+** Grace:Dan 1:1 <2022-01-27>
+<2022-01-27> ??
+
+matrices, swes in atgu organization?
+
+*** salary issues 36 hour week idea
+heidi suggests:
+1. flex fridays, people just make up the time elsewhere
+2. go down to a 36 hour week for 36 hours paid
+3. we could convince HR to increase the salary bands
+4. create paths for people without PhDs to advance
+*** matrices, salaries
+*** ???
+*** DONE find an early meeting
+** Hail-Batch Monthly Catch-Up <2022-01-27>
+<2022-01-27>
+
+*** When should Hail Batch get deployed?
+
+We're working through remaining 500s in ACR. Some VM deployment issues. Let's get started soon. Once
+Greg Smith is finished, AUS should attempt to deployment.
+
+*** Hello Sabrina Yan
+
+*** Permissions in Azure?
+
+Azure B2C. Azure connects your identity to a Azure AD Tenant service account.
+
+"Martha" DRS URI, user identity. Something called RAS support is being built.
+
+terra_notebook_utils implements this https://github.com/DataBiosphere/terra-notebook-utils/blob/master/terra_notebook_utils/blobstore/gs.py
+
+Something about a cloud function is involved?
+
+*** If every user has their own Batch and/or Cromwell instance, this will be very expensive. What do we do?
+Terra wants to have "enclaves" that groups.
+
+"Local" Hail Batch
+*** Query Service.
+March 28th.
+*** TODO get AUS into the CI trusted group
+*** TODO get AUS into the Hail compilers team meetings
+*** Cromwell pipelines of interest.
+The only non-Cromwell pipeline is the GATK Structural Variants pipeline
+**** DONE VQSR (apparently already implemented by Vlad!)
+implemented already by Vlad
+*** Terra: Third Party Application.
+*** DONE finish up with Greg Smith then get back to AUS
+*** DONE revisit the CI deployment issue and send an email
+*** DONE DRS in MT meeting with Kyle.
+Moved to 02-02 hail batch and terra third party apps meeting
+*** DONE Follow up offline with Kyle on how to test DRS URI
+Moved to 02-02 hail batch and terra third party apps meeting
+*** DONE Ask about which cromwell pipelines are they dependent on?
+Moved into the meeting notes for the next meeting (Jan 27th)
+** Microsoft-Broad JSC <2022-01-20>
+<2022-01-20>
+
+AnalytiXIN. 50k-6M samples. Proposal. >70% confidence will land in 2022. Stakeholders:
+biocrossroads, Eli Lilly, IUHealth, IUSOM, IHIE, research unis in Indiana. 50k samples at
+first. Funded by Eli Lilly Foundation. Need Health System stakeholder approval for sequencing.
+
+Jukebox plans to go public at AGBT (end of February).
+** ATGU Leadership Admin <2022-01-19>
+<2022-01-19>
+
+** John:Tim:Dan 1:1:1 <2022-01-18>
+<2022-01-18>
+
+In March, John & Tim will submit a written argument for promotion to me.
+
+In a year, John is really motivated by the query service and Hail becoming a
+computational-infrastructural foundation of Broad. John is interested in exploring some services
+team work. Breadth of experience. Kubernetes, services, etc.
+
+In five years, less clear. Mentoring Annamira & Emma were good experiences. Would like to do more of
+that. Linear Algebra group could be a fun group to lead.
+** jigold 1:1 <2022-01-18>
+<2022-01-18>
+
+** Grace:Dan 1:1 <2022-01-18>
+<2022-01-18>
+
+*** tim
+let grace know ahead of time
+**** DONE tell Ben/Claire/Carla about Tim's paternity leave
+*** regional missense constraint
+KC says Patrick S & John have been very helpful collaborators
+*** LAI local ancestry inference
+Put off until July. Patrick S was involved in this.
+
+Mike is taking a paternity leave.
+*** switch resource files that get read in by users
+**** DONE hailtop.cloud_where_am_i()
+https://app.zenhub.com/workspaces/gnomad-5f4d127ea61afc001d6be50b/issues/broadinstitute/gnomad_methods/433
+*** shared annotation database resource
+grace will introduce Patrick Cummings & Dan
+
+for updates, post on zulip
+*** VQSR
+**** DONE Talk to Tim and Konrad about what the strategy is:
+1. Do we want this in Hail Batch?
+2. How do we support N+K
+https://app.slack.com/client/T033C0MM9/CNNTF97GE/thread/CNNTF97GE-1639760860.016200
+*** TSV per column
+**** DONE check in with Tim about this and follow up
+**** DONE Check in with Julia/KC etc. for clarity
+*** gnomad release
+** Carolin:Dan <2022-01-18>
+<2022-01-18>
+
+presenting at (hopefully) feb 15, (maybe) feb 8.
+
+** Ameeta:Dan 1:1 Carolin <2022-01-13>
+<2022-01-13>
+
+I should intervene within the Carolin-Jackie dynamic.
+
+Give feedback on concrete, measurable indicators.
+
+how to bring to attention an issue with timing:
+
+> hey, this thing you were doing took longer than it should have. Why did it take that long? what
+> can we do to make sure it gets done successfully within time for the next project.
+
+Bring up time management while WFH
+
+> How do you manage your time while you're at home?
+
+Note that it is recurring issue.
+
+--
+
+Make the expectations for the role very clear.
+
+> Why do you think you haven't progressed because I'm seeing a negative trend?
+
+--
+
+Be more specific when asking for progress updates. The things that I want her to make progress on
+are the things I should ask about. Hold her accountable for the work I want her to do.
+
+
+RESET EXPECTATIONS.
+
+** Dan:Tim 1:1 <2022-01-12>
+<2022-01-12>
+- [ ] ask when Chris will join for gnomad standup? (should be very soon, right?)
+
+** ATGU Leadership <2022-01-10>
+Novo Nordisk Foundation project.
+
+Maps; Mechanisms; Medicine
+variants; regularly elements, genes, proteins, cellular functions; organism
+
+Five step variant-to-function:
+- variant
+- gene
+- cell types
+- cellular functions
+- physiological functions
+- disease
+
+** Dan:Tim 1:1 <2022-01-05>
+<2022-01-05>
+
+Internalize the project's goals and needs.
+
+Connect the deep research that Patrick does into the short-term goals.
+
+bad examples: C++ deep dive, fat QR decomposition.
+
+good examples: distribution sort for shuffler, other shuffler stuff, streams stuff, graph-based IR
+stuff
+
+Big change: Patrick operating independently. Patrick figuring out the things that would be
+impactful. Incremental delivery of his ideas.
+
+** BSP sample intake meeting <2022-01-05>
+<2022-01-05>
+SIDR
+
+initially for clinical intake. API-based approach to creating new samples in addition to web forms.
+
+** Ben/Claire/DK <2022-01-04>
+<2022-01-04>
+
+Talked a bit about Carolin. Ben suggests asking what does Carolin enjoy?
+
+Kumar is currently on leave.
+
+Ben mentioned Brad Burnstein and the [[https://www.broadinstitute.org/gene-regulation-observatory-gro][Gene Regulation Observatory (GRO)]]. Brad directs the GRO. GRO is
+new in 2020. Somehow Terra is involved in this. Ben likes Brad. GRO seems entangled with the Schmidt
+Center in some way. There was a [[https://ericandwendyschmidtcenter.org]["workshop"]] in December 2021 about AI applied to the cell. I use
+scare quotes because it was three keynotes and three panels. Hardly any workshopping of ideas?
+
+Anyway Ben seems to think there's a potential for Hail Batch to aid in the GRO's investigation of
+the epigenome. Ben also mentioned the annotation database as relevant to GRO.
+
+** carolin 1:1 <2022-01-04>
+<2022-01-04>
+
+The tests for the into project should be finished this week.
+
+** jigold 1:1 <2022-01-04>
+<2022-01-04>
+
+carolin 1:1.
+
+- bring up the carolin 2022 goals
+- being online
+
+** alex 1:1 <2022-01-04>
+<2022-01-04>
+
+Alex estimates a month or two of progress left on PCA.
+
+Lot's of heat here about Patrick's work
+
+** Neale Leadership <2022-01-04>
+*** diabetes genetically-motivated plate screen
+<2022-01-04>
+
+[[./todo-images/Screen Shot 2022-01-04 at 9.36.03 AM.png]]
+
+Lots of cellular phenotypes.
+
+Already in progress.
+** ben:claire:dk meeting
+bridge to ai is a genetics grant to connect genetics to therapeutics. loud native tools to make high
+dimensional phenotypes work with genotypes.
+
+Low seven figure ask will catalyze.
+
+Seems odd that we do so much work for gnomAD team but they pay for so much of what we do. It's OK
+that we focus so much on them because that investment enables the next level of scale in
+genetics. Also gnomAD produces lots of important derivative products for genetics.
+
+It would be nice to rebalance hail efforts in favor of new analyses and functionality rather than
+towards efficiency.
+
+We have to figure out how to get Wei to develop on Hail Batch.
+
+How do I make more money for Hail.
+1. Hail as a Service (if we could get 20-50k of salary that would help with retention efforts)
+2. Jeremy and Philanthropy. Work with development. There are also internal funds that we could
+   potentially get. Perhaps things like the Schmidt center.
+3. Grant writing.
+
+Ben doesn't want me chasing revenue. There are potential internal sources to retain folks.
+** Neale Leadership <2021-12-07>
+psych focused subset of the broader gnomad dataset. half a dozen analyses with ~200k total
+(cases+controls).
+
+burn rate of 5k per post-doc per month for active analysis
+
+> I don't see the point in pouring half a million dollars down a well [on RVAS of UKB genomes] if we
+> will not learn anything
+~Ben Neale
+
+*** low pass genome and deep exomes
+we have sample avail. and capacity to do ~200k. 120k from PUMAS. 20k from bioex. 20-30k for
+pakistani collection (sample but no money yet). 20k from wellcome leap.
+
+ASD is a bit small.
+
+ADHD, IBD also in play.
+
+Ben thinks 75 USD per sample could unlock funding. Reagent costs could maybe reach 30-40 USD, so
+another 30-40 USD for processing.
+
+20-30k early years, growing to 70-80k later years. We can get average cost down based on the high
+volume of sequencing.
+
+150 USD is probably too much to collect this sized dataset.
+
+Sinead shares a doc of all the genotyping/sequencing efforts in the lab
+https://docs.google.com/spreadsheets/d/1nZgYRH0_Qi7ldUYtkpxbJtfSXsLPmMZvif9T8cUvBAM/edit#gid=0
+
+GLIMPSE?? maybe: https://odelaneau.github.io/GLIMPSE/index.html
+
+Hail-Batch-based imputation might be interesting/necessary for this project.
+
+With low-pass genomes, what do the gVCFs look like. Do we even want gVCFs? Ben & Dan were talking
+about this.
+
+> it would surprise me if the PL/PP vector was insufficient to make GLIMPSE run ... I would be very
+> surprised if they were insufficient statistics.
+** Tim 1:1
+take a month in early february
+then two months when heather returns to work, 12 weeks after the baby is born
+
+** Tim 1:1 <2021-10-18>
+<2021-10-18>
+
+*** Notes
+MLIR should happen. Plotting should happen.
+** Claire:DK 1:1
+   be more proactive about hiring funding with carla
+*** DONE jackie promotion
+*** DONE share Jeremy doc with claire for feedback
+*** DONE for what do we need an admin?
+  other admin/ops work:
+  - event management
+  - reimbursment
+  - pre-grant application
+  - post-grant application
+  - calendar management
+  - meeting management
+** Ben:Claire:DK
+  Managing sometimes means acting as a absorbing buffer for people's frustrations.
+
+  Use timelines in _addition_ to goals to motivate folks.
+
+  The software developers of cloud software should be separate from the operators of the cloud to
+  enable competition and improvement of the software efficiency.
+
+  Project Eden wants to sequence the Estonian biobank on new technology.
+
+  Andreas heads estonian biobank
+
+  Tonu is involved somehow. Andreas has a son.
+
+  There's a committee running the biobank? and that's not going well.
+
+  Eden intends to identify, by genotype, people for clincal trials.
+
+  Our Health cohort is bieng assembled in the UK. We did a good job with gene bass which might make
+  use an analytic center for the Our Health cohort.
+*** DONE WONTDO Kumar written goals share with ben
+** Ben 1:1s
+*** DONE WONTDO how can we avoid repeat of CCDG?
+*** DONE how do we avoid kumar's situation happening again
+*** DONE What's Ben's plan for staff scientists, is this interesting and important to him?
+** 2021-09-16 HMDR
+  - [ ] add noise to the images
+  - [ ] We should add non-heritable high-dimensional signal
+** 2021-09-16 Tim 1:1
+  Table.execute is being removed and replaced with calls to lowered IRs. Should have some
+  performance improvements but likely no significant changes.
+
+  Need to use static methods and a tree-structured state class.
+
+  Patrick C.
+
+  "Empowering your Career"
+
+*** Kumar meeting prep
+   Day prioritized: Tuesdays and Thursdays
+   Main tasks:
+
+   1. Hail StatGen Reference Card / Cheatsheet
+   2. Document the gnomAD pipeline for consumption by stat gen Hail users
+   3. Regular Hail workshops and development of workshop materials
+   4. Hail community engagement
+** 2021-09-16 Kumar:Tim:Me
+  1. Hail StatGen Reference Card / Cheatsheet
+  2. Document the gnomAD pipeline for consumption by stat gen Hail users
+  3. Regular Hail workshops and development of workshop materials
+  4. Hail community engagement
+
+  Kumar to start Thursday on the reference card.
+** 2021-09-07 Jackie 1:1
+*** Carolin
+   The react/UI project seemed to make no progress.
+
+   First meeting seemed like she started up on a test project.
+
+   Second meeting it seemed like she had not made new progress over daniel's work.
+
+   Jackie not comfortable talking about performance with her.
+** 2021-08-31 Jackie 1:1
+*** AR Martin and A Ganna want to use Hail Batch
+   A terraform script will exist within a year. Within about two years we expect Hail Batch to be
+   available to the world.
+*** Azure
+   Mostly on track. Batch workers and jobs currently cannot talk to services in k8s.
+*** Carolin
+   Worried that the class is an achievable amount of work. Worried that she doesn't have the study
+   skills to handle the crunch of work.
+
+   Carolin made the PR. Jackie feels like the PR review felt like a crushing review.
+
+   Worried about revenues/costs. 2k in 3k out.
+
+   Have Daniel think about concurrency and parallelizing the scheduler.
+
+   Always run and cancelling.
+** 2021-08-31 Daniel 1:1
+*** Co-ops
+   Daniel is leading the co-op search. He's in touch with Aileen. Excited for BUYS.
+**** DONE read mentor chapter in Fournier
+    <2021-10-15>
+**** DONE break down an intern plan with simple achievable projects
+    <2021-10-15>
+*** Azure
+   Terraform is in. Services can come up, but both gateways are missing.
+
+   Gateways are in progress in a separate project.
+*** Reading Group
+   Struggling with the audience.
+*** Yom Kippur and Neale Lab Retreat
+   Yom Kippur Wednesday sundown to Thursday sundown
+*** CS61
+   Signed up with a friend.
+** DONE neale lab leadership buddy program becomes donuts?
+** Patrick S promotions and titles
+Put someone in the role that you want them to do.
+
+What tasks and projects would we assign to him?
+
+Promote to SrSWE but lets identify over the next six months ML projects that would be good to take
+on.
+
+There's a grad student who might be able to pick up the HMDR work.
+*** DONE Check with Carla about the promotions for Patrick & Daniel
+*** DONE what are the hard criticism to share along with the promotion
+*** DONE initiate a conversation with Patrick & Tim about developing ML
+*** DONE contact Ameeta about salary range for scientist I and scientist II
+** Neale Leadership
+*** 2021-11-09
+Christmas Market on the ninth. Let's have a lab outing.
+
+Snowport, at 88 Seaport Blvd., will be open daily from Nov. 19 to Jan. 2, 2022. The attraction will
+be open Monday through Thursday from 3 to 8 p.m.; Friday and Saturday from 11 a.m. to 8 p.m.; and
+Sunday from 11 a.m. to 7 p.m.
+*** 2021-10-26
+**** Funding
+     NNF, MSFT
+***** GSK (NDAed) V2F
+JSC: Ramnik, Todd, Mark
+
+    Mechanism to pitch projects and experimental follow up of genetic discoveries.
+
+** DONE prepare some notes on co-ops for ben etc.
+won't do
+** DONE Tim P paternity leave in February
+** DONE jigold job description
+** DONE flu shot
+** DONE organize small group social activities
+** DONE prepare thoughts on past year of leadership
+   <2021-09-17>
+   For the section titled “Reflection of the past year from leadership”, the idea is to give a high
+   level summary of what your subgroup has been working on in the past year, to highlight some of
+   the achievements but also, in the theme of resilience that we’ve tried to touch on before, to
+   also mention what struggles were encountered and where things might have failed, mentioned any
+   lessons learnt etc.
+** DONE channel reorganization
+   1. rename Hail Dev to Hail Query Dev
+   2. retire ServicesDev (but not delete it)
+   3. create Hail Batch Dev (a public channel)
+** DONE get Patrick C into our management structure before reviews
+<2022-04-01>
+I think I do not want to do this actually. There are some political issues at play.
+* etc notes
+** notes on blob SHA MD5 crc32 hashes
+(base) # ipython
+Python 3.7.7 (default, May  6 2020, 04:59:01)
+Type 'copyright', 'credits' or 'license' for more information
+IPython 7.16.1 -- An enhanced Interactive Python. Type '?' for help.
+
+In [1]: from hailtop.aiotools.router_fs import RouterAsyncFS
+   ...: fs = RouterAsyncFS
+   ...: fs.filestatus('s3://pan-ukb-us-east-1/sumstats_release/results_full.mt/entries/rows/parts/part-00024-e797b457-f813-4e8c-be1c-cdcea737d9b6')
+Traceback (most recent call last):
+  File "<ipython-input-1-08731c06651b>", line 3, in <module>
+    fs.filestatus('s3://pan-ukb-us-east-1/sumstats_release/results_full.mt/entries/rows/parts/part-00024-e797b457-f813-4e8c-be1c-cdcea737d9b6')
+AttributeError: type object 'RouterAsyncFS' has no attribute 'filestatus'
+
+
+In [2]: from hailtop.aiotools.router_fs import RouterAsyncFS
+   ...: fs = RouterAsyncFS
+   ...: fs.statfile('s3://pan-ukb-us-east-1/sumstats_release/results_full.mt/entries/rows/parts/part-00024-e797b457-f813-4e8c-be1c-cdcea737d9b6')
+Traceback (most recent call last):
+  File "<ipython-input-2-091962042978>", line 3, in <module>
+    fs.statfile('s3://pan-ukb-us-east-1/sumstats_release/results_full.mt/entries/rows/parts/part-00024-e797b457-f813-4e8c-be1c-cdcea737d9b6')
+TypeError: statfile() missing 1 required positional argument: 'url'
+
+
+In [3]: from hailtop.aiotools.router_fs import RouterAsyncFS
+   ...: fs = RouterAsyncFS()
+   ...: fs.statfile('s3://pan-ukb-us-east-1/sumstats_release/results_full.mt/entries/rows/parts/part-00024-e797b457-f813-4e8c-be1c-cdcea737d9b6')
+Traceback (most recent call last):
+  File "<ipython-input-3-873ca5888d13>", line 2, in <module>
+    fs = RouterAsyncFS()
+TypeError: __init__() missing 1 required positional argument: 'default_scheme'
+
+
+In [4]: from hailtop.aiotools.router_fs import RouterAsyncFS
+   ...: fs = RouterAsyncFS('file')
+   ...: fs.statfile('s3://pan-ukb-us-east-1/sumstats_release/results_full.mt/entries/rows/parts/part-00024-e797b457-f813-4e8c-be1c-cdcea737d9b6')
+Out[4]: <coroutine object RouterAsyncFS.statfile at 0x7ff4b9b6c950>
+
+In [5]: from hailtop.aiotools.router_fs import RouterAsyncFS
+   ...: fs = RouterAsyncFS('file')
+   ...: await fs.statfile('s3://pan-ukb-us-east-1/sumstats_release/results_full.mt/entries/rows/parts/part-00024-e797b457-f813-4e8c-be1c-cdcea737d9b6')
+Traceback (most recent call last):
+  File "/Users/dking/projects/hail/hail/python/hailtop/aiocloud/aioaws/fs.py", line 388, in statfile
+    Key=name)
+  File "/Users/dking/projects/hail/hail/python/hailtop/utils/utils.py", line 159, in blocking_to_async
+    thread_pool, lambda: fun(*args, **kwargs))
+  File "/Users/dking/miniconda3/lib/python3.7/concurrent/futures/thread.py", line 57, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/Users/dking/projects/hail/hail/python/hailtop/utils/utils.py", line 159, in <lambda>
+    thread_pool, lambda: fun(*args, **kwargs))
+  File "/Users/dking/miniconda3/lib/python3.7/site-packages/botocore/client.py", line 395, in _api_call
+    return self._make_api_call(operation_name, kwargs)
+  File "/Users/dking/miniconda3/lib/python3.7/site-packages/botocore/client.py", line 725, in _make_api_call
+    raise error_class(parsed_response, operation_name)
+ClientError: An error occurred (404) when calling the HeadObject operation: Not Found
+
+The above exception was the direct cause of the following exception:
+Traceback (most recent call last):
+  File "<ipython-input-5-744605d4d1e8>", line 6, in async-def-wrapper
+  File "/Users/dking/projects/hail/hail/python/hailtop/aiotools/router_fs.py", line 100, in statfile
+    return await fs.statfile(url)
+  File "/Users/dking/projects/hail/hail/python/hailtop/aiocloud/aioaws/fs.py", line 392, in statfile
+    raise FileNotFoundError(url) from e
+FileNotFoundError: s3://pan-ukb-us-east-1/sumstats_release/results_full.mt/entries/rows/parts/part-00024-e797b457-f813-4e8c-be1c-cdcea737d9b6
+
+
+In [6]: from hailtop.aiotools.router_fs import RouterAsyncFS
+   ...: fs = RouterAsyncFS('file')
+   ...: await fs.statfile('s3://pan-ukb-us-east-1/sumstats_release/results_full.mt/README.md')
+Traceback (most recent call last):
+  File "/Users/dking/projects/hail/hail/python/hailtop/aiocloud/aioaws/fs.py", line 388, in statfile
+    Key=name)
+  File "/Users/dking/projects/hail/hail/python/hailtop/utils/utils.py", line 159, in blocking_to_async
+    thread_pool, lambda: fun(*args, **kwargs))
+  File "/Users/dking/miniconda3/lib/python3.7/concurrent/futures/thread.py", line 57, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/Users/dking/projects/hail/hail/python/hailtop/utils/utils.py", line 159, in <lambda>
+    thread_pool, lambda: fun(*args, **kwargs))
+  File "/Users/dking/miniconda3/lib/python3.7/site-packages/botocore/client.py", line 395, in _api_call
+    return self._make_api_call(operation_name, kwargs)
+  File "/Users/dking/miniconda3/lib/python3.7/site-packages/botocore/client.py", line 725, in _make_api_call
+    raise error_class(parsed_response, operation_name)
+ClientError: An error occurred (404) when calling the HeadObject operation: Not Found
+
+The above exception was the direct cause of the following exception:
+Traceback (most recent call last):
+  File "<ipython-input-6-8f0d545ea1d9>", line 6, in async-def-wrapper
+  File "/Users/dking/projects/hail/hail/python/hailtop/aiotools/router_fs.py", line 100, in statfile
+    return await fs.statfile(url)
+  File "/Users/dking/projects/hail/hail/python/hailtop/aiocloud/aioaws/fs.py", line 392, in statfile
+    raise FileNotFoundError(url) from e
+FileNotFoundError: s3://pan-ukb-us-east-1/sumstats_release/results_full.mt/README.md
+
+
+In [7]: from hailtop.aiotools.router_fs import RouterAsyncFS
+   ...: fs = RouterAsyncFS('file')
+   ...: [x async for x in await fs.listfiles('s3://pan-ukb-us-east-1/sumstats_release/results_full.mt/')]
+Out[7]:
+[<hailtop.aiocloud.aioaws.fs.S3FileListEntry at 0x7ff4bce75c10>,
+ <hailtop.aiocloud.aioaws.fs.S3FileListEntry at 0x7ff4bce75e50>,
+ <hailtop.aiocloud.aioaws.fs.S3FileListEntry at 0x7ff4bce75c50>,
+ <hailtop.aiocloud.aioaws.fs.S3FileListEntry at 0x7ff4bce759d0>,
+ <hailtop.aiocloud.aioaws.fs.S3FileListEntry at 0x7ff4bce75ed0>,
+ <hailtop.aiocloud.aioaws.fs.S3FileListEntry at 0x7ff4bce75a50>,
+ <hailtop.aiocloud.aioaws.fs.S3FileListEntry at 0x7ff4bce75cd0>,
+ <hailtop.aiocloud.aioaws.fs.S3FileListEntry at 0x7ff4bce756d0>]
+
+In [8]: from hailtop.aiotools.router_fs import RouterAsyncFS
+   ...: fs = RouterAsyncFS('file')
+   ...: [x.url() async for x in await fs.listfiles('s3://pan-ukb-us-east-1/sumstats_release/results_full.mt/')]
+Out[8]:
+[<coroutine object S3FileListEntry.url at 0x7ff4bcd75950>,
+ <coroutine object S3FileListEntry.url at 0x7ff4bce2bb00>,
+ <coroutine object S3FileListEntry.url at 0x7ff4bce250e0>,
+ <coroutine object S3FileListEntry.url at 0x7ff4b9b21290>,
+ <coroutine object S3FileListEntry.url at 0x7ff4bce15710>,
+ <coroutine object S3FileListEntry.url at 0x7ff4bce153b0>,
+ <coroutine object S3FileListEntry.url at 0x7ff4bce155f0>,
+ <coroutine object S3FileListEntry.url at 0x7ff4bcde3560>]
+
+In [9]: from hailtop.aiotools.router_fs import RouterAsyncFS
+   ...: fs = RouterAsyncFS('file')
+   ...: [await x.url() async for x in await fs.listfiles('s3://pan-ukb-us-east-1/sumstats_release/results_full.mt/')]
+Out[9]:
+['s3://pan-ukb-us-east-1/sumstats_release/results_full.mt/cols/',
+ 's3://pan-ukb-us-east-1/sumstats_release/results_full.mt/entries/',
+ 's3://pan-ukb-us-east-1/sumstats_release/results_full.mt/globals/',
+ 's3://pan-ukb-us-east-1/sumstats_release/results_full.mt/index/',
+ 's3://pan-ukb-us-east-1/sumstats_release/results_full.mt/rows/',
+ 's3://pan-ukb-us-east-1/sumstats_release/results_full.mt/README.txt',
+ 's3://pan-ukb-us-east-1/sumstats_release/results_full.mt/_SUCCESS',
+ 's3://pan-ukb-us-east-1/sumstats_release/results_full.mt/metadata.json.gz']
+
+In [10]: from hailtop.aiotools.router_fs import RouterAsyncFS
+    ...: fs = RouterAsyncFS('file')
+    ...: await fs.statfile('s3://pan-ukb-us-east-1/sumstats_release/results_full.mt/README.txt')
+Out[10]: <hailtop.aiocloud.aioaws.fs.S3HeadObjectFileStatus at 0x7ff4bcedcd50>
+
+In [11]: dict(Out[10])
+/Users/dking/miniconda3/bin/ipython:1: RuntimeWarning: coroutine 'S3HeadObjectFileStatus.__getitem__' was never awaited
+  #!/Users/dking/miniconda3/bin/python
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+Traceback (most recent call last):
+  File "<ipython-input-11-b245f020cf5e>", line 1, in <module>
+    dict(Out[10])
+TypeError: cannot convert dictionary update sequence element #0 to a sequence
+
+
+In [12]: Out[10].head_object_resp
+Out[12]:
+{'ResponseMetadata': {'RequestId': 'MJA9ZCKE67HEPT9S',
+  'HostId': 'fghYv2OLAAI2UP0M0N0ZCQXrRUpxFZ9dZ12o8fW2ac98h6Y10ng/X85a5fm2sPTZ7ISH3GQESBQ=',
+  'HTTPStatusCode': 200,
+  'HTTPHeaders': {'x-amz-id-2': 'fghYv2OLAAI2UP0M0N0ZCQXrRUpxFZ9dZ12o8fW2ac98h6Y10ng/X85a5fm2sPTZ7ISH3GQESBQ=',
+   'x-amz-request-id': 'MJA9ZCKE67HEPT9S',
+   'date': 'Thu, 21 Apr 2022 18:15:01 GMT',
+   'last-modified': 'Tue, 19 Apr 2022 18:26:44 GMT',
+   'etag': '"ffe7ee4b21b58e71f1e6574d9ebf5883"',
+   'x-amz-version-id': 'XMLRmpCIpZJxV5Ch6xoeOIRd7X_Qoyoo',
+   'accept-ranges': 'bytes',
+   'content-type': 'binary/octet-stream',
+   'server': 'AmazonS3',
+   'content-length': '147'},
+  'RetryAttempts': 0},
+ 'AcceptRanges': 'bytes',
+ 'LastModified': datetime.datetime(2022, 4, 19, 18, 26, 44, tzinfo=tzutc()),
+ 'ContentLength': 147,
+ 'ETag': '"ffe7ee4b21b58e71f1e6574d9ebf5883"',
+ 'VersionId': 'XMLRmpCIpZJxV5Ch6xoeOIRd7X_Qoyoo',
+ 'ContentType': 'binary/octet-stream',
+ 'Metadata': {}}
+
+In [13]: from hailtop.aiotools.router_fs import RouterAsyncFS
+    ...: fs = RouterAsyncFS('file')
+    ...: await fs.statfile('gs://ukb-diverse-pops-public/sumstats_release/results_full.mt/README.txt')
+Traceback (most recent call last):
+  File "<ipython-input-13-5230ad8ba48c>", line 6, in async-def-wrapper
+  File "/Users/dking/projects/hail/hail/python/hailtop/aiotools/router_fs.py", line 100, in statfile
+    return await fs.statfile(url)
+  File "/Users/dking/projects/hail/hail/python/hailtop/aiocloud/aiogoogle/client/storage_client.py", line 602, in statfile
+    return GetObjectFileStatus(await self._storage_client.get_object_metadata(bucket, name))
+  File "/Users/dking/projects/hail/hail/python/hailtop/aiocloud/aiogoogle/client/storage_client.py", line 346, in get_object_metadata
+    return cast(Dict[str, str], await self.get(f'/b/{bucket}/o/{urllib.parse.quote(name, safe="")}', **kwargs))
+  File "/Users/dking/projects/hail/hail/python/hailtop/aiocloud/common/base_client.py", line 23, in get
+    async with await self._session.get(url, **kwargs) as resp:
+  File "/Users/dking/projects/hail/hail/python/hailtop/aiocloud/common/session.py", line 17, in get
+    return await self.request('GET', url, **kwargs)
+  File "/Users/dking/projects/hail/hail/python/hailtop/aiocloud/common/session.py", line 102, in request
+    return await request_retry_transient_errors(self._http_session, method, url, **kwargs)
+  File "/Users/dking/projects/hail/hail/python/hailtop/utils/utils.py", line 752, in request_retry_transient_errors
+    return await retry_transient_errors(session.request, method, url, **kwargs)
+  File "/Users/dking/projects/hail/hail/python/hailtop/utils/utils.py", line 722, in retry_transient_errors
+    return await f(*args, **kwargs)
+  File "/Users/dking/projects/hail/hail/python/hailtop/httpx.py", line 122, in request_and_raise_for_status
+    body=body
+ClientResponseError: 400, message='Bad Request', url=URL('https://storage.googleapis.com/storage/v1/b/ukb-diverse-pops-public/o/sumstats_release%2Fresults_full.mt%2FREADME.txt') body='{\n  "error": {\n    "code": 400,\n    "message": "Bucket is a requester pays bucket but no user project provided.",\n    "errors": [\n      {\n        "message": "Bucket is a requester pays bucket but no user project provided.",\n        "domain": "global",\n        "reason": "required"\n      }\n    ]\n  }\n}\n'
+
+
+In [14]: from hailtop.aiotools.router_fs import RouterAsyncFS
+    ...: fs = RouterAsyncFS('file', gcs_kwargs={'project':'hail-vdc'})
+    ...: await fs.statfile('gs://ukb-diverse-pops-public/sumstats_release/results_full.mt/README.txt')
+Out[14]: <hailtop.aiocloud.aiogoogle.client.storage_client.GetObjectFileStatus at 0x7ff4bdfca750>
+
+In [15]: Out[14].items
+Traceback (most recent call last):
+  File "<ipython-input-15-842b67f909b7>", line 1, in <module>
+    Out[14].items
+AttributeError: 'GetObjectFileStatus' object has no attribute 'items'
+
+
+In [16]: Out[14]._items
+Out[16]:
+{'kind': 'storage#object',
+ 'id': 'ukb-diverse-pops-public/sumstats_release/results_full.mt/README.txt/1633745014881281',
+ 'selfLink': 'https://www.googleapis.com/storage/v1/b/ukb-diverse-pops-public/o/sumstats_release%2Fresults_full.mt%2FREADME.txt',
+ 'mediaLink': 'https://storage.googleapis.com/download/storage/v1/b/ukb-diverse-pops-public/o/sumstats_release%2Fresults_full.mt%2FREADME.txt?generation=1633745014881281&alt=media',
+ 'name': 'sumstats_release/results_full.mt/README.txt',
+ 'bucket': 'ukb-diverse-pops-public',
+ 'generation': '1633745014881281',
+ 'metageneration': '1',
+ 'contentType': 'application/octet-stream',
+ 'storageClass': 'STANDARD',
+ 'size': '147',
+ 'md5Hash': '/+fuSyG1jnHx5ldNnr9Ygw==',
+ 'crc32c': '6wqDuQ==',
+ 'etag': 'CIH4j7qevPMCEAE=',
+ 'timeCreated': '2021-10-09T02:03:34.901Z',
+ 'updated': '2021-10-09T02:03:34.901Z',
+ 'timeStorageClassUpdated': '2021-10-09T02:03:34.901Z'}
+
+In [17]:
+
+In [17]: from hailtop.aiotools.router_fs import RouterAsyncFS
+    ...: fs = RouterAsyncFS('file', gcs_kwargs={'project':'hail-vdc'})
+    ...: await fs.statfile('hail-az://haildevtest/test/a0wzdu5ollb2/test/resources/0var.vcf.bgz')
+EnvironmentCredential.get_token failed: EnvironmentCredential authentication unavailable. Environment variables are not fully configured.
+ImdsCredential.get_token failed: ManagedIdentityCredential authentication unavailable, no managed identity endpoint found.
+ManagedIdentityCredential.get_token failed: ManagedIdentityCredential authentication unavailable, no managed identity endpoint found.
+SharedTokenCacheCredential.get_token failed: SharedTokenCacheCredential authentication unavailable. No accounts were found in the cache.
+VisualStudioCodeCredential.get_token failed: Failed to get Azure user details from Visual Studio Code.
+Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x7ff4bcdda490>
+Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x7ff4bceaa190>
+Out[17]: <hailtop.aiocloud.aioazure.fs.AzureFileStatus at 0x7ff4bcecf450>
+
+In [18]: Out[17]
+Out[18]: <hailtop.aiocloud.aioazure.fs.AzureFileStatus at 0x7ff4bcecf450>
+
+In [19]: Out[17].blob_props
+Out[19]: {'name': 'a0wzdu5ollb2/test/resources/0var.vcf.bgz', 'container': 'test', 'snapshot': None, 'version_id': None, 'is_current_version': None, 'blob_type': <BlobType.BlockBlob: 'BlockBlob'>, 'metadata': {}, 'encrypted_metadata': None, 'last_modified': datetime.datetime(2022, 3, 20, 18, 45, 43, tzinfo=datetime.timezone.utc), 'etag': '"0x8DA0AA1D683B8C6"', 'size': 900, 'content_range': None, 'append_blob_committed_block_count': None, 'is_append_blob_sealed': None, 'page_blob_sequence_number': None, 'server_encrypted': True, 'copy': {'id': None, 'source': None, 'status': None, 'progress': None, 'completion_time': None, 'status_description': None, 'incremental_copy': None, 'destination_snapshot': None}, 'content_settings': {'content_type': 'application/octet-stream', 'content_encoding': None, 'content_language': None, 'content_md5': None, 'content_disposition': None, 'cache_control': None}, 'lease': {'status': 'unlocked', 'state': 'available', 'duration': None}, 'blob_tier': 'Cool', 'rehydrate_priority': None, 'blob_tier_change_time': datetime.datetime(2022, 3, 22, 7, 33, 35, tzinfo=datetime.timezone.utc), 'blob_tier_inferred': None, 'deleted': False, 'deleted_time': None, 'remaining_retention_days': None, 'creation_time': datetime.datetime(2022, 3, 20, 18, 45, 43, tzinfo=datetime.timezone.utc), 'archive_status': None, 'encryption_key_sha256': None, 'encryption_scope': None, 'request_server_encrypted': True, 'object_replication_source_properties': [], 'object_replication_destination_policy': None, 'last_accessed_on': None, 'tag_count': None, 'tags': None, 'immutability_policy': {'expiry_time': None, 'policy_mode': None}, 'has_legal_hold': None, 'has_versions_only': None}
+
+In [20]: import pprint.pprint
+Traceback (most recent call last):
+  File "<ipython-input-20-a211458fa2d3>", line 1, in <module>
+    import pprint.pprint
+ModuleNotFoundError: No module named 'pprint.pprint'; 'pprint' is not a package
+
+
+In [21]: from pprint import pprint
+
+In [22]: pprint(Out[17].blob_props)
+{'name': 'a0wzdu5ollb2/test/resources/0var.vcf.bgz', 'container': 'test', 'snapshot': None, 'version_id': None, 'is_current_version': None, 'blob_type': <BlobType.BlockBlob: 'BlockBlob'>, 'metadata': {}, 'encrypted_metadata': None, 'last_modified': datetime.datetime(2022, 3, 20, 18, 45, 43, tzinfo=datetime.timezone.utc), 'etag': '"0x8DA0AA1D683B8C6"', 'size': 900, 'content_range': None, 'append_blob_committed_block_count': None, 'is_append_blob_sealed': None, 'page_blob_sequence_number': None, 'server_encrypted': True, 'copy': {'id': None, 'source': None, 'status': None, 'progress': None, 'completion_time': None, 'status_description': None, 'incremental_copy': None, 'destination_snapshot': None}, 'content_settings': {'content_type': 'application/octet-stream', 'content_encoding': None, 'content_language': None, 'content_md5': None, 'content_disposition': None, 'cache_control': None}, 'lease': {'status': 'unlocked', 'state': 'available', 'duration': None}, 'blob_tier': 'Cool', 'rehydrate_priority': None, 'blob_tier_change_time': datetime.datetime(2022, 3, 22, 7, 33, 35, tzinfo=datetime.timezone.utc), 'blob_tier_inferred': None, 'deleted': False, 'deleted_time': None, 'remaining_retention_days': None, 'creation_time': datetime.datetime(2022, 3, 20, 18, 45, 43, tzinfo=datetime.timezone.utc), 'archive_status': None, 'encryption_key_sha256': None, 'encryption_scope': None, 'request_server_encrypted': True, 'object_replication_source_properties': [], 'object_replication_destination_policy': None, 'last_accessed_on': None, 'tag_count': None, 'tags': None, 'immutability_policy': {'expiry_time': None, 'policy_mode': None}, 'has_legal_hold': None, 'has_versions_only': None}
+
+In [23]: pprint('a')
+'a'
+
+In [24]: pprint(Out[17].blob_props)
+{'name': 'a0wzdu5ollb2/test/resources/0var.vcf.bgz', 'container': 'test', 'snapshot': None, 'version_id': None, 'is_current_version': None, 'blob_type': <BlobType.BlockBlob: 'BlockBlob'>, 'metadata': {}, 'encrypted_metadata': None, 'last_modified': datetime.datetime(2022, 3, 20, 18, 45, 43, tzinfo=datetime.timezone.utc), 'etag': '"0x8DA0AA1D683B8C6"', 'size': 900, 'content_range': None, 'append_blob_committed_block_count': None, 'is_append_blob_sealed': None, 'page_blob_sequence_number': None, 'server_encrypted': True, 'copy': {'id': None, 'source': None, 'status': None, 'progress': None, 'completion_time': None, 'status_description': None, 'incremental_copy': None, 'destination_snapshot': None}, 'content_settings': {'content_type': 'application/octet-stream', 'content_encoding': None, 'content_language': None, 'content_md5': None, 'content_disposition': None, 'cache_control': None}, 'lease': {'status': 'unlocked', 'state': 'available', 'duration': None}, 'blob_tier': 'Cool', 'rehydrate_priority': None, 'blob_tier_change_time': datetime.datetime(2022, 3, 22, 7, 33, 35, tzinfo=datetime.timezone.utc), 'blob_tier_inferred': None, 'deleted': False, 'deleted_time': None, 'remaining_retention_days': None, 'creation_time': datetime.datetime(2022, 3, 20, 18, 45, 43, tzinfo=datetime.timezone.utc), 'archive_status': None, 'encryption_key_sha256': None, 'encryption_scope': None, 'request_server_encrypted': True, 'object_replication_source_properties': [], 'object_replication_destination_policy': None, 'last_accessed_on': None, 'tag_count': None, 'tags': None, 'immutability_policy': {'expiry_time': None, 'policy_mode': None}, 'has_legal_hold': None, 'has_versions_only': None}
+
+In [25]: type(Out[17].blob_props)
+Out[25]: azure.storage.blob._models.BlobProperties
+
+In [26]: pprint(dict(Out[17].blob_props))
+{'append_blob_committed_block_count': None,
+ 'archive_status': None,
+ 'blob_tier': 'Cool',
+ 'blob_tier_change_time': datetime.datetime(2022, 3, 22, 7, 33, 35, tzinfo=datetime.timezone.utc),
+ 'blob_tier_inferred': None,
+ 'blob_type': <BlobType.BlockBlob: 'BlockBlob'>,
+ 'container': 'test',
+ 'content_range': None,
+ 'content_settings': {'content_type': 'application/octet-stream', 'content_encoding': None, 'content_language': None, 'content_md5': None, 'content_disposition': None, 'cache_control': None},
+ 'copy': {'id': None, 'source': None, 'status': None, 'progress': None, 'completion_time': None, 'status_description': None, 'incremental_copy': None, 'destination_snapshot': None},
+ 'creation_time': datetime.datetime(2022, 3, 20, 18, 45, 43, tzinfo=datetime.timezone.utc),
+ 'deleted': False,
+ 'deleted_time': None,
+ 'encrypted_metadata': None,
+ 'encryption_key_sha256': None,
+ 'encryption_scope': None,
+ 'etag': '"0x8DA0AA1D683B8C6"',
+ 'has_legal_hold': None,
+ 'has_versions_only': None,
+ 'immutability_policy': {'expiry_time': None, 'policy_mode': None},
+ 'is_append_blob_sealed': None,
+ 'is_current_version': None,
+ 'last_accessed_on': None,
+ 'last_modified': datetime.datetime(2022, 3, 20, 18, 45, 43, tzinfo=datetime.timezone.utc),
+ 'lease': {'status': 'unlocked', 'state': 'available', 'duration': None},
+ 'metadata': {},
+ 'name': 'a0wzdu5ollb2/test/resources/0var.vcf.bgz',
+ 'object_replication_destination_policy': None,
+ 'object_replication_source_properties': [],
+ 'page_blob_sequence_number': None,
+ 'rehydrate_priority': None,
+ 'remaining_retention_days': None,
+ 'request_server_encrypted': True,
+ 'server_encrypted': True,
+ 'size': 900,
+ 'snapshot': None,
+ 'tag_count': None,
+ 'tags': None,
+ 'version_id': None}
+
+In [27]: Out[17].blob_props.get
+Out[27]: <bound method DictMixin.get of {'name': 'a0wzdu5ollb2/test/resources/0var.vcf.bgz', 'container': 'test', 'snapshot': None, 'version_id': None, 'is_current_version': None, 'blob_type': <BlobType.BlockBlob: 'BlockBlob'>, 'metadata': {}, 'encrypted_metadata': None, 'last_modified': datetime.datetime(2022, 3, 20, 18, 45, 43, tzinfo=datetime.timezone.utc), 'etag': '"0x8DA0AA1D683B8C6"', 'size': 900, 'content_range': None, 'append_blob_committed_block_count': None, 'is_append_blob_sealed': None, 'page_blob_sequence_number': None, 'server_encrypted': True, 'copy': {'id': None, 'source': None, 'status': None, 'progress': None, 'completion_time': None, 'status_description': None, 'incremental_copy': None, 'destination_snapshot': None}, 'content_settings': {'content_type': 'application/octet-stream', 'content_encoding': None, 'content_language': None, 'content_md5': None, 'content_disposition': None, 'cache_control': None}, 'lease': {'status': 'unlocked', 'state': 'available', 'duration': None}, 'blob_tier': 'Cool', 'rehydrate_priority': None, 'blob_tier_change_time': datetime.datetime(2022, 3, 22, 7, 33, 35, tzinfo=datetime.timezone.utc), 'blob_tier_inferred': None, 'deleted': False, 'deleted_time': None, 'remaining_retention_days': None, 'creation_time': datetime.datetime(2022, 3, 20, 18, 45, 43, tzinfo=datetime.timezone.utc), 'archive_status': None, 'encryption_key_sha256': None, 'encryption_scope': None, 'request_server_encrypted': True, 'object_replication_source_properties': [], 'object_replication_destination_policy': None, 'last_accessed_on': None, 'tag_count': None, 'tags': None, 'immutability_policy': {'expiry_time': None, 'policy_mode': None}, 'has_legal_hold': None, 'has_versions_only': None}>
+
+In [28]: Out[17].blob_props.get('Content-MD5)
+  File "<ipython-input-28-b69791653bc8>", line 1
+    Out[17].blob_props.get('Content-MD5)
+                                        ^
+SyntaxError: EOL while scanning string literal
+
+
+In [29]: Out[17].blob_props.get('Content-MD5;)
+  File "<ipython-input-29-cfa898a87e80>", line 1
+    Out[17].blob_props.get('Content-MD5;)
+                                         ^
+SyntaxError: EOL while scanning string literal
+
+
+In [30]: Out[17].blob_props.get('Content-MD5')
+
+** copy notes
+*** DONE 
+'"ukbb-diversepops-neale"'
+
+[
+ {"from": "gs://ukb-diverse-pops-public/sumstats_release/meta_analysis.raw.mt",
+  "to": "s3://pan-ukb-us-east-1/sumstats_release/meta_analysis.raw.mt"},
+ {"from": "gs://ukb-diverse-pops-public/sumstats_release/results_full.mt",
+  "to": "s3://pan-ukb-us-east-1/sumstats_release/results_full.mt"}
+]
+gs://ukb-diverse-pops-public/sumstats_release/meta_analysis.raw.mt
+s3://pan-ukb-us-east-1/sumstats_release/meta_analysis.raw.mt
+
+gs://ukb-diverse-pops-public/sumstats_release/results_full.mt
+s3://pan-ukb-us-east-1/sumstats_release/results_full.mt
+
+*** DONE gs://gnomad-public-requester-pays/release/2.1.1/ht/exomes_phased_counts_0.05_3_prime_UTR_variant_vp.ht
+   <2021-09-17>
+*** DONE hash check some files
+   <2021-09-16>
+*** installation
+create a key  pair
+#+BEGIN_SRC
+mkdir -p ~/aws-instance
+aws ec2 create-key-pair \
+    --key-name copy-key \
+    --query 'KeyMaterial' \
+    --output text > ~/aws-instance/key.pem
+chmod 0600 ~/aws-instance/key.pem
+#+END_SRC
+Start a c5.4xlarge. Pick any subnet whose availability zone has support for c5.4xlarge. If it
+doesn't you'll get an error message that tells you which zones are supported. Your security group
+should allow SSH connections from at least your IP address. If you've ever created an instance
+through the web UI, then there should be a "launch-wizard" security group which has this property.
+#+BEGIN_SRC
+YOUR_PUBLIC_SUBNET_ID=subnet-52c67134
+YOUR_PUBLIC_SECURITY_GROUP_ID=sg-070cbb0f1583879e6
+
+aws ec2 run-instances \
+    --image-id ami-01cc34ab2709337aa \
+    --count 1 \
+    --instance-type c5.4xlarge \
+    --key-name copy-key \
+    --subnet-id $YOUR_PUBLIC_SUBNET_ID \
+    --security-group-ids $YOUR_PUBLIC_SECURITY_GROUP_ID \
+    --associate-public-ip-address \
+    --output json  | jq -r '.Instances[]' > ~/aws-instance/instance.json
+cat ~/aws-instance/instance.json | jq -r '.InstanceId' > ~/aws-instance/instance-id
+cat ~/aws-instance/instance.json | jq -r '.PublicIpAddress' > ~/aws-instance/public-ip
+
+while [[ "$(cat ~/aws-instance/public-ip)" == "null" ]]
+do
+    echo 'waiting for instance to come alive'
+    sleep 5
+    aws ec2 describe-instances \
+        --instance-ids $(cat ~/aws-instance/instance-id) \
+        --output json \
+        | jq '.Reservations[].Instances[]' > ~/aws-instance/instance.json
+    cat ~/aws-instance/instance.json | jq -r '.PublicIpAddress' > ~/aws-instance/public-ip
+done
+#+END_SRC
+
+   4xlarge's have 5gbps sustained, 10gbps burst and are cheap, see:
+   - https://aws.amazon.com/ec2/pricing/on-demand/
+   - https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/compute-optimized-instances.html#compute-network-performance
+#+BEGIN_SRC
+ssh -i ~/aws-instance/key.pem ec2-user@$(cat ~/aws-instance/public-ip) '/bin/bash -c "
+yes | sudo amazon-linux-extras install epel
+yes | sudo yum -y install nethogs htop git
+curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-355.0.0-linux-x86_64.tar.gz
+tar -xf google-cloud-sdk-355.0.0-linux-x86_64.tar.gz
+./google-cloud-sdk/install.sh --quiet
+echo source /home/ec2-user/google-cloud-sdk/path.bash.inc >> ~/.bashrc
+"'
+
+ssh -i ~/aws-instance/key.pem ec2-user@$(cat ~/aws-instance/public-ip) '/bin/bash -c "
+pip3 install hail py-spy
+aws configure
+gcloud auth application-default login
+"'
+#+END_SRC
+
+The login and configure commands will require you to interact with them.
+
+WARNING: this instance now has your credentials on it. This is not secure. We should be using a service account.
+
+Log into the machine:
+
+#+BEGIN_SRC
+ssh -i ~/aws-instance/key.pem ec2-user@$(cat ~/aws-instance/public-ip)
+#+END_SRC
+
+Do this inside a screen:
+
+#+BEGIN_SRC
+py-spy record --format speedscope --rate 5 -- python3 -m hailtop.aiotools.copy '"YOUR_PROJECT_HERE"' '[
+{"from": "gs://gnomad-public-requester-pays/release/2.1.1/ht/exomes_phased_counts_0.05_3_prime_UTR_variant_vp.ht",
+   "to": "s3://gnomad-public-us-east-1/release/2.1.1/ht/exomes_phased_counts_0.05_3_prime_UTR_variant_vp.ht"}
+]'
+#+END_SRC
+
+   Start two screen windows (~C-a c~ to start one) and run one line in each window:
+#+BEGIN_SRC
+htop
+sudo nethogs
+#+END_SRC
+
+#+BEGIN_SRC
+aws ec2 terminate-instances --instance-ids $(cat ~/aws-instance/instance-id)
+aws ec2 delete-key-pair --key-name copy-key
+rm -rf ~/aws-instance
+#+END_SRC
+*** DONE 2021-11-15 Grace
+py-spy record --format speedscope --rate 5 -- python3 -m hailtop.aiotools.copy 'null' '[
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr1.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr1.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr1.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr1.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr10.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr10.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr10.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr10.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr11.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr11.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr11.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr11.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr12.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr12.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr12.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr12.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr13.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr13.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr13.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr13.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr14.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr14.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr14.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr14.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr15.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr15.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr15.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr15.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr16.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr16.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr16.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr16.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr17.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr17.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr17.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr17.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr18.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr18.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr18.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr18.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr19.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr19.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr19.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr19.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr2.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr2.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr2.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr2.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr20.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1lease/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr20.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr20.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1lease/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr20.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr21.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1lease/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr21.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr21.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1lease/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr21.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr22.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1lease/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr22.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr22.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1lease/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr22.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr3.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1lease/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr3.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr3.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1lease/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr3.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr4.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr4.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr4.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr4.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr5.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr5.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr5.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr5.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr6.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr6.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr6.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr6.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr7.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr7.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr7.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1lease/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr7.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr8.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr8.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr8.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr8.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr9.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr9.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr9.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr9.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chrX.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chrX.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chrX.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chrX.vcf.bgz.tbi"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chrY.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chrY.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chrY.vcf.bgz.tbi",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chrY.vcf.bgz.tbi"
+}
+]'
+
+----
+
+INPROGRESS:
+py-spy record --format speedscope --rate 5 -- python3 -m hailtop.aiotools.copy 'null' '[
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr1.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr1.vcf.bgz"
+}
+]'
+
+
+py-spy record --format speedscope --rate 5 -- python3 -m hailtop.aiotools.copy 'null' '[
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr10.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr10.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr11.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr11.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr12.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr12.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr13.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr13.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr14.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr14.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr15.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr15.vcf.bgz"
+}
+]'
+
+
+py-spy record --format speedscope --rate 5 -- python3 -m hailtop.aiotools.copy 'null' '[
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr16.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr16.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr17.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr17.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr18.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr18.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr19.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr19.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr2.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr2.vcf.bgz"
+}
+]'
+
+py-spy record --format speedscope --rate 5 -- python3 -m hailtop.aiotools.copy 'null' '[
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr20.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr20.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr21.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr21.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr22.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr22.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr3.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr3.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr4.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr4.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr5.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr5.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr6.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr6.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr7.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr7.vcf.bgz"
+}
+]'
+
+py-spy record --format speedscope --rate 5 -- python3 -m hailtop.aiotools.copy 'null' '[
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr8.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr8.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr9.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr9.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chrX.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chrX.vcf.bgz"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chrY.vcf.bgz",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chrY.vcf.bgz"
+}
+]'
+*** DONE 2021-11-10 grace
+py-spy record --format speedscope --rate 5 -- python3 -m hailtop.aiotools.copy '"broad-mpg-gnomad"' '[
+{"from": "gs://gnomad-public-requester-pays/release/2.1/pca/gnomad.r2.1.RF_fit.pkl",
+ "to":   "s3://gnomad-public-us-east-1/release/2.1/pca/gnomad.r2.1.RF_fit.pkl"
+},
+{"from": "gs://gnomad-public-requester-pays/release/3.1/pca/gnomad.v3.1.pca_loadings.ht",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1/pca/gnomad.v3.1.pca_loadings.ht"
+},
+{"from": "gs://gnomad-public-requester-pays/release/3.1/pca/gnomad.v3.1.RF_fit.pkl",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1/pca/gnomad.v3.1.RF_fit.pkl"
+},
+{"from": "gs://gcp-public-data--gnomad/release/3.1.2/ht/genomes/gnomad.genomes.v3.1.2.sites.ht",
+ "to":   "s3://gnomad-public-us-east-1/release/3.1.2/ht/genomes/gnomad.genomes.v3.1.2.sites.ht"
+},
+{"from": "gs://gnomad-public-requester-pays/truth-sets/source/lof-curation/NSD1_curation_results.csv",
+ "to":   "s3://gnomad-public-us-east-1/truth-sets/source/lof-curation/NSD1_curation_results.csv"
+},
+{"from": "gs://gnomad-public-requester-pays/release/2.1/pca/gnomad.r2.1.pca_loadings.ht",
+ "to":   "s3://gnomad-public-us-east-1/release/2.1/pca/gnomad.r2.1.pca_loadings.ht"
+}
+]'
+*** DONE 2021-11-04
+#+BEGIN_SRC
+py-spy record --format speedscope --rate 5 -- python3 -m hailtop.aiotools.copy 'null' '[
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/mt/genomes/gnomad.genomes.v3.1.2.hgdp_1kg_subset_dense.mt",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/mt/genomes/gnomad.genomes.v3.1.2.hgdp_1kg_subset_dense.mt"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/mt/genomes/gnomad.genomes.v3.1.2.hgdp_1kg_subset_sparse.mt",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/mt/genomes/gnomad.genomes.v3.1.2.hgdp_1kg_subset_sparse.mt"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/ht/genomes/gnomad.genomes.v3.1.2.hgdp_1kg_subset_variant_annotations.ht",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/ht/genomes/gnomad.genomes.v3.1.2.hgdp_1kg_subset_variant_annotations.ht"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/ht/genomes/gnomad.genomes.v3.1.2.hgdp_1kg_subset_sample_meta.ht",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/ht/genomes/gnomad.genomes.v3.1.2.hgdp_1kg_subset_sample_meta.ht"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_1kg_subset_sample_meta.tsv.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_1kg_subset_sample_meta.tsv.bgz"}
+]'
+
+py-spy record --format speedscope --rate 5 -- python3 -m hailtop.aiotools.copy 'null' '[
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr1.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr1.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr1.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr1.vcf.bgz.tbi"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr10.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr10.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr10.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr10.vcf.bgz.tbi"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr11.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr11.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr11.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr11.vcf.bgz.tbi"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr12.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr12.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr12.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr12.vcf.bgz.tbi"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr13.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr13.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr13.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr13.vcf.bgz.tbi"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr14.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr14.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr14.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr14.vcf.bgz.tbi"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr15.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr15.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr15.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr15.vcf.bgz.tbi"}
+]'
+
+py-spy record --format speedscope --rate 5 -- python3 -m hailtop.aiotools.copy 'null' '[
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr16.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr16.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr16.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr16.vcf.bgz.tbi"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr17.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr17.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr17.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr17.vcf.bgz.tbi"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr18.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr18.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr18.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr18.vcf.bgz.tbi"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr19.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr19.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr19.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr19.vcf.bgz.tbi"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr2.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr2.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr2.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr2.vcf.bgz.tbi"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr20.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr20.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr20.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr20.vcf.bgz.tbi"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr21.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr21.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr21.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr21.vcf.bgz.tbi"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr22.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr22.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr22.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr22.vcf.bgz.tbi"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr3.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr3.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr3.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr3.vcf.bgz.tbi"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr4.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr4.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr4.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr4.vcf.bgz.tbi"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr5.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr5.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr5.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr5.vcf.bgz.tbi"}
+]'
+
+py-spy record --format speedscope --rate 5 -- python3 -m hailtop.aiotools.copy 'null' '[
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr6.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr6.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr6.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr6.vcf.bgz.tbi"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr7.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr7.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr7.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr7.vcf.bgz.tbi"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr8.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr8.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr8.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr8.vcf.bgz.tbi"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr9.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr9.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr9.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr9.vcf.bgz.tbi"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chrX.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chrX.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chrX.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chrX.vcf.bgz.tbi"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chrY.vcf.bgz",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chrY.vcf.bgz"},
+{"from":"gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chrY.vcf.bgz.tbi",
+ "to":"s3://gnomad-public-us-east-1/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chrY.vcf.bgz.tbi"}
+]'
+#+END_SRC
+*** DONE remove outstanding transfers
+*** DONE for wei
+#+BEGIN_SRC
+py-spy record --format speedscope --rate 5 -- python3 -m hailtop.aiotools.copy 'null' '[
+{"from": "s3://gbmi-sumstats/052021_final/meta/gbmi-sumstats-to-share",
+ "to":   "s3://gbmi-sumstats"}
+]'
+#+END_SRC
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/ExAC.r1.sites.vep.vcf.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/ExAC.r1.sites.vep.vcf.gz.tbi
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr1.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr2.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr3.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr4.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr5.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr6.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr7.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr8.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr9.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr10.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr11.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr12.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr13.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr14.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr15.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr16.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr17.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr18.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr19.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr20.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr21.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chr22.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chrX.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/coverage/Panel.chrY.coverage.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/forweb_cleaned_exac_r03_march16_z_data_pLI_CNV-final.txt.gz
+*** DONE gs://gnomad-public-requester-pays/legacy/exac_browser/regional_missense_constraint.tsv
+*** DONE gs://gnomad-public-requester-pays/release/2.1.1/liftover_grch38/ht/exomes/gnomad.exomes.r2.1.1.sites.liftover_grch38.ht
+*** DONE gs://gnomad-public-requester-pays/release/2.1.1/liftover_grch38/ht/genomes/gnomad.genomes.r2.1.1.sites.liftover_grch38.ht
+*** DONE gs://gnomad-public-requester-pays/release/3.1/ht/genomes/gnomad.genomes.v3.1.sites.ht
+*** DONE gs://gnomad-public-requester-pays/release/3.1/mt/genomes/gnomad.genomes.v3.1.hgdp_1kg_subset.mt
+*** DONE gs://gnomad-public-requester-pays/truth-sets/source/lof-curation/all_homozygous_curation_results.csv
+*** DONE gs://gnomad-public-requester-pays/truth-sets/source/lof-curation/lysosomal_storage_disease_genes_curation_results.csv
+*** DONE gs://gnomad-public-requester-pays/truth-sets/source/lof-curation/AP4_curation_results.csv
+*** DONE gs://gnomad-public-requester-pays/truth-sets/source/lof-curation/FIG4_curation_results.csv
+*** DONE gs://gnomad-public-requester-pays/truth-sets/source/lof-curation/MCOLN1_curation_results.csv
+*** DONE gs://gnomad-public-requester-pays/truth-sets/source/lof-curation/haploinsufficient_genes_curation_results.csv
+*** DONE gs://gnomad-public-requester-pays/truth-sets/source/lof-curation/metabolic_conditions_genes_curation_results.csv
+*** DONE gs://gnomad-public-requester-pays/papers/2019-tx-annotation/pre_computed/all.possible.snvs.tx_annotated.021520.ht
+*** DONE gs://gnomad-public-requester-pays/papers/2019-tx-annotation/pre_computed/all.possible.snvs.tx_annotated.GTEx.v7.021520.tsv.bgz
+*** DONE gs://gnomad-public-requester-pays/papers/2019-tx-annotation/gnomad_browser/all.baselevel.021620.ht
+*** DONE gs://gnomad-public-requester-pays/papers/2019-tx-annotation/gnomad_browser/all.baselevel.021620.tsv.bgz
+*** DONE gs://gnomad-public-requester-pays/intervals/exome_calling_regions.v1.interval_list
+*** DONE gs://gnomad-public-requester-pays/intervals/hg19-v0-wgs_evaluation_regions.v1.interval_list
+*** DONE gs://gnomad-public-requester-pays/papers/2019-flagship-lof/v1.0/gnomad.v2.1.1.all_lofs.txt.bgz
+*** DONE gs://gnomad-public-requester-pays/papers/2019-sv/gnomad_v2.1_sv.sites.vcf.gz
+*** DONE gs://gnomad-public-requester-pays/papers/2019-sv/gnomad_v2.1_sv.sites.vcf.gz.tbi
+*** DONE gs://gnomad-public-requester-pays/papers/2019-sv/gnomad_v2.1_sv.sites.bed.gz
+*** DONE gs://gnomad-public-requester-pays/papers/2019-sv/gnomad_v2.1_sv.sites.bed.gz.tbi
+*** DONE gs://gnomad-public-requester-pays/papers/2019-sv/gnomad_v2.1_sv.controls_only.sites.vcf.gz
+*** DONE gs://gnomad-public-requester-pays/papers/2019-sv/gnomad_v2.1_sv.controls_only.sites.vcf.gz.tbi
+*** DONE gs://gnomad-public-requester-pays/papers/2019-sv/gnomad_v2.1_sv.controls_only.sites.bed.gz
+*** DONE gs://gnomad-public-requester-pays/papers/2019-sv/gnomad_v2.1_sv.controls_only.sites.bed.gz.tbi
+*** DONE gs://gnomad-public-requester-pays/papers/2019-sv/gnomad_v2.1_sv.nonneuro.sites.vcf.gz
+*** DONE gs://gnomad-public-requester-pays/papers/2019-sv/gnomad_v2.1_sv.nonneuro.sites.vcf.gz.tbi
+*** DONE gs://gnomad-public-requester-pays/papers/2019-sv/gnomad_v2.1_sv.nonneuro.sites.bed.gz
+*** DONE gs://gnomad-public-requester-pays/papers/2019-sv/gnomad_v2.1_sv.nonneuro.sites.bed.gz.tbi
+** SEQR
+**** 2021-10-29 Review of John's work
+Hana Snow, John Compitello, Me
+**** Notes
+Querying more than one family is very rare. When querying many individuals, users usually use a
+variant filter.
+
+GCS was not fast enough.
+
+Hana voices concerns about pd-ssd bandwidth/IOPS will become a bottleneck if many Query servers are
+sharing the same read-only pd-ssd. We will experiment with that. Likely not an issue because the
+bottleneck is Hail compute time not network or disk bandwidth.
+
+Hana notes that another common query is "does any sample to which I have access have variant
+X". John notes this should be very fast.
+
+Spectrum of queries seem to be:
+- subset a family, compute column aggs
+- subset a family, show variants
+- subset to one-few genes, compute row aggs
+- subset to one variant, compute row aggs
+
+Hana asks how long the one-table-for-family, show some variants query takes.
+
+It might be valuable to have the Hail client spin up multiple JVMs connected on UDSes. This is some
+amount of work, but not that much.
+
+SEQR needs Pagination. SEQR needs jump to page N.
+
+Hana asks about the process and cost of adding new samples to an extant dataset. We want a no
+downtime solution here. Adding new gVCFs is not hard. When a VDS combination happens, we need to
+know when it is safe to delete data. We probably want a little SEQR admin page tool that lets you
+notify it of a combined dataset to which it should send new queries. This same tool should notify
+the admin when the data can be deleted.
+
+Hana notes they have a mix of genomes and exomes.
+
+Sometimes there duplicate samples because a sample will have been genome and exome sequencing.
+
+Approach this as a two phase process:
+1. Switch SEQR to Hail.
+2. Long term
+
+Let's make sure we involve the AUS folks in our long-term discussions.
+
+**** DK's pagination solution
+Assume: we will always display the first page of a query.
+Assume: the dataset has the row index as a field.
+
+When the first page of a query loads, record the locus-alleles and row index for the first and last
+variant. Next page is easy and fast: make a request for variants after the last variant.
+
+Nth page is slightly harder: take the index of the last variant and add =PAGE_SIZE * N=. Send that
+to Hail. Hail uses the index to determine in which partition a variant exists with index
+=LAST_VARIANT_INDEX + PAGE_SIZE * N=. I assume our indices let us skip a count of variants within a
+partition. If not, it should not be hard to add this to our B-Tree implementation.
+**** Action Items
+- [ ] Experiment with 10 concurrent servers running a query against a shared read-only pd-ssd.
+- [ ] Benchmark one-table-for-family show N variants.
+- [ ] Create an async Hail client which can use a pool of JVMs to do concurrent Spark queries.
+- [ ] How efficiently can Hail compute "jump to the Nth variant"?
+- [ ] What is the effect on querying and storage of storing exomes and genomes in the same MT?
+- [ ] Involve the Leo, et al. once the tech report is ready.
+** Australia
+*** Hail Batch Monthly Catch Up <2022-01-27>
+Ask about HDInisght JVM version.
+*** Monthly Batch Check-In
+Billing is not ideal because you have to spin up a separate dataproc cluster.
+
+Garvan will have multiple cost-centers/projects which should get billed to.
+
+We're using an Azure AD Application as the equivalent of a Google Service Account.
+
+January 1 for AUS to deploy the Hail system into Azure. DG will need to be available to support them
+if they run into infrastructural problems.
+
+**** DONE what is the steady state overhead of Hail Batch
+could we architect it around lambdas and pubsub?
+
+We're working on a version that exists on a single VM for a number of reasons.
+**** DONE allow selectable regions
+moved into projects / Batch
+**** DONE allow a control plane to start VMs in many subscriptions
+I don't see this as a realistic solution for us.
+**** DONE AsyncFS and copy tool to Michael Franklin.
+*** meeting notes
+Several teams in Australia are working on proposals for genetics compute infrastructure. DMac's
+current focus is to prevent an investment in an HPC-like cluster. Part of the value of his proposal
+is that we are not locked in to Google because Azure is an alternative. Selling to AUS gov will pick
+up in 2022Q1-Q2.
+
+hailctl hdinsight needs to come soon.
+
+Seqr is important to DMac in the next year.
+
+AUS workflows fall into two categories: Hail-Batch-and-Hail-Query-on-Dataproc and Cromwell. AUS
+infrastructure includes the hail stuff, cromwell, SQL database, permissions. AUS has permissions
+encoded in GCP and needs to port this to Azure.
+
+Releasing the workflow launcher publicly is necessary for AUS to use Terra for Cromwell.
+
+Cromwell-batch interaction glue is kind of ugly. Hmm, would be good to better understand this.
+
+*** DONE hailctl hdinsight needs to come soon if query service is not ready
+*** DONE AUS really really wants the Query Service
+hard at work, should arrive end of March
+*** DONE DRS / MT integration
+moved to Terra-Hail integration
+*** DONE what are these cromwell pipelines that AUS uses
+automatic translation of wdl to batch is tricky.
+
+moved to the hail batch monthly catch up 2022-01-27
+*** DONE regular sync's with Leo
+   - [ ] MSFT asked about thing that DMac needs to be successful
+   - [ ] tighter integration between the teams
+
+*** DONE prep Hail talk on 2021-09-15
+   <2021-09-15>
+
+** Hail users as of 2021-12-22
+Public Biotechs / Pharma / Healthcare:
+- 23andme
+- AbbVie
+- BioMarin
+- Cerner
+- Eli Lilly
+- GSK
+- IQVIA
+- Invitae
+- Novartis
+- Novo Nordisk
+- Takeda
+- Thrive (a division of Exact Sciences)
+Startup Biotechs / Pharma / Healthtech:
+- Ariel Medicine
+- Axiomedix
+- Bioturing
+- Blackthorn Therapeutics
+- Calico
+- Color
+- Coral Genomics
+- Emperico
+- Gencove
+- Genomics, plc
+- Global Gene Corp
+- Goldfinch Bio
+- Helix
+- Imagene AI
+- Maze Therapeutics
+- The Hyve
+The Clouds:
+- Amazon
+- Google
+- Microsoft
+Academic:
+- Baylor Genetics
+- Boston Children's Hospital
+- Boston University
+- Brigham and Woman's Hosptial
+- Case Western Reserve University
+- Columbia University Medical Center
+- Cornell
+- Garvan Institute, Australia
+- Grinell Colege
+- Harvard Biostatistics
+- Harvard Medical School
+- Harvard School of Public Health
+- Hasso Plattner Institute
+- Icahn School of Medicine at Mount Sinai
+- Imperial College London
+- Inha University
+- Institute of Genomics and Integrative Biology, India
+- Johns Hopkins University
+- Korea University
+- Kyoto University Hospital
+- Leids University Medical Center
+- Lunds University
+- MIT
+- Massachusetts Institute of Technology
+- McGill University
+- New York Genome Center
+- SUNY Upstate
+- Salk Institute
+- Sidra Medicine, Qatar
+- Stanford University
+- Taipei Medical University
+- Technical University of Munich
+- The Hospital for Sick Children
+- The Whitehead Institute
+- UIUC
+- Ulm University
+- Uniformed Services University of the Health Sciences
+- University of Alberta
+- University of California: Santa Cruz, San Diego, Irvine, & San Francisco,
+- University of Chicago
+- University of Florida
+- University of Helsinki
+- University of Luxembourg
+- University of Massachusetts Boston
+- University of Michigan
+- University of North Texas
+- University of Oxford: Population Health
+- University of South Dakota
+- University of Southern Denmark
+- Vanderbilt
+- Vinča Nuclear Institute
+- Washington University in St Louis
+- Wellcome Sanger Institute
+- Western University, Canada
+
+** azure hdinsight notes
+*** todo:
+*** DONE remove the cluster's entry from known hosts
+*** DONE delete the ABS container
+*** part2
+#+begin_src
+hailctl hdinsight start dkingtest29 Billydad1 Billydad1 dkingtestaccount dking-hdinsight-experiments \
+        --install-hail-uri https://raw.githubusercontent.com/danking/hail/dk-hdinsight-vep/hail/python/hailtop/hailctl/hdinsight/resources/install-hail.sh \
+        --install-native-deps https://raw.githubusercontent.com/danking/hail/dk-hdinsight-vep/hail/python/hailtop/hailctl/hdinsight/resources/install-native-deps.sh \
+        --wheel-uri https://storage.googleapis.com/hail-common/dking/hail-0.2.79-py3-none-any.whl \
+        --vep GRCh37 \
+        --vep-loftee-tar-uri hail-az://dkingtestaccount/vep/loftee-beta-GRCh37 \
+        --vep-homo-sapiens-tar-uri hail-az://dkingtestaccount/vep/homo-sapiens-85-GRCh37 \
+        --install-vep-uri https://raw.githubusercontent.com/danking/hail/dk-hdinsight-vep/hail/python/hailtop/hailctl/hdinsight/resources/install-vep.sh \
+        --vep-config-uri https://raw.githubusercontent.com/danking/hail/dk-hdinsight-vep/hail/python/hailtop/hailctl/hdinsight/resources/vep-GRCh37.json
+#+end_src
+*** part1
+You must specify all necessary azure storage accounts at cluster creation time. The required
+container field is for temporary cluster storage. The container must be unique
+per-cluster. Suggestion: make it the same.
+
+No changes are necessary to Security & Networking.
+
+Specify the script action which installs hail, e.g. https://raw.githubusercontent.com/danking/hail/dk-hdinsight-test/hail/python/hailtop/hailctl/hdinsight/resources/install-hail.sh
+
+The storage account must live in the same resource group that the cluster does.
+
+Storage accounts may only contain lower case letters and numbers.
+
+wtf!
+
+#+begin_src
+{"status":"Failed","error":{"code":"DeploymentFailed","message":"At least one resource deployment operation failed. Please list deployment operations for details. Please see https://aka.ms/DeployOperations for usage details.","details":[{"code":"Conflict","message":"{\r\n  \"status\": \"Failed\",\r\n  \"error\": {\r\n    \"code\": \"ResourceDeploymentFailure\",\r\n    \"message\": \"The resource operation completed with terminal provisioning state 'Failed'.\",\r\n    \"details\": [\r\n      {\r\n        \"code\": \"AmbariClusterCreationFailedErrorCode\",\r\n        \"message\": \"Internal server error occurred while processing the request. Please retry the request or contact support. The following host components failed to start up: HIVE_SERVER, OOZIE_SERVER, WEBHCAT_SERVER.\"\r\n      }\r\n    ]\r\n  }\r\n}"}]}}
+Command ran in 3986.688 seconds (init: 0.117, invoke: 3986.570)
+#+end_src
+
+
+the following was successful
+#+begin_src
+cluster_name=dkingtest28
+az hdinsight create \
+    --name $cluster_name \
+    --resource-group dking-hdinsight-experiments \
+    --type spark \
+    --component-version Spark=3.0 \
+    --http-password LongPassword1 \
+    --http-user admin \
+    --location eastus \
+    --workernode-count 2 \
+    --ssh-password LongPassword1 \
+    --ssh-user sshuser \
+    --storage-account dkingtestaccount \
+    --storage-container $cluster_name \
+    --version 4.0
+#+end_src
+#+begin_src
+{
+  "etag": "8c70d9ab-1fe8-4467-8451-92b92e9ea31d",
+  "id": "/subscriptions/22cd45fe-f996-4c51-af67-ef329d977519/resourceGroups/dking-hdinsight-experiments/providers/Microsoft.HDInsight/clusters/dkingtest25",
+  "identity": null,
+  "location": "East US",
+  "name": "dkingtest25",
+  "properties": {
+    "clusterDefinition": {
+      "blueprint": "https://blueprints.azurehdinsight.net/spark-5.0.2000.0.2112012118.json",
+      "componentVersion": {
+        "Spark": "3.0"
+      },
+      "configurations": null,
+      "kind": "spark"
+    },
+    "clusterHdpVersion": "5.0.2.11",
+    "clusterId": "167bbf4147854574b643e328d089ec1e",
+    "clusterState": "Running",
+    "clusterVersion": "5.0.2000.0",
+    "computeIsolationProperties": {
+      "enableComputeIsolation": false,
+      "hostSku": null
+    },
+    "computeProfile": {
+      "roles": [
+        {
+          "autoscaleConfiguration": null,
+          "dataDisksGroups": null,
+          "encryptDataDisks": false,
+          "hardwareProfile": {
+            "vmSize": "standard_e8_v3"
+          },
+          "minInstanceCount": null,
+          "name": "headnode",
+          "osProfile": {
+            "linuxOperatingSystemProfile": {
+              "password": null,
+              "sshProfile": null,
+              "username": "sshuser"
+            }
+          },
+          "scriptActions": null,
+          "targetInstanceCount": 2,
+          "virtualNetworkProfile": null,
+          "vmGroupName": null
+        },
+        {
+          "autoscaleConfiguration": null,
+          "dataDisksGroups": null,
+          "encryptDataDisks": false,
+          "hardwareProfile": {
+            "vmSize": "standard_e8_v3"
+          },
+          "minInstanceCount": null,
+          "name": "workernode",
+          "osProfile": {
+            "linuxOperatingSystemProfile": {
+              "password": null,
+              "sshProfile": null,
+              "username": "sshuser"
+            }
+          },
+          "scriptActions": null,
+          "targetInstanceCount": 2,
+          "virtualNetworkProfile": null,
+          "vmGroupName": null
+        },
+        {
+          "autoscaleConfiguration": null,
+          "dataDisksGroups": null,
+          "encryptDataDisks": false,
+          "hardwareProfile": {
+            "vmSize": "standard_a2_v2"
+          },
+          "minInstanceCount": null,
+          "name": "zookeepernode",
+          "osProfile": {
+            "linuxOperatingSystemProfile": {
+              "password": null,
+              "sshProfile": null,
+              "username": "sshuser"
+            }
+          },
+          "scriptActions": null,
+          "targetInstanceCount": 3,
+          "virtualNetworkProfile": null,
+          "vmGroupName": null
+        }
+      ]
+    },
+    "connectivityEndpoints": [
+      {
+        "location": "dkingtest25-ssh.azurehdinsight.net",
+        "name": "SSH",
+        "port": 22,
+        "privateIpAddress": null,
+        "protocol": "TCP"
+      },
+      {
+        "location": "dkingtest25.azurehdinsight.net",
+        "name": "HTTPS",
+        "port": 443,
+        "privateIpAddress": null,
+        "protocol": "TCP"
+      }
+    ],
+    "createdDate": "2021-12-16T20:01:45.997",
+    "diskEncryptionProperties": null,
+    "encryptionInTransitProperties": {
+      "isEncryptionInTransitEnabled": false
+    },
+    "errors": null,
+    "excludedServicesConfig": {
+      "excludedServicesConfigId": "default",
+      "excludedServicesList": ""
+    },
+    "kafkaRestProperties": null,
+    "minSupportedTlsVersion": null,
+    "networkProperties": null,
+    "osType": "Linux",
+    "privateEndpointConnections": null,
+    "privateLinkConfigurations": null,
+    "provisioningState": "Succeeded",
+    "quotaInfo": {
+      "coresUsed": 32
+    },
+    "securityProfile": null,
+    "storageProfile": {
+      "storageaccounts": [
+        {
+          "container": "hdinsight-tmp",
+          "fileSystem": null,
+          "fileshare": null,
+          "isDefault": true,
+          "key": null,
+          "msiResourceId": null,
+          "name": "dkingtestaccount.blob.core.windows.net",
+          "resourceId": "/subscriptions/22cd45fe-f996-4c51-af67-ef329d977519/resourceGroups/dking-hdinsight-experiments/providers/Microsoft.Storage/storageAccounts/dkingtestaccount",
+          "saskey": null
+        }
+      ]
+    },
+    "tier": "standard"
+  },
+  "resourceGroup": "dking-hdinsight-experiments",
+  "systemData": null,
+  "tags": null,
+  "type": "Microsoft.HDInsight/clusters",
+  "zones": null
+}
+#+end_src
+#+begin_src
+az hdinsight script-action execute -g dking-hdinsight-experiments -n installhail \
+--cluster-name $cluster_name \
+--script-uri https://raw.githubusercontent.com/danking/hail/dk-hdinsight-test/hail/python/hailtop/hailctl/hdinsight/resources/install-hail.sh \
+--roles headnode \
+--persist-on-success \
+--script-parameters "https://storage.googleapis.com/hail-common/dking/hail-0.2.79-py3-none-any.whl 0.2.79 $cluster_name"
+
+az hdinsight script-action execute -g dking-hdinsight-experiments -n installnativedeps \
+--cluster-name dkingtest25 \
+--script-uri https://raw.githubusercontent.com/danking/hail/dk-hdinsight-test/hail/python/hailtop/hailctl/hdinsight/resources/install-native-deps.sh \
+--roles 'headnode workernode' \
+--persist-on-success
+#+end_src
