@@ -2000,6 +2000,7 @@ def test_write_many():
             hl.Struct(idx=4, c='4')
         ]
 
+
 @pytest.mark.parametrize('branching_factor', [2, 3, 5, 7, 121])
 def test_indexed_read_boundaries(branching_factor):
     with hl._with_flags(index_branching_factor=str(branching_factor)):
