@@ -492,7 +492,7 @@ async def init_batch(
         local_tmpdir: Optional[str] = None,
         default_reference: str = 'GRCh37',
         global_seed: Optional[int] = None,
-        disable_progress_bar: TqdmDisableType = TqdmDisableOption.default
+        disable_progress_bar: TqdmDisableType = TqdmDisableOption.default,
         driver_cores: Optional[Union[str, int]] = None,
         driver_memory: Optional[str] = None,
         worker_cores: Optional[Union[str, int]] = None,
