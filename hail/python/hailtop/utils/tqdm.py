@@ -6,7 +6,10 @@ class TqdmDisableOption(Enum):
     default = 0
 
 
-def tqdm(*args, disable: Optional[Union[TqdmDisableOption, bool]] = TqdmDisableOption.default, **kwargs):
+TqdmDisableType = Optional[Union[TqdmDisableOption, bool]]
+
+
+def tqdm(*args, disable: TqdmDisableType = TqdmDisableOption.default, **kwargs):
     from tqdm.notebook import tqdm as tqdm_notebook  # pylint: disable=import-outside-toplevel
     from tqdm.auto import tqdm as tqdm_auto  # pylint: disable=import-outside-toplevel
     # To tqdm_notebook, None means do not display. To standard tqdm, None means

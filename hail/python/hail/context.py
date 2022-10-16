@@ -15,7 +15,7 @@ from hail.typecheck import (nullable, typecheck, typecheck_method, enumeration, 
 from hail.utils import get_env_or_default
 from hail.utils.java import Env, warning, choose_backend
 from hail.backend import Backend
-from hailtop.utils import secret_alnum_string
+from hailtop.utils import secret_alnum_string, TqdmDisableOption, TqdmDisableType
 from .builtin_references import BUILTIN_REFERENCES
 from .fs.fs import FS
 
@@ -471,7 +471,7 @@ def init_spark(sc=None,
     local_tmpdir=nullable(str),
     default_reference=enumeration(*BUILTIN_REFERENCES),
     global_seed=nullable(int),
-    disable_progress_bar=bool,
+    disable_progress_bar=nullable(oneof(bool, TqdmDisableOption)),
     driver_cores=nullable(oneof(str, int)),
     driver_memory=nullable(str),
     worker_cores=nullable(oneof(str, int)),
@@ -492,7 +492,7 @@ async def init_batch(
         local_tmpdir: Optional[str] = None,
         default_reference: str = 'GRCh37',
         global_seed: Optional[int] = None,
-        disable_progress_bar: bool = True,
+        disable_progress_bar: TqdmDisableType = TqdmDisableOption.default
         driver_cores: Optional[Union[str, int]] = None,
         driver_memory: Optional[str] = None,
         worker_cores: Optional[Union[str, int]] = None,
