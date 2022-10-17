@@ -84,9 +84,10 @@ class GeomLineBasic(Geom):
 
 class GeomPoint(Geom):
 
-    simple_aes_to_plotly = {
+    aes_to_plotly = {
         "color": "marker_color",
         "size": "marker_size",
+        "tooltip": "hovertext",
         "alpha": "marker_opacity",
         "shape": "marker_symbol",
     }
@@ -109,21 +110,15 @@ class GeomPoint(Geom):
         self.shape = shape
 
     def _map_to_plotly(self, mapping):
-        def aes_to_plotly_kwargs(aes_name, aes_value):
-            plotly_name = self.simple_aes_to_plotly.get(aes_name)
-            if plotly_name is not None:
-                return {plotly_name: aes_value}
-            assert aes_name == 'tooltip'
-            return {'hovertext': aes_value, 'hoverinfo': 'text'}
-
-        return {
-            plotly_name: plotly_value
-            for aes_name, aes_value in mapping.items()
-            for plotly_name, plotly_value in aes_to_plotly_kwargs(aes_name, aes_value)
+        plotly_kwargs = {
+            **{self.aes_to_plotly[k]: v for k, v in mapping.items()}
         }
+        if 'tooltip' in mapping:
+            plotly_kwargs['hoverinfo'] = 'text'
+        return plotly_kwargs
 
     def _get_aes_value(self, df, aes_name):
-        if hasattr(self, aes_name):
+        if getattr(self, aes_name) is not None:
             return getattr(self, aes_name)
         if df.attrs.get(aes_name) is not None:
             return df.attrs[aes_name]
@@ -142,16 +137,14 @@ class GeomPoint(Geom):
     def _add_trace(self, fig_so_far: go.Figure, df, facet_row, facet_col, values):
         fig_so_far.add_scatter(
             **{
-                **{
-                    "x": df.x,
-                    "y": df.y,
-                    "mode": "markers",
-                    "row": facet_row,
-                    "col": facet_col,
-                    "showlegend": False
-                },
-                **self._map_to_plotly(values)
-            }
+                "x": df.x,
+                "y": df.y,
+                "mode": "markers",
+                "row": facet_row,
+                "col": facet_col,
+                "showlegend": False
+            },
+            **self._map_to_plotly(values)
         )
 
     def _add_legend(self, fig_so_far: go.Figure, aes_name, category, value):
@@ -177,7 +170,6 @@ class GeomPoint(Geom):
                     self._add_legend(fig_so_far, aes_name, category, value)
 
     def apply_to_fig(self, parent, grouped_data, fig_so_far: go.Figure, precomputed, facet_row, facet_col, legend_cache):
-        parent.is_static = True
         legends = {}
         for df in grouped_data:
             values = self._get_aes_values(df)
@@ -189,6 +181,8 @@ class GeomPoint(Geom):
                         self._get_aes_value(df, f"{aes_name}_legend"): values[aes_name]
                     })
         self._add_legends(fig_so_far, legends)
+        if len(legends) > 1:
+            parent.is_static = True
 
     def get_stat(self):
         return StatIdentity()
