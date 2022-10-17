@@ -163,12 +163,6 @@ class GeomPoint(Geom):
             }
         )
 
-    def _add_legends(self, fig_so_far: go.Figure, legends):
-        for aes_name, legend_group in legends.items():
-            if len(legend_group) > 1:
-                for category, value in legend_group.items():
-                    self._add_legend(fig_so_far, aes_name, category, value)
-
     def apply_to_fig(self, parent, grouped_data, fig_so_far: go.Figure, precomputed, facet_row, facet_col, legend_cache):
         legends = {}
         for df in grouped_data:
@@ -180,8 +174,13 @@ class GeomPoint(Geom):
                         **legends.get(aes_name, {}),
                         self._get_aes_value(df, f"{aes_name}_legend"): values[aes_name]
                     })
-        self._add_legends(fig_so_far, legends)
-        if len(legends) > 1:
+        n_legends = 0
+        for aes_name, legend_group in legends.items():
+            if len(legend_group) > 1:
+                n_legends += 1
+                for category, value in legend_group.items():
+                    self._add_legend(fig_so_far, aes_name, category, value)
+        if n_legends > 1:
             parent.is_static = True
 
     def get_stat(self):
