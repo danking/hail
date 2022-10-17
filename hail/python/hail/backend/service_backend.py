@@ -372,12 +372,14 @@ class ServiceBackend(Backend):
 
             with timings.step("wait batch"):
                 try:
+                    progress_bar_description = ''
                     if self.disable_progress_bar is not True:
-                        deploy_config = get_deploy_config()
-                        url = deploy_config.external_url('batch', f'/batches/{b.id}/jobs/1')
-                        print(f'Action: {name}. Driver Job: {url}')
+                        progress_bar_description = name
 
-                    status = await b.wait(disable_progress_bar=self.disable_progress_bar)
+                    status = await b.wait(
+                        disable_progress_bar=self.disable_progress_bar,
+                        description=progress_bar_description
+                    )
                 except Exception:
                     await b.cancel()
                     raise

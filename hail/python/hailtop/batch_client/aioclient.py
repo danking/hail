@@ -7,9 +7,8 @@ import functools
 import asyncio
 import aiohttp
 import secrets
-from rich.progress import Progress, MofNCompleteColumn, BarColumn, TextColumn, TimeRemainingColumn
-from rich.live import Live
-from rich.table import Table
+from rich.progress import Progress, MofNCompleteColumn, BarColumn, TextColumn, TimeRemainingColumn, TimeElapsedColumn
+from rich.style import Style
 
 
 from hailtop.config import get_deploy_config, DeployConfig
@@ -18,7 +17,6 @@ from hailtop.utils import bounded_gather, request_retry_transient_errors, tqdm, 
 from hailtop import httpx
 
 from .globals import tasks, complete_states
-from .progress_bar import HailBarColumn
 
 log = logging.getLogger('batch_client.aioclient')
 
@@ -341,6 +339,14 @@ class BatchSubmissionInfo:
         self.used_fast_update = used_fast_update or {}
 
 
+def is_notebook() -> bool:
+    try:
+        from IPython import get_ipython
+        return get_ipython().__class__.__name__ == 'ZMQInteractiveShell'
+    except NameError:
+        return False
+
+
 class Batch:
     def __init__(self,
                  client: 'BatchClient',
@@ -413,63 +419,36 @@ class Batch:
             return await self.status()  # updates _last_known_status
         return self._last_known_status
 
-    # def _generate_progress_bar() -> Table:
-    #     table_columns = (
-    #         Column(no_wrap=True),
-    #         MofNCompleteColumn(),
-    #         BarColumn(),
-    #         BarColumn(),
-    #         TimeRemainingColumn()
-    #         (
-    #             Column(no_wrap=True)
-    #             if isinstance(_column, str)
-    #             else _column.get_table_column().copy()
-    #         )
-    #         for _column in self.columns
-    #     )
-    #     table = Table.grid(*table_columns, padding=(0, 1), expand=self.expand)
-
-    #     for task in tasks:
-    #         if task.visible:
-    #             table.add_row(
-    #                 *(
-    #                     (
-    #                         column.format(task=task)
-    #                         if isinstance(column, str)
-    #                         else column(task)
-    #                     )
-    #                     for column in self.columns
-    #                 )
-    #             )
-    #     return table
-
-    # with Live(generate_table(), refresh_per_second=4) as live:
-    #     for _ in range(40):
-    #         time.sleep(0.4)
-    #         live.update(generate_table())
-
     # FIXME Error if this is called while within a job of the same Batch
-    async def wait(self, *, disable_progress_bar=TqdmDisableOption.default):
-        i = 0
-        n_jobs = (await self.status())['n_jobs']
-        n_complete = 0
+    async def wait(self,
+                   *,
+                   disable_progress_bar=TqdmDisableOption.default,
+                   description: str = ''
+                   ):
+        deploy_config = get_deploy_config()
+        url = deploy_config.external_url('batch', f'/batches/{self.id}')
+        if is_notebook():
+            link_column = TextColumn(str(self.id), style=Style(link=url))
+        else:
+            link_column = TextColumn(url)
         p = Progress(
             TextColumn("[progress.description]{task.description}"),
-            HailBarColumn(),
+            link_column,
+            BarColumn(),
             MofNCompleteColumn(),
-            TimeRemainingColumn()
+            TimeRemainingColumn(),
+            TimeElapsedColumn()
         )
         p.start()
-        # with tqdm(total=n_jobs, disable=disable_progress_bar, desc=f'Batch {self.id}: completed jobs') as pbar:
         try:
-            tid = p.add_task(f'Batch {self.id}: completed jobs', total=n_jobs, visible=True)
+            status = await self.status()
+            tid = p.add_task(description, total=status['n_jobs'], visible=True)
+            i = 0
             while True:
                 status = await self.status()
-                n_jobs = status['n_jobs']
-                n_running = status.get('n_running', 0)
-                n_complete = status['n_completed']
-                p.update(tid, total=n_jobs, completed=n_complete, in_progress=n_running)
+                p.update(tid, total=status['n_jobs'], completed=status['n_completed'])
                 if status['complete']:
+                    p.refresh()
                     return status
                 j = random.randrange(math.floor(1.1 ** i))
                 await asyncio.sleep(0.100 * j)
