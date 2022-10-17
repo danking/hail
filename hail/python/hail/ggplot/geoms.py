@@ -118,7 +118,7 @@ class GeomPoint(Geom):
         return plotly_kwargs
 
     def _get_aes_value(self, df, aes_name):
-        if getattr(self, aes_name) is not None:
+        if getattr(self, aes_name, None) is not None:
             return getattr(self, aes_name)
         if df.attrs.get(aes_name) is not None:
             return df.attrs[aes_name]
