@@ -1,6 +1,7 @@
 import abc
 
 import numpy as np
+import plotly.graph_objects as go
 
 from .aes import aes
 from .stats import StatCount, StatIdentity, StatBin, StatNone, StatFunction, StatCDF
@@ -17,7 +18,7 @@ class Geom(FigureAttribute):
         self.aes = aes
 
     @abc.abstractmethod
-    def apply_to_fig(self, parent, agg_result, fig_so_far, precomputed, facet_row, facet_col, legend_cache):
+    def apply_to_fig(self, parent, agg_result, fig_so_far: go.Figure, precomputed, facet_row, facet_col, legend_cache):
         pass
 
     @abc.abstractmethod
@@ -57,7 +58,7 @@ class GeomLineBasic(Geom):
         super().__init__(aes)
         self.color = color
 
-    def apply_to_fig(self, parent, grouped_data, fig_so_far, precomputed, facet_row, facet_col, legend_cache):
+    def apply_to_fig(self, parent, grouped_data, fig_so_far: go.Figure, precomputed, facet_row, facet_col, legend_cache):
 
         def plot_group(df):
             trace_args = {
@@ -83,10 +84,9 @@ class GeomLineBasic(Geom):
 
 class GeomPoint(Geom):
 
-    aes_to_plotly = {
+    simple_aes_to_plotly = {
         "color": "marker_color",
         "size": "marker_size",
-        "tooltip": "hovertext",
         "alpha": "marker_opacity",
         "shape": "marker_symbol",
     }
@@ -109,7 +109,18 @@ class GeomPoint(Geom):
         self.shape = shape
 
     def _map_to_plotly(self, mapping):
-        return {self.aes_to_plotly[k]: v for k, v in mapping.items()}
+        def aes_to_plotly_kwargs(aes_name, aes_value):
+            plotly_name = self.simple_aes_to_plotly.get(aes_name)
+            if plotly_name is not None:
+                return {plotly_name: aes_value}
+            assert aes_name == 'tooltip'
+            return {'hovertext': aes_value, 'hoverinfo': 'text'}
+
+        return {
+            plotly_name: plotly_value
+            for aes_name, aes_value in mapping.items()
+            for plotly_name, plotly_value in aes_to_plotly_kwargs(aes_name, aes_value)
+        }
 
     def _get_aes_value(self, df, aes_name):
         if hasattr(self, aes_name):
@@ -128,7 +139,7 @@ class GeomPoint(Geom):
                 values[aes_name] = value
         return values
 
-    def _add_trace(self, fig_so_far, df, facet_row, facet_col, values):
+    def _add_trace(self, fig_so_far: go.Figure, df, facet_row, facet_col, values):
         fig_so_far.add_scatter(
             **{
                 **{
@@ -143,7 +154,7 @@ class GeomPoint(Geom):
             }
         )
 
-    def _add_legend(self, fig_so_far, aes_name, category, value):
+    def _add_legend(self, fig_so_far: go.Figure, aes_name, category, value):
         fig_so_far.add_scatter(
             **{
                 **{
@@ -159,13 +170,13 @@ class GeomPoint(Geom):
             }
         )
 
-    def _add_legends(self, fig_so_far, legends):
+    def _add_legends(self, fig_so_far: go.Figure, legends):
         for aes_name, legend_group in legends.items():
             if len(legend_group) > 1:
                 for category, value in legend_group.items():
                     self._add_legend(fig_so_far, aes_name, category, value)
 
-    def apply_to_fig(self, parent, grouped_data, fig_so_far, precomputed, facet_row, facet_col, legend_cache):
+    def apply_to_fig(self, parent, grouped_data, fig_so_far: go.Figure, precomputed, facet_row, facet_col, legend_cache):
         parent.is_static = True
         legends = {}
         for df in grouped_data:
@@ -202,7 +213,7 @@ class GeomLine(GeomLineBasic):
         super().__init__(aes, color)
         self.color = color
 
-    def apply_to_fig(self, parent, agg_result, fig_so_far, precomputed, facet_row, facet_col, legend_cache):
+    def apply_to_fig(self, parent, agg_result, fig_so_far: go.Figure, precomputed, facet_row, facet_col, legend_cache):
         super().apply_to_fig(parent, agg_result, fig_so_far, precomputed, facet_row, facet_col, legend_cache)
 
     def get_stat(self):
@@ -237,7 +248,7 @@ class GeomText(Geom):
         self.size = size
         self.alpha = alpha
 
-    def apply_to_fig(self, parent, grouped_data, fig_so_far, precomputed, facet_row, facet_col, legend_cache):
+    def apply_to_fig(self, parent, grouped_data, fig_so_far: go.Figure, precomputed, facet_row, facet_col, legend_cache):
         def plot_group(df):
             trace_args = {
                 "x": df.x,
@@ -295,7 +306,7 @@ class GeomBar(Geom):
             stat = StatCount()
         self.stat = stat
 
-    def apply_to_fig(self, parent, grouped_data, fig_so_far, precomputed, facet_row, facet_col, legend_cache):
+    def apply_to_fig(self, parent, grouped_data, fig_so_far: go.Figure, precomputed, facet_row, facet_col, legend_cache):
         def plot_group(df):
             trace_args = {
                 "x": df.x,
@@ -365,7 +376,7 @@ class GeomHistogram(Geom):
         self.position = position
         self.size = size
 
-    def apply_to_fig(self, parent, grouped_data, fig_so_far, precomputed, facet_row, facet_col, legend_cache):
+    def apply_to_fig(self, parent, grouped_data, fig_so_far: go.Figure, precomputed, facet_row, facet_col, legend_cache):
         min_val = self.min_val if self.min_val is not None else precomputed.min_val
         max_val = self.max_val if self.max_val is not None else precomputed.max_val
         # This assumes it doesn't really make sense to use another stat for geom_histogram
@@ -468,7 +479,7 @@ class GeomDensity(Geom):
         self.color = color
         self.alpha = alpha
 
-    def apply_to_fig(self, parent, grouped_data, fig_so_far, precomputed, facet_row, facet_col, legend_cache):
+    def apply_to_fig(self, parent, grouped_data, fig_so_far: go.Figure, precomputed, facet_row, facet_col, legend_cache):
         def plot_group(df, idx):
             slope = 1.0 / (df.attrs['max'] - df.attrs['min'])
             n = df.attrs['n']
@@ -552,7 +563,7 @@ class GeomHLine(Geom):
         self.linetype = linetype
         self.color = color
 
-    def apply_to_fig(self, parent, agg_result, fig_so_far, precomputed, facet_row, facet_col, legend_cache):
+    def apply_to_fig(self, parent, agg_result, fig_so_far: go.Figure, precomputed, facet_row, facet_col, legend_cache):
         line_attributes = {
             "y": self.yintercept,
             "line_dash": linetype_plotly_to_gg(self.linetype)
@@ -595,7 +606,7 @@ class GeomVLine(Geom):
         self.linetype = linetype
         self.color = color
 
-    def apply_to_fig(self, parent, agg_result, fig_so_far, precomputed, facet_row, facet_col, legend_cache):
+    def apply_to_fig(self, parent, agg_result, fig_so_far: go.Figure, precomputed, facet_row, facet_col, legend_cache):
         line_attributes = {
             "x": self.xintercept,
             "line_dash": linetype_plotly_to_gg(self.linetype)
@@ -635,7 +646,7 @@ class GeomTile(Geom):
     def __init__(self, aes):
         self.aes = aes
 
-    def apply_to_fig(self, parent, grouped_data, fig_so_far, precomputed, facet_row, facet_col, legend_cache):
+    def apply_to_fig(self, parent, grouped_data, fig_so_far: go.Figure, precomputed, facet_row, facet_col, legend_cache):
         def plot_group(df):
 
             for idx, row in df.iterrows():
@@ -677,7 +688,7 @@ class GeomFunction(GeomLineBasic):
         super().__init__(aes, color)
         self.fun = fun
 
-    def apply_to_fig(self, parent, agg_result, fig_so_far, precomputed, facet_row, facet_col, legend_cache):
+    def apply_to_fig(self, parent, agg_result, fig_so_far: go.Figure, precomputed, facet_row, facet_col, legend_cache):
         super().apply_to_fig(parent, agg_result, fig_so_far, precomputed, facet_row, facet_col, legend_cache)
 
     def get_stat(self):
@@ -701,7 +712,7 @@ class GeomArea(Geom):
         self.fill = fill
         self.color = color
 
-    def apply_to_fig(self, parent, grouped_data, fig_so_far, precomputed, facet_row, facet_col, legend_cache):
+    def apply_to_fig(self, parent, grouped_data, fig_so_far: go.Figure, precomputed, facet_row, facet_col, legend_cache):
         def plot_group(df):
             trace_args = {
                 "x": df.x,
@@ -758,7 +769,7 @@ class GeomRibbon(Geom):
         self.fill = fill
         self.color = color
 
-    def apply_to_fig(self, parent, grouped_data, fig_so_far, precomputed, facet_row, facet_col, legend_cache):
+    def apply_to_fig(self, parent, grouped_data, fig_so_far: go.Figure, precomputed, facet_row, facet_col, legend_cache):
         def plot_group(df):
 
             trace_args_bottom = {
