@@ -842,6 +842,10 @@ class Emit[C](
         val ev = env.inputValues(i)
         ev.toI(cb)
       case I32(x) =>
+        cb.println("println " + x.toString)
+        cb.warning("warning " + x.toString)
+        cb.logInfo("log " + x.toString)
+        cb.consoleInfo("console " + x.toString)
         presentPC(primitive(const(x)))
       case I64(x) =>
         presentPC(primitive(const(x)))
