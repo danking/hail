@@ -548,6 +548,8 @@ case class PartitionRVDReader(rvd: RVD, uidFieldName: String) extends PartitionR
     context: EmitCode,
     requestedType: TStruct): IEmitCode = {
 
+    cb.logInfo("info PartitionRVDReader emitStream!")
+
     val mb = cb.emb
 
     val (Some(PTypeReferenceSingleCodeType(upcastPType: PBaseStruct)), upcast) = Compile[AsmFunction2RegionLongLong](ctx,
@@ -648,6 +650,8 @@ case class PartitionNativeReader(spec: AbstractTypedCodecSpec, uidFieldName: Str
     context: EmitCode,
     requestedType: TStruct): IEmitCode = {
 
+    cb.logInfo("info PartitionNativeReader emitStream!")
+
     val mb = cb.emb
 
     val insertUID: Boolean = requestedType.hasField(uidFieldName) && !spec.encodedVirtualType.asInstanceOf[TStruct].hasField(uidFieldName)
@@ -729,6 +733,8 @@ case class PartitionNativeReaderIndexed(
     cb: EmitCodeBuilder,
     context: EmitCode,
     requestedType: TStruct): IEmitCode = {
+
+    cb.logInfo("info PartitionNativeReaderIndexed emitStream!")
 
     val mb = cb.emb
 
@@ -881,6 +887,8 @@ case class PartitionZippedNativeReader(left: PartitionReader, right: PartitionRe
   ): IEmitCode = {
     val (lRequested, rRequested) = splitRequestedType(requestedType)
 
+    cb.logInfo("info PartitionZippedNativeReader emitStream!")
+
     context.toI(cb).flatMap(cb) { case zippedContext: SBaseStructValue =>
       val ctx1 = EmitCode.fromI(cb.emb)(zippedContext.loadField(_, "leftContext"))
       val ctx2 = EmitCode.fromI(cb.emb)(zippedContext.loadField(_, "rightContext"))
@@ -1004,6 +1012,8 @@ case class PartitionZippedIndexedNativeReader(specLeft: AbstractTypedCodecSpec, 
     val rightOffsetFieldIndex = indexSpecRight.offsetFieldIndex
 
     val index = new StagedIndexReader(cb.emb, indexSpecLeft)
+
+    cb.logInfo("info PartitionZippedIndexedNativeReader emitStream!")
 
     context.toI(cb).map(cb) { case ctxStruct: SBaseStructValue =>
 
