@@ -296,7 +296,7 @@ class EmitCodeBuilder(val emb: EmitMethodBuilder[_], var code: Code[Unit]) exten
   }
 
   def workerInfo(cs: Code[String]*): Unit = {
-    val s = cs.reduce[Code[String]] { case (l, r) => (l.concat(r)) }
+    val s = memoize(cs.reduce[Code[String]] { case (l, r) => (l.concat(r)) }, "workerInfoString")
     this.println(const("println ").concat(s))
     this.logInfo(const("info ").concat(s))
     this.warning(const("warning ").concat(s))
