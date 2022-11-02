@@ -296,7 +296,12 @@ class EmitCodeBuilder(val emb: EmitMethodBuilder[_], var code: Code[Unit]) exten
   }
 
   def workerInfo(cs: Code[String]*): Unit = {
-    this += Code.invokeScalaObject1[String, Unit](WorkerTimer.getClass, "info", cs.reduce[Code[String]] { case (l, r) => (l.concat(r)) })
+    val s = cs.reduce[Code[String]] { case (l, r) => (l.concat(r)) }
+    this.println(const("println ").concat(s))
+    this.logInfo(const("info ").concat(s))
+    this.warning(const("warning ").concat(s))
+    this.consoleInfo(const("consoleInfo ").concat(s))
+    this += Code.invokeScalaObject1[String, Unit](WorkerTimer.getClass, "info", s)
   }
 
   def warning(cs: Code[String]*): Unit = {
