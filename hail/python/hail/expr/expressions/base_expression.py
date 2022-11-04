@@ -1065,7 +1065,14 @@ class Expression(object):
             entries, cols = Env.get_uid(), Env.get_uid()
             t = ds.select_cols().localize_entries(entries, cols)
             t = t.order_by(*t.key)
-            output_col_name = Env.get_uid()
+            if header:
+                col_key = t[cols]
+                if len(ds.col_key) == 1:
+                    col_key = hl.map(lambda x: x[0], col_key)
+                column_names = hl.map(hl.str, col_key).collect()[0]
+                output_col_name = delimiter.join(column_names)
+            else:
+                output_col_name = Env.get_uid()
             entry_array = t[entries]
             if self_name:
                 entry_array = hl.map(lambda x: x[self_name], entry_array)
@@ -1074,16 +1081,7 @@ class Expression(object):
             file_contents = t.select(
                 **{k: hl.str(t[k]) for k in ds.row_key},
                 **{output_col_name: hl.delimit(entry_array, delimiter)})
-            if header:
-                col_key = t[cols]
-                if len(ds.col_key) == 1:
-                    col_key = hl.map(lambda x: x[0], col_key)
-                column_names = hl.map(hl.str, col_key).collect(_localize=False)[0]
-                header_table = hl.utils.range_table(1).key_by().select(
-                    **{k: k for k in ds.row_key},
-                    **{output_col_name: hl.delimit(column_names, delimiter)})
-                file_contents = header_table.union(file_contents)
-            file_contents.export(path, delimiter=delimiter, header=False, parallel=parallel, types_file=types_file)
+            file_contents.export(path, delimiter=delimiter, header=header, parallel=parallel, types_file=types_file)
 
     @typecheck_method(n=int, _localize=bool)
     def take(self, n, _localize=True):

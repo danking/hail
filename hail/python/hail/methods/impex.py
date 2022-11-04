@@ -1,12 +1,13 @@
 import json
 import os
 import re
-from typing import List
+from typing import List, Union
 
 import avro.schema
 from avro.datafile import DataFileReader
 from avro.io import DatumReader
 import hail as hl
+from collections import defaultdict
 from hail import ir
 from hail.expr import StructExpression, LocusExpression, \
     expr_array, expr_float64, expr_str, expr_numeric, expr_call, expr_bool, \
@@ -1989,40 +1990,45 @@ def import_matrix_table(paths,
     """
     row_key = wrap_to_list(row_key)
     comment = wrap_to_list(comment)
-    paths = [hl.current_backend().fs.canonicalize_path(p) for p in wrap_to_list(paths)]
     missing_list = wrap_to_list(missing)
 
-    def comment_filter(table):
-        return hl.rbind(hl.array(comment),
-                        lambda hl_comment: hl_comment.any(lambda com: hl.if_else(hl.len(com) == 1,
-                                                                                 table.text.startswith(com),
-                                                                                 table.text.matches(com, False)))) \
-            if len(comment) > 0 else False
+    def comment_filter(table: hl.Table) -> Union[hl.Expression, bool]:
+        if len(comment) > 0:
+            def is_commented_line(comment_re):
+                return hl.if_else(
+                    hl.len(comment_re) == 1,
+                    table.text.startswith(comment_re),
+                    table.text.matches(comment_re, False)
+                )
+            return hl.array(comment).any(is_commented_line)
+        return False
 
-    def truncate(string_array, delim=", "):
+    def truncate(string_array: List[str], delim: str = ", ") -> str:
         if len(string_array) > 10:
             string_array = string_array[:10]
             string_array.append("...")
         return delim.join(string_array)
 
-    path_to_index = {path: idx for idx, path in enumerate(paths)}
+    def format_file(file_name: Union[str, hl.StringExpression], hl_value: bool = False):
+        path_components = file_name.split('/')
+        if isinstance(file_name, hl.Expression):
+            return hl.if_else(
+                hl.len(path_components) > 4,
+                path_components[-4:]
+                file_name
+            )
+        if len(path_components) > 4:
+            return '/'.join(path_components[-4:])
+        return file_name
 
-    def format_file(file_name, hl_value=False):
-        if hl_value:
-            return hl.rbind(file_name.split('/'), lambda split_file:
-                            hl.if_else(hl.len(split_file) <= 4, hl.str("/").join(file_name.split('/')[-4:]),
-                                       hl.str("/") + hl.str("/").join(file_name.split('/')[-4:])))
-        else:
-            return "/".join(file_name.split('/')[-3:]) if len(file_name) <= 4 else \
-                "/" + "/".join(file_name.split('/')[-3:])
-
+    # FIXME
     file_start_array = None
-
     def get_file_start(row):
         nonlocal file_start_array
         if file_start_array is None:
-            collect_expr = first_lines_table.collect(_localize=False).map(lambda line: (line.file, line.idx))
-            file_start_array = hl.literal(hl.eval(collect_expr), dtype=collect_expr.dtype)
+            file_start_array = first_lines_table.select(
+                file_start = (first_lines_table.file, first_lines_table.idx)
+            ).file_start.collect(_localize=False)
         return hl.coalesce(
             file_start_array.filter(lambda line_tuple: line_tuple[0] == row.file).map(
                 lambda line_tuple: line_tuple[1]).first(),
@@ -2129,46 +2135,87 @@ def import_matrix_table(paths,
     ht = import_lines(paths, min_partitions, force_bgz=force_bgz).add_index(name='row_id')
     # for checking every header matches
     file_per_partition = import_lines(paths, force_bgz=force_bgz, file_per_partition=True)
-    file_per_partition = file_per_partition.filter(hl.bool(hl.len(file_per_partition.text) == 0)
-                                                   | comment_filter(file_per_partition), False)
-    first_lines_table = file_per_partition._map_partitions(lambda rows: rows[:1])
-    first_lines_table = first_lines_table.annotate(split_array=first_lines_table.text.split(delimiter)).add_index()
+    file_per_partition = file_per_partition.filter(comment_filter(file_per_partition), keep=False)
+    file_per_partition = file_per_partition.annotate(values=file_per_partition.text.split(delimiter))
+
+    heads = file_per_partition.select('file', 'values')._map_partitions(lambda rows: rows[:2]).collect()
+
+    if all(len(x) == 0 for x in heads):
+        raise ValueError('All files are empty.')
+
+    if no_header:
+        rows = [x[0] for x in heads if len(x) > 0]
+        n_values_to_file = defaultdict(list)
+        for row in rows:
+            n_values_to_file[len(row.values)].append(row.file)
+        if len(n_values_to_file) > 1:
+            raise ValueError(f'Files do not have the same number of entries. Found: {n_values_to_file}.')
+        n_found_values = list(n_values_to_file)[0]
+        if n_found_values > num_of_row_fields:
+            raise ValueError(f'Every file has {n_found_values} values per line but we expect '
+                             f'at least {num_of_row_fields} row values.')
+        row_fields = [f'f{i}' for i in range(n_found_row_fields)]
+        col_keys = list(range(n_found_row_fields)
+    else:
+        headers = [x[0] for x in heads if len(x) > 0]
+        header_to_file = defaultdict(list)
+        for header in headers:
+            header_to_file[tuple(header.values)].append(header.file)
+        if len(header_to_file) > 1:
+            raise ValueError(f'Files do not share the same header. Found: {header_to_file}')
+
 
     if not no_header:
         def validate_header_get_info_dict():
-            two_first_lines = file_per_partition.head(2)
-            two_first_lines = two_first_lines.annotate(split_array=two_first_lines.text.split(delimiter)).collect()
-            header_line = two_first_lines[0] if two_first_lines else None
-            first_data_line = two_first_lines[1] if len(two_first_lines) > 1 else None
-            num_of_data_line_values = len(first_data_line.split_array) if len(two_first_lines) > 1 else 0
-            num_of_header_values = len(header_line.split_array) if two_first_lines else 0
-            if header_line is None or path_to_index[header_line.file] != 0:
-                raise ValueError(f"Expected header in every file but found empty file: {format_file(paths[0])}")
-            elif not first_data_line or first_data_line.file != header_line.file:
-                hl.utils.warning(f"File {format_file(header_line.file)} contains a header, but no lines of data")
-                if num_of_header_values < num_of_data_line_values:
-                    raise ValueError(f"File {format_file(header_line.file)} contains one line assumed to be the header."
-                                     f"The header had a length of {num_of_header_values} while the number"
-                                     f"of row fields is {num_of_row_fields}")
-                user_row_fields = header_line.split_array[:num_of_row_fields]
-                column_ids = header_line.split_array[num_of_row_fields:]
-            elif num_of_data_line_values != num_of_header_values:
-                if num_of_data_line_values == num_of_header_values + num_of_row_fields:
-                    user_row_fields = ["f" + str(f_idx) for f_idx in list(range(0, num_of_row_fields))]
-                    column_ids = header_line.split_array
-                else:
-                    raise ValueError(
-                        f"In file {format_file(header_line.file)}, expected the header line to match either:\n"
-                        f"rowField0 rowField1 ... rowField${num_of_row_fields} colId0 colId1 ...\nor\n"
-                        f" colId0 colId1 ...\nInstead the first two lines were:\nInstead the first two lin"
-                        f"es were:\n{header_line.text}\n{first_data_line.text}\nThe first line contained"
-                        f" {num_of_header_values} separated values and the second line"
-                        f" contained {num_of_data_line_values}")
+            two_first_lines = file_per_partition.head(2).collect()
+
+            try:
+                header_line = two_first_lines[0]
+            except IndexError:
+                raise ValueError(f'All files are empty.')
+
+            n_header_values = len(header_line.split_array)
+            file_name = header_line.file
+
+            try:
+                first_data_line = two_first_lines[1]
+            except IndexError:
+                hl.utils.warning('Files contain a header but no data.')
+                n_data_line_values = 0
             else:
-                user_row_fields = header_line.split_array[:num_of_row_fields]
-                column_ids = header_line.split_array[num_of_row_fields:]
-            return {'text': header_line.text, 'header_values': header_line.split_array, 'path': header_line.file,
-                    'row_fields': user_row_fields, 'column_ids': column_ids}
+                n_data_line_values = len(first_data_line.split_array)
+
+            if n_data_line_values == n_header_values:
+                return {
+                    'text': header_line.text,
+                    'header_values': header_line.split_array,
+                    'path': file_name,
+                    'row_fields': header_line.split_array[:num_of_row_fields],
+                    'column_ids': header_line.split_array[num_of_row_fields:]
+                }
+            elif n_data_line_values == n_header_values + num_of_row_fields:
+                return {
+                    'text': header_line.text,
+                    'header_values': header_line.split_array,
+                    'path': file_name,
+                    'row_fields': [f'f{i}' for i in range(num_of_row_fields)],
+                    'column_ids': header_line.split_array
+                }
+            else:
+                lines_indented = "\n".join("    " + line for line in two_first_lines)
+                raise ValueError(f'''Expected header line to match either:
+    rowField0 rowField1 ... rowField{num_of_row_fields} colId0 colid1 ...
+
+or
+
+    colId0 colId1 ...
+
+Instead we found:
+
+{lines_indented}
+
+containing {n_header_values} header columns and {n_data_line_values} data values
+''')
 
         def warn_if_duplicate_col_ids():
             time_col_id_encountered_dict = {}
@@ -2217,23 +2264,17 @@ def import_matrix_table(paths,
         header_dict = validate_header_get_info_dict()
         warn_if_duplicate_col_ids()
         validate_all_headers()
-
     else:
-        first_line = first_lines_table.head(1).collect()
-        if not first_line or path_to_index[first_line[0].file] != 0:
-            hl.utils.warning(
-                f"File {format_file(paths[0])} is empty and has no header, so we assume no columns")
-            header_dict = {'header_values': [],
-                           'row_fields': ["f" + str(f_idx) for f_idx in list(range(0, num_of_row_fields))],
-                           'column_ids': []
-                           }
-        else:
-            first_line = first_line[0]
-            header_dict = {'header_values': [],
-                           'row_fields': ["f" + str(f_idx) for f_idx in list(range(0, num_of_row_fields))],
-                           'column_ids':
-                               [col_id for col_id in list(range(0, len(first_line.split_array) - num_of_row_fields))]
-                           }
+        lines = first_lines_table.head(1).collect()
+        try:
+            first_line = lines[0]
+        except IndexError:
+            raise ValueError('All files are empty.')
+        header_dict = {
+            'header_values': [],
+            'row_fields': [f'f{i}' for i in range(num_of_row_fields)],
+            'column_ids': [str(i) for i in range(len(first_line.split_array) - num_of_row_fields)]
+        }
 
     validate_row_fields()
     header_filter = ht.text == header_dict['text'] if not no_header else False
