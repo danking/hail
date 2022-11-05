@@ -53,7 +53,7 @@ object StringTableReader {
 case class StringTablePartitionReader(lines: GenericLines, uidFieldName: String) extends PartitionReader{
   override def contextType: Type = lines.contextType
 
-  override def fullRowType: TStruct = TStruct("file"-> TString, "text"-> TString, uidFieldName -> TTuple(TInt64, TInt64))
+  override def fullRowType: TStruct = TStruct("file" -> TString, "text" -> TString, uidFieldName -> TTuple(TInt64, TInt64))
 
   override def rowRequiredness(requestedType: TStruct): RStruct = {
     val req = BaseTypeWithRequiredness(requestedType).asInstanceOf[RStruct]
