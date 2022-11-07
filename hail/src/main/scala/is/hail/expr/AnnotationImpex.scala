@@ -140,7 +140,7 @@ object JSONAnnotationImpex {
       }
     }
 
-  def irImportAnnotation(s: String, t: Type, warnContext: mutable.HashSet[String]): Row = {
+  def parseJSON(s: String, t: Type, warnContext: mutable.HashSet[String]): Row = {
     try {
       // wraps in a Row to handle returned missingness
       Row(importAnnotation(JsonMethods.parse(s), t, true, warnContext))
@@ -150,12 +150,26 @@ object JSONAnnotationImpex {
     }
   }
 
-  def importAnnotation(jv: JValue, t: Type, padNulls: Boolean = true, warnContext: mutable.HashSet[String] = null): Annotation =
-    importAnnotationInternal(jv, t, "<root>", padNulls, if (warnContext == null) new mutable.HashSet[String] else warnContext)
+  def parseJSONReturnExceptions(s: String, t: Type, warnContext: mutable.HashSet[String]): Row = {
+    try {
+      // wraps in a Row to handle returned missingness
+      val v = importAnnotation(JsonMethods.parse(s), t, true, warnContext, warningsAreErrors=true)
+      Row(v, null)
+    } catch {
+      case e: Throwable =>
+        Row(null, s"Error parsing JSON:\n  type: $t\n  value: $s, cause: $e: ${e.getMessage()}")
+    }
+  }
 
-  private def importAnnotationInternal(jv: JValue, t: Type, parent: String, padNulls: Boolean, warnContext: mutable.HashSet[String]): Annotation = {
-    def imp(jv: JValue, t: Type, parent: String): Annotation = importAnnotationInternal(jv, t, parent, padNulls, warnContext)
+  def importAnnotation(jv: JValue, t: Type, padNulls: Boolean = true, warnContext: mutable.HashSet[String] = null, warningsAreErrors: Boolean = false): Annotation =
+    importAnnotationInternal(jv, t, "<root>", padNulls, if (warnContext == null) new mutable.HashSet[String] else warnContext, warningsAreErrors)
+
+  private def importAnnotationInternal(jv: JValue, t: Type, parent: String, padNulls: Boolean, warnContext: mutable.HashSet[String], warningsAreErrors: Boolean = false): Annotation = {
+    def imp(jv: JValue, t: Type, parent: String): Annotation = importAnnotationInternal(jv, t, parent, padNulls, warnContext, warningsAreErrors)
     def warnOnce(msg: String, path: String): Unit = {
+      if (warningsAreErrors) {
+        fatal(path + ": " + msg)
+      }
       if (!warnContext.contains(path)) {
         warn(msg)
         warnContext += path

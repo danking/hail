@@ -484,8 +484,21 @@ object StringFunctions extends RegistryFunctions {
       val warnCtx = cb.emb.genFieldThisRef[mutable.HashSet[String]]("parse_json_context")
       cb.ifx(warnCtx.load().isNull, cb.assign(warnCtx, Code.newInstance[mutable.HashSet[String]]()))
 
-      val row = Code.invokeScalaObject3[String, Type, mutable.HashSet[String], Row](JSONAnnotationImpex.getClass, "irImportAnnotation",
+      val row = Code.invokeScalaObject3[String, Type, mutable.HashSet[String], Row](JSONAnnotationImpex.getClass, "parseJSON",
         s.loadString(cb), er.mb.ecb.getType(resultType.virtualType.asInstanceOf[TTuple].types(0)), warnCtx)
+
+      unwrapReturn(cb, er.region, resultType, row)
+    }
+
+    registerSCode("parse_json_return_exceptions", Array(TString), TStruct("val" -> tv("T"), "err" -> TString),
+      (rType: Type, _: Seq[SType]) => SType.canonical(rType), typeParameters = Array(tv("T"))
+    ) { case (er, cb, _, resultType, Array(s: SStringValue), _) =>
+
+      val warnCtx = cb.emb.genFieldThisRef[mutable.HashSet[String]]("parse_json_context")
+      cb.ifx(warnCtx.load().isNull, cb.assign(warnCtx, Code.newInstance[mutable.HashSet[String]]()))
+
+      val row = Code.invokeScalaObject3[String, Type, mutable.HashSet[String], Row](JSONAnnotationImpex.getClass, "parseJSONReturnExceptions",
+        s.loadString(cb), er.mb.ecb.getType(resultType.virtualType.asInstanceOf[TBaseStruct].types(0)), warnCtx)
 
       unwrapReturn(cb, er.region, resultType, row)
     }

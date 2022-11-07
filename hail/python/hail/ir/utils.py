@@ -126,24 +126,36 @@ def make_filter_and_replace(filter, find_replace):
     }
 
 
-def parse_type(string_expr, ttype):
+def parse_type(string_expr, ttype, *, invalid_missing: bool = True):
     if ttype == hl.tstr:
         return string_expr
     elif ttype == hl.tint32:
+        if invalid_missing:
+            return hl.parse_int32(string_expr)
         return hl.int32(string_expr)
     elif ttype == hl.tint64:
+        if invalid_missing:
+            return hl.parse_int64(string_expr)
         return hl.int64(string_expr)
     elif ttype == hl.tfloat32:
+        if invalid_missing:
+            return hl.parse_float32(string_expr)
         return hl.float32(string_expr)
     elif ttype == hl.tfloat64:
+        if invalid_missing:
+            return hl.parse_float64(string_expr)
         return hl.float64(string_expr)
     elif ttype == hl.tbool:
+        if invalid_missing:
+            return hl.parse_bool(string_expr)
         return hl.bool(string_expr)
     elif ttype == hl.tcall:
-        return hl.parse_call(string_expr)
+        return hl.parse_call(string_expr, invalid_missing=invalid_missing)
     elif isinstance(ttype, hl.tlocus):
-        return hl.parse_locus(string_expr, ttype.reference_genome)
+        return hl.parse_locus(string_expr, ttype.reference_genome, invalid_missing=invalid_missing)
     elif isinstance(ttype, hl.tinterval) and isinstance(ttype.point_type, hl.tlocus):
-        return hl.parse_locus_interval(string_expr, ttype.point_type.reference_genome)
+        return hl.parse_locus_interval(string_expr, ttype.point_type.reference_genome, invalid_missing=invalid_missing)
     else:
+        if invalid_missing:
+            return hl.parse_json(string_expr, ttype, return_exceptions=True).val
         return hl.parse_json(string_expr, ttype)

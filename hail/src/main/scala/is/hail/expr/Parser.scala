@@ -84,6 +84,13 @@ object Parser extends JavaTokenParsers {
     }
   }
 
+  def parseCallOrMissing(input: String): BoxedCall = {
+    parseAll[Call](call, input) match {
+      case Success(r, _) => r
+      case NoSuccess(msg, next) => null
+    }
+  }
+
   def oneOfLiteral(a: Array[String]): Parser[String] = new Parser[String] {
     private[this] val root = ParseTrieNode.generate(a)
 

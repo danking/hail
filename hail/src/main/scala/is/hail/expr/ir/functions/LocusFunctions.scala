@@ -233,6 +233,27 @@ object LocusFunctions extends RegistryFunctions {
           rt)
     }
 
+    registerSCode1("LocusOrMissing", TString, TTuple(tlocus("T")), { (_returnType: Type, _: SType) =>
+      val returnType = _returnType.asInstanceOf[TBaseStruct]
+      val locusSType = PCanonicalLocus(returnType.types(0).asInstanceOf[TLocus].rg).sType
+      SStackStruct(returnType, FastIndexedSeq(EmitType(locusSType, false)))
+    }) {
+      case (r, cb, rt@SStackStruct(_, IndexedSeq(EmitType(SCanonicalLocusPointer(locusPType: PCanonicalLocus), false))), str: SStringValue, _) =>
+        val slocus = str.loadString(cb)
+        val maybeLocus = cb.newLocal[Locus]("maybeLocus",
+          Code.invokeScalaObject2[String, ReferenceGenome, Locus](locusClass, "parseOrMissing", slocus, rgCode(r.mb, locusPType.rg))
+        )
+        rt.fromEmitCodes(cb, FastIndexedSeq(EmitCode.fromI(cb.emb) { cb =>
+          IEmitCode(cb,
+            maybeLocus.load().isNull,
+            emitLocus(cb,
+              r.region,
+              maybeLocus,
+              locusPType)
+          )
+        }))
+    }
+
     registerSCode2("Locus", TString, TInt32, tlocus("T"), {
       (returnType: Type, _: SType, _: SType) => PCanonicalLocus(returnType.asInstanceOf[TLocus].rg).sType
     }) {

@@ -1814,7 +1814,7 @@ def import_lines(paths, min_partitions=None, force_bgz=False, force=False, file_
 @typecheck(paths=oneof(str, sequenceof(str)),
            row_fields=dictof(str, hail_type),
            row_key=oneof(str, sequenceof(str)),
-           entry_type=enumeration(tint32, tint64, tfloat32, tfloat64, tstr),
+           entry_type=hail_type,
            missing=str,
            min_partitions=nullable(int),
            no_header=bool,
@@ -2038,16 +2038,16 @@ def import_matrix_table(paths,
 
     ht = import_lines(paths, force_bgz=force_bgz, file_per_partition=True)
     ht = ht.filter(comment_filter(ht), keep=False)
-    ht = ht.select(file=ht.file, values=ht.text.split(delimiter))
+    ht = ht.select(file=ht.file, vals=ht.text.split(delimiter))
 
-    file_info = ht._map_partitions(lambda rows: hl.struct(head=rows[:2], n_lines=hl.len(rows))).collect()
+    file_info = ht._map_partitions(lambda rows: [hl.struct(rows=rows[:2], n_lines=hl.len(rows))]).collect()
     file_info = [x for x in file_info if x.n_lines > 0]
 
     if len(file_info) == 0:
         raise ValueError('All files are empty.')
 
-    heads = [x.head for x in file_info]
-    file_sizes = {x.head[0].file: x.n_lines for x in file_info}
+    file_peeks = [x.rows for x in file_info]
+    file_sizes = {x.rows[0].file: x.n_lines for x in file_info}
     total_n_lines = 0
     cumsum_file_sizes = {}
     for filename, size in file_sizes.items():
@@ -2056,15 +2056,16 @@ def import_matrix_table(paths,
     hl_cumsum_file_sizes = hl.literal(cumsum_file_sizes)
 
     def get_line(row: hl.Table) -> hl.Expression:
-        return row.row_id - hl_cumsum_file_sizes(row.file)
+        return row.row_id - hl_cumsum_file_sizes[row.file]
 
+    header = None
     if no_header:
-        rows = [x[0] for x in heads if len(x) > 0]
+        rows = [x[0] for x in file_peeks if len(x) > 0]
         n_values_to_file = defaultdict(list)
         for row in rows:
-            n_values_to_file[len(row.values)].append(row.file)
+            n_values_to_file[len(row.vals)].append(row.file)
         if len(n_values_to_file) > 1:
-            raise ValueError(f'Files do not have the same number of values per line. Found: {n_values_to_file}.')
+            raise ValueError(f'Files do not have the same number of values per line. Found: {dict(n_values_to_file)}.')
 
         n_actual_values = list(n_values_to_file)[0]
         if num_of_row_fields > n_actual_values:
@@ -2072,43 +2073,39 @@ def import_matrix_table(paths,
 
         actual_row_field_names = [f'f{i}' for i in range(n_actual_values)]
         col_ids = list(range(n_actual_values - num_of_row_fields))
-        header_filter = False
     else:
-        headers = [x[0] for x in heads if len(x) > 0]
+        headers = [x[0] for x in file_peeks if len(x) > 0]
         header_to_file = defaultdict(list)
         for header in headers:
-            header_to_file[tuple(header.values)].append(header.file)
+            header_to_file[tuple(header.vals)].append(header.file)
         if len(header_to_file) > 1:
-            raise ValueError(f'Files do not share the same header. Found: {header_to_file}')
+            raise ValueError(f'Files do not share the same header. Found: {dict(header_to_file)}')
 
-        header = list(header_to_file)[0]
+        header = headers[0].vals
         if num_of_row_fields > len(header):
             raise ValueError(f'Expected at least {num_of_row_fields} row values per line but header only had {len(header)} columns. Header: {format_str_list_for_print(header)}.')
 
-        data_lines = [x[1] for x in heads if len(x) > 1]
+        data_lines = [x[1] for x in file_peeks if len(x) > 1]
         n_values_to_file = defaultdict(list)
         for line in data_lines:
-            n_values_to_file[len(line.values)].append(line.file)
+            n_values_to_file[len(line.vals)].append(line.file)
         if len(n_values_to_file) > 1:
-            raise ValueError(f'Files do not have the same number of values per line. Found {n_values_to_file}.')
+            raise ValueError(f'Files do not have the same number of values per line. Found {dict(n_values_to_file)}.')
 
         if len(n_values_to_file) == 0:
             actual_row_field_names = header[:num_of_row_fields]
             col_ids = header[num_of_row_fields:]
-            header_filter = ht.text == delimiter.join(header)
         else:
             n_actual_values = list(n_values_to_file)[0]
             if n_actual_values == len(header):
                 actual_row_field_names = header[:num_of_row_fields]
                 col_ids = header[num_of_row_fields:]
-                header_filter = ht.text == delimiter.join(header)
             elif n_actual_values == len(header) + num_of_row_fields:
                 actual_row_field_names = [f'f{i}' for i in range(num_of_row_fields)]
                 col_ids = header
-                header_filter = ht.text == delimiter.join(header)
             else:
-                example_data_line = data_lines[0].values
-                lines_indented = "    " + delimiter.join(header) + '\n    ' + example_data_line
+                example_data_line = data_lines[0].vals
+                lines_indented = "    " + delimiter.join(header) + '\n    ' + delimiter.join(example_data_line)
                 raise ValueError(f'''Expected header line to match either:
 
     rowField0 rowField1 ... rowField{num_of_row_fields} colId0 colid1 ...
@@ -2134,14 +2131,14 @@ containing {len(header)} header columns and {len(example_data_line)} data values
     if duplicated_row_fields:
         raise ValueError(f"Found {len(duplicated_row_fields)} duplicate row fields in header. Duplicates: {format_str_list_for_print(duplicated_row_fields)}.")
 
-    actual_row_field_names_set = set(duplicated_row_fields)
+    actual_row_field_names_set = set(actual_row_field_names)
     row_fields_set = set(row_fields)
     if actual_row_field_names_set != row_fields_set:
         message = f'The row_fields must contain an entry for every row field and nothing else.'
         missing_in_parameter = actual_row_field_names_set - row_fields_set
         if missing_in_parameter:
             message += (f' Some fields were found in the files but not specified in '
-                        f'`row_fields`: {format_str_list_for_print(row_fields)}.')
+                        f'`row_fields`: {format_str_list_for_print(missing_in_parameter)}.')
         missing_in_file = row_fields_set - actual_row_field_names_set
         if missing_in_file:
             message += (f' Some fields were specified in `row_fields` but not found in '
@@ -2152,18 +2149,22 @@ containing {len(header)} header columns and {len(example_data_line)} data values
     n_values_per_line = n_col_ids + num_of_row_fields
 
     ht = import_lines(paths, min_partitions, force_bgz=force_bgz)
-    ht = ht.filter((hl.len(ht.text) == 0) | comment_filter(ht) | header_filter, keep=False)
-    ht = ht.annotate(values=ht.text._split_line(delimiter, missing_list, quote=None, regex=False))
-    n_actual_values_per_line = hl.len(ht.values)
+    ht = ht.add_index('row_id')
+    ht = ht.filter((hl.len(ht.text) == 0) | comment_filter(ht), keep=False)
+    if not no_header:
+        ht = ht.filter(ht.text == delimiter.join(header), keep=False)
+    ht = ht.annotate(vals=ht.text._split_line(delimiter, missing_list, quote=None, regex=False))
+    n_actual_values_per_line = hl.len(ht.vals)
     ht = ht.annotate(
-        values=(
+        vals=(
             hl.case()
-            .when(n_actual_values_per_line == n_values_per_line, ht.values)
+            .when(n_actual_values_per_line == n_values_per_line, ht.vals)
             .or_error(hl.format(
-                f'%s:%d: Expected {n_values_per_line} row fields and entries but only found %d.',
+                f'%s:%d: Expected {n_values_per_line} row fields and entries but only found %d. Line: %s.',
                 ht.file,
                 get_line(ht),
-                n_actual_values_per_line
+                n_actual_values_per_line,
+                ht.text
             ))
         )
     )
@@ -2196,7 +2197,7 @@ containing {len(header)} header columns and {len(example_data_line)} data values
     row_field_index = {name: index for index, name in enumerate(actual_row_field_names)}
     for name, dtype in row_fields.items():
         final_fields[name] = parse_with_nice_error_message(
-            ht.values[row_field_index[name]],
+            ht.vals[row_field_index[name]],
             ht,
             dtype,
             'row field'
@@ -2204,7 +2205,7 @@ containing {len(header)} header columns and {len(example_data_line)} data values
 
     def parse_entry(idx: hl.Expression) -> hl.Expression:
         return hl.struct(x=parse_with_nice_error_message(
-            ht.values[idx],
+            ht.vals[idx],
             ht,
             entry_type,
             'entry for column'

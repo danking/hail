@@ -201,6 +201,8 @@ object Call extends Serializable {
 
   def parse(s: String): Call = Parser.parseCall(s)
 
+  def parseOrMissing(s: String): BoxedCall = Parser.parseCallOrMissing(s)
+
   def toString(c: Call): String = {
     val phased = isPhased(c)
     val sep = if (phased) "|" else "/"

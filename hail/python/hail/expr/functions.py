@@ -1050,8 +1050,9 @@ def locus_from_global_position(global_pos,
 
 
 @typecheck(s=expr_str,
-           reference_genome=reference_genome_type)
-def parse_locus(s, reference_genome: Union[str, ReferenceGenome] = 'default') -> LocusExpression:
+           reference_genome=reference_genome_type,
+           invalid_missing=bool)
+def parse_locus(s, reference_genome: Union[str, ReferenceGenome] = 'default', *, invalid_missing: bool = False) -> LocusExpression:
     """Construct a locus expression by parsing a string or string expression.
 
     Examples
@@ -1067,15 +1068,19 @@ def parse_locus(s, reference_genome: Union[str, ReferenceGenome] = 'default') ->
 
     Parameters
     ----------
-    s : str or :class:`.StringExpression`
+    s : :class:`.str` or :class:`.StringExpression`
         String to parse.
-    reference_genome : :class:`str` or :class:`.ReferenceGenome`
+    reference_genome : :class:`.str` or :class:`.ReferenceGenome`
         Reference genome to use.
+    invalid_missing : :class:`.bool`
+        If the locus is invalid return missing instead of raising an error.
 
     Returns
     -------
     :class:`.LocusExpression`
     """
+    if invalid_missing:
+        return _func('LocusOrMissing', ttuple(tlocus(reference_genome)), s)[0]
     return _func('Locus', tlocus(reference_genome), s)
 
 
@@ -1485,8 +1490,8 @@ def unphased_diploid_gt_index_call(gt_index) -> CallExpression:
     return _func('UnphasedDiploidGtIndexCall', tcall, to_expr(gt_index))
 
 
-@typecheck(s=expr_str)
-def parse_call(s) -> CallExpression:
+@typecheck(s=expr_str, invalid_missing=bool)
+def parse_call(s, *, invalid_missing: bool = False) -> CallExpression:
     """Construct a call expression by parsing a string or string expression.
 
     Examples
@@ -1515,13 +1520,17 @@ def parse_call(s) -> CallExpression:
 
     Parameters
     ----------
-    s : str or :class:`.StringExpression`
+    s : :class:`.str` or :class:`.StringExpression`
         String to parse.
+    invalid_missing : :class:`.bool`
+        If the call is invalid return missing instead of raising an error.
 
     Returns
     -------
     :class:`.CallExpression`
     """
+    if invalid_missing:
+        return _func('CallOrMissing', ttuple(tcall), s)[0]
     return _func('Call', tcall, s)
 
 
@@ -1715,8 +1724,8 @@ def json(x) -> StringExpression:
     return _func("json", tstr, x)
 
 
-@typecheck(x=expr_str, dtype=hail_type)
-def parse_json(x, dtype):
+@typecheck(x=expr_str, dtype=hail_type, return_exceptions=bool)
+def parse_json(x, dtype, *, return_exceptions: bool = False):
     """Convert a JSON string to a structured expression.
 
     Examples
@@ -1730,13 +1739,21 @@ def parse_json(x, dtype):
     ----------
     x : :class:`.StringExpression`
         JSON string.
-    dtype
+    dtype : :class:`.str` or :class:`.HailType`
         Type of value to parse.
+    return_exceptions :class:`.bool`
+        Instead of returning the parsed expression directly, return a struct with two fields: `val`,
+        of type `dtype`, and `err`, of type `str`. If `err` is missing then the successfully parsed
+        value is `val`. If `err` is non-missing, then `err` is a string describing the failure and
+        `val` is missing.
 
     Returns
     -------
     :class:`.Expression`
+
     """
+    if return_exceptions:
+        return _func("parse_json_return_exceptions", tstruct(val=dtype, err=tstr), x, type_args=(dtype,))
     return _func("parse_json", ttuple(dtype), x, type_args=(dtype,))[0]
 
 
@@ -5395,6 +5412,37 @@ def bool(x) -> BooleanExpression:
         return x != 0
     else:
         return x._method("toBoolean", tbool)
+
+
+@typecheck(x=expr_oneof(expr_str))
+def parse_bool(x) -> BooleanExpression:
+    """Convert to a Boolean expression.
+
+    Examples
+    --------
+
+    >>> hl.eval(hl.bool('TRUE'))
+    True
+
+    >>> hl.eval(hl.bool('abc')) is None
+    True
+
+    Notes
+    -----
+    Acceptable string values are: ``'True'``, ``'true'``, ``'TRUE'``,
+    ``'False'``, ``'false'``, and ``'FALSE'``.
+
+    If the input is an invalid boolean, then result of this call will be missing.
+
+    Parameters
+    ----------
+    x : :class:`.NumericExpression` or :class:`.BooleanExpression` or :class:`.StringExpression`
+
+    Returns
+    -------
+    :class:`.BooleanExpression`
+    """
+    return x._method("toBooleanOrMissing", tbool)
 
 
 @typecheck(s=expr_str,

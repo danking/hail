@@ -1758,6 +1758,50 @@ class ImportMatrixTableTests(unittest.TestCase):
                                no_header=True,
                                row_key=[])._force_count_rows()
 
+    def test_import_matrix_table_glob(self):
+        mt = hl.import_matrix_table(resource('import-matrix-table-parallel-files/*'),
+                                    entry_type=hl.tcall,
+                                    row_fields={'locus': hl.tlocus('GRCh37'), 'alleles': hl.tarray(hl.tstr)})
+        assert mt.count() == (3, 3)
+        assert list(mt.row) == ['row_id', 'locus', 'alleles']
+        assert list(mt.col) == ['col_id']
+        assert list(mt.entry) == ['x']
+        assert mt.col_id.collect() == ['s0', 's1', 's2']
+        assert mt.x.collect() == [
+            hl.Call(alleles=[0, 1], phased=False),
+            hl.Call(alleles=[1, 1], phased=False),
+            hl.Call(alleles=[0, 1], phased=False),
+            hl.Call(alleles=[1, 1], phased=False),
+            hl.Call(alleles=[0, 1], phased=False),
+            hl.Call(alleles=[1, 1], phased=False),
+            hl.Call(alleles=[0, 1], phased=False),
+            hl.Call(alleles=[0, 0], phased=False),
+            hl.Call(alleles=[0, 0], phased=False)
+        ]
+
+    def test_import_matrix_table_glob_row_key(self):
+        mt = hl.import_matrix_table(resource('import-matrix-table-parallel-files/*'),
+                                    entry_type=hl.tcall,
+                                    row_fields={'locus': hl.tlocus('GRCh37'), 'alleles': hl.tarray(hl.tstr)},
+                                    row_key=['locus', 'alleles'])
+        assert mt.count() == (3, 3)
+        assert list(mt.row) == ['locus', 'alleles']
+        assert list(mt.row_key) == ['locus', 'alleles']
+        assert list(mt.col) == ['col_id']
+        assert list(mt.entry) == ['x']
+        assert mt.col_id.collect() == ['s0', 's1', 's2']
+        assert mt.x.collect() == [
+            hl.Call(alleles=[0, 1], phased=False),
+            hl.Call(alleles=[1, 1], phased=False),
+            hl.Call(alleles=[0, 1], phased=False),
+            hl.Call(alleles=[1, 1], phased=False),
+            hl.Call(alleles=[0, 1], phased=False),
+            hl.Call(alleles=[1, 1], phased=False),
+            hl.Call(alleles=[0, 1], phased=False),
+            hl.Call(alleles=[0, 0], phased=False),
+            hl.Call(alleles=[0, 0], phased=False)
+        ]
+
     def test_import_matrix_table_no_cols(self):
         fields = {'Chromosome': hl.tstr, 'Position': hl.tint32, 'Ref': hl.tstr, 'Alt': hl.tstr, 'Rand1': hl.tfloat64, 'Rand2': hl.tfloat64}
         file = resource('sample2_va_nomulti.tsv')
@@ -1782,12 +1826,12 @@ class ImportMatrixTableTests(unittest.TestCase):
         assert mt1._same(mt2)
 
     def test_headers_not_identical(self):
-        with pytest.raises(ValueError, match='invalid header: lengths of headers differ'):
+        with pytest.raises(ValueError, match='Files do not share the same header.'):
             hl.import_matrix_table([resource("sampleheader1.txt"), resource("sampleheader2.txt")],
                                    row_fields={'f0': hl.tstr}, row_key=['f0'])
 
     def test_headers_same_len_diff_elem(self):
-        with pytest.raises(ValueError, match='invalid header: expected elements to be identical for all input paths'):
+        with pytest.raises(ValueError, match='Files do not share the same header.'):
             hl.import_matrix_table([resource("sampleheader2.txt"),
                                    resource("sampleheaderdiffelem.txt")], row_fields={'f0': hl.tstr}, row_key=['f0'])
 
@@ -1797,22 +1841,22 @@ class ImportMatrixTableTests(unittest.TestCase):
                                    row_fields={'f0': hl.tstr},
                                    row_key=['f0']
                                    )._force_count_rows()
-        with pytest.raises(HailUserError, match='unexpected end of line while reading entries'):
+        with pytest.raises(HailUserError, match='Expected 6 row fields and entires by only found 5.'):
             boom()
 
     def test_wrong_row_field_type(self):
-        with pytest.raises(HailUserError, match="error parsing value into int32 at row field 'f0'"):
+        with pytest.raises(HailUserError, match='Cannot parse row field "f0" as int32. Found: row000000.'):
             hl.import_matrix_table(resource("sampleheader1.txt"),
                                    row_fields={'f0': hl.tint32},
                                    row_key=['f0'])._force_count_rows()
 
     def test_wrong_entry_type(self):
-        with pytest.raises(HailUserError, match="error parsing value into int32 at column id 'col000003'"):
+        with pytest.raises(HailUserError, match='Cannot parse entry for column "col000003" as int32. Found abc.'):
             hl.import_matrix_table(resource("samplenonintentries.txt"),
                                    row_fields={'f0': hl.tstr},
                                    row_key=['f0'])._force_count_rows()
 
-    def test_key_by_after_empty_key_import(self):
+    def test_key_by_after_empty_key_import1(self):
         fields = {'Chromosome':hl.tstr,
                   'Position': hl.tint32,
                   'Ref': hl.tstr,
@@ -1824,7 +1868,7 @@ class ImportMatrixTableTests(unittest.TestCase):
         mt = mt.key_rows_by('Chromosome', 'Position')
         assert 0.001 < abs(0.50965 - mt.aggregate_entries(hl.agg.mean(mt.x)))
 
-    def test_key_by_after_empty_key_import(self):
+    def test_key_by_after_empty_key_import2(self):
         fields = {'Chromosome':hl.tstr,
                   'Position': hl.tint32,
                   'Ref': hl.tstr,
@@ -1899,6 +1943,48 @@ class ImportMatrixTableTests(unittest.TestCase):
             hl.utils.Struct(foo=7, row_id=0, col_id='s1', x=1234),
             hl.utils.Struct(foo=7, row_id=0, col_id='s2', x=2345)
         ]
+
+    def test_import_matrix_table_extensively_general_parsing(self):
+        mt = hl.utils.range_matrix_table(3, 3, n_partitions=3)
+        mt = mt.annotate_rows(
+            a="abc",
+            b=123,
+            c=1 << 40,
+            d=456.0,
+            e=456.0,
+            f=hl.call(1, 2, phased=False),
+            g=hl.call(1, 2, phased=True),
+            h=hl.locus("1", 123),
+            i=False,
+            j=hl.locus_interval("1", 100, 1000),
+            k="123.1.1",
+            l="456.a",
+            m="1|abc",
+            n="1/abc",
+            o="NotAChromsome:2",
+            p="1:-5",
+            q="1:-5-100"
+        )
+        mt = mt.annotate_rows(
+            r=mt.row
+        )
+        mt = mt.key_rows_by(*list(mt.row))
+        mt = mt.annotate_entries(
+            s="abc",
+            t=hl.if_else(mt.col_idx == 0, "456.a", "456.0")
+        )
+        with hl.TemporaryDirectory(ensure_exists=False) as f:
+            mt.entry.export(f, parallel='header_per_shard')
+            mt2 = hl.import_matrix_table(
+                f + '/*',
+                row_fields={f: mt.row[f].dtype for f in mt.row},
+                entry_type=mt.entry.dtype,
+                row_key=[f for f in mt.row_key]
+            )
+            mt2 = mt2.key_cols_by(col_idx = hl.int(mt2.col_id))
+            mt2 = mt2.select_cols()
+            mt2 = mt2.select_entries(**mt2.x)
+            assert mt._same(mt2)
 
 
 @pytest.mark.parametrize("entry_fun", [hl.str, hl.int32, hl.float64])

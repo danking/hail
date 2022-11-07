@@ -43,11 +43,20 @@ object Locus {
   def parse(str: String, rg: ReferenceGenome): Locus = {
     val elts = str.split(":")
     val size = elts.length
-    if (size < 2)
+    if (size < 2) {
       fatal(s"Invalid string for Locus. Expecting contig:pos -- found '$str'.")
+    }
 
     val contig = elts.take(size - 1).mkString(":")
     Locus(contig, elts(size - 1).toInt, rg)
+  }
+
+  def parseOrMissing(str: String, rg: ReferenceGenome): Locus = {
+    try {
+      parse(str, rg)
+    } catch {
+      case exc: HailException => null
+    }
   }
 
   def parseInterval(str: String, rg: ReferenceGenome, invalidMissing: Boolean = false): Interval =

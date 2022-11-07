@@ -1,19 +1,37 @@
 package is.hail.expr.ir.functions
 
 import is.hail.asm4s.Code
+import is.hail.expr.ir._
 import is.hail.types.physical.stypes._
-import is.hail.types.physical.stypes.concrete.{SCanonicalCall, SIndexablePointer}
+import is.hail.types.physical.stypes.concrete._
 import is.hail.types.physical.stypes.interfaces._
 import is.hail.types.physical.stypes.primitives.{SBoolean, SInt32}
 import is.hail.types.physical.{PCanonicalArray, PInt32}
 import is.hail.types.virtual._
 import is.hail.variant._
+import is.hail.utils._
 
 import scala.reflect.classTag
 
 object CallFunctions extends RegistryFunctions {
   def registerAll() {
     registerWrappedScalaFunction1("Call", TString, TCall, (rt: Type, st: SType) => SCanonicalCall)(Call.getClass, "parse")
+
+    registerSCode1("CallOrMissing", TString, TTuple(TCall),
+      (rt: Type, _: SType) => SStackStruct(TTuple(TCall), FastIndexedSeq(EmitType(SCanonicalCall, false)))
+    ) {
+      case (r, cb, rt: SStackStruct, str: SStringValue, _) =>
+        val scall = str.loadString(cb)
+        val maybeCall = cb.newLocal[BoxedCall]("maybeCall",
+          Code.invokeScalaObject1[String, BoxedCall](Call.getClass, "parseOrMissing", scall)
+        )
+        rt.fromEmitCodes(cb, FastIndexedSeq(EmitCode.fromI(cb.emb) { cb =>
+          IEmitCode(cb,
+            maybeCall.load().isNull,
+            SCanonicalCall.constructFromIntRepr(cb, maybeCall.invoke[Int]("intValue"))
+          )
+        }))
+    }
 
     registerSCode1("callFromRepr", TInt32, TCall, (rt: Type, _: SType) => SCanonicalCall) {
       case (er, cb, rt, repr, _) => SCanonicalCall.constructFromIntRepr(cb, repr.asInt.value)

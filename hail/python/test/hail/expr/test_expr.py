@@ -321,6 +321,44 @@ class Tests(unittest.TestCase):
 
         self.assertTrue(all([expected_schema[f] == t for f, t in kt.row.dtype.items()]))
 
+    def test_parse_locus(self):
+        valid_locus_1, valid_locus_2 = hl.eval((
+            hl.parse_locus("1:2312"),
+            hl.parse_locus("1:2312", invalid_missing=True)
+        ))
+        assert valid_locus_1 == hl.Locus("1", 2312)
+        assert valid_locus_2 == hl.Locus("1", 2312)
+
+        try:
+            hl.eval(hl.parse_locus("1.2"))
+            assert False
+        except Exception as err:
+            assert "Invalid string for Locus. Expecting contig:pos -- found '1.2'." in str(err)
+
+        try:
+            hl.eval(hl.parse_locus("NotAChromsome:2312"))
+            assert False
+        except Exception as err:
+            assert "Invalid locus 'NotAChromsome:2312' found. Contig 'NotAChromsome' is not in the reference genome 'GRCh37'." in str(err)
+
+        try:
+            hl.eval(hl.parse_locus("1:-5"))
+            assert False
+        except Exception as err:
+            assert "Invalid locus '1:-5' found. Position '-5' is not within the range [1-249250621] for reference genome 'GRCh37'." in str(err)
+
+        invalid_loci = hl.eval((
+            hl.parse_locus("1.2", invalid_missing=True),
+            hl.parse_locus("NotAChromsome:2312", invalid_missing=True),
+            hl.parse_locus("1:-5", invalid_missing=True)
+        ))
+        assert invalid_loci == (None, None, None)
+
+        ht = hl.Table.parallelize([hl.Struct(x=x) for x in ["X:343", "1.2", "NotAChromosome", "1:-5", "1:5"]], n_partitions=4)
+        actual = ht.annotate(x = hl.parse_locus(ht.x, invalid_missing=True)).x.collect()
+        expected = [hl.Locus("X", 343), None, None, None, hl.Locus("1", 5)]
+        assert actual == expected
+
     def test_floating_point(self):
         self.assertEqual(hl.eval(1.1e-15), 1.1e-15)
 
@@ -2331,8 +2369,7 @@ class Tests(unittest.TestCase):
         a1 = 2
         phased = hl.literal(True)
         call_expr_2 = hl.call(a0, a1, phased=phased)
-        call_expr_3 = hl.parse_call("1|2")
-        call_expr_4 = hl.unphased_diploid_gt_index_call(2)
+        call_expr_3 = hl.unphased_diploid_gt_index_call(2)
 
         _test_many_equal_typed([
             (c2_homref.ploidy, 2, tint32),
@@ -2384,12 +2421,30 @@ class Tests(unittest.TestCase):
             (call_expr_2.ploidy, 2, tint32),
 
             (call_expr_3[0], 1, tint32),
-            (call_expr_3[1], 2, tint32),
-            (call_expr_3.ploidy, 2, tint32),
+            (call_expr_3[1], 1, tint32),
+            (call_expr_3.ploidy, 2, tint32)])
 
-            (call_expr_4[0], 1, tint32),
-            (call_expr_4[1], 1, tint32),
-            (call_expr_4.ploidy, 2, tint32)])
+    def test_parse_call(self):
+        valid_call_1, valid_call_2 = hl.eval((
+            hl.parse_call("1|2"),
+            hl.parse_call("1|2", invalid_missing=True)
+        ))
+        assert valid_call_1 == hl.Call([1, 2], phased=True)
+        assert valid_call_2 == hl.Call([1, 2], phased=True)
+
+        try:
+            invalid_call = hl.eval(hl.parse_call("1.2"))
+            assert False
+        except Exception as err:
+            assert "invalid call expression: '1.2': end of input expected" in str(err)
+
+        invalid_call = hl.eval(hl.parse_call("1.2", invalid_missing=True))
+        assert invalid_call is None
+
+        ht = hl.Table.parallelize([hl.Struct(x=x) for x in ["1|2", "1.2", "abc", "0/1"]], n_partitions=4)
+        actual = ht.annotate(x = hl.parse_call(ht.x, invalid_missing=True)).x.collect()
+        expected = [hl.Call([1, 2], phased=True), None, None, hl.Call([0, 1], phased=False)]
+        assert actual == expected
 
     def test_call_unphase(self):
 
@@ -2840,11 +2895,11 @@ class Tests(unittest.TestCase):
                                             row_fields={'locus': hl.tstr,
                                                         'alleles': hl.tstr},
                                             row_key=['locus', 'alleles'],
-                                            entry_type=hl.tstr)
+                                            entry_type=hl.tcall)
             actual = actual.rename({'col_id': 's'})
             actual = actual.key_rows_by(locus = hl.parse_locus(actual.locus),
                                         alleles = actual.alleles.replace('"', '').replace(r'\[', '').replace(r'\]', '').split(','))
-            actual = actual.transmute_entries(GT = hl.parse_call(actual.x))
+            actual = actual.transmute_entries(GT = actual.x)
             expected = mt.select_cols().select_globals().select_rows()
             expected.show()
             actual.show()
@@ -3803,6 +3858,51 @@ class Tests(unittest.TestCase):
             hl.tuple([1, 2, 'str'])
         ]
         assert hl.eval(hl._compare(hl.tuple(values), hl.tuple(hl.parse_json(hl.json(v), v.dtype) for v in values)) == 0)
+
+    def test_parse_json_return_exceptions(self):
+        try:
+            hl.eval(hl.parse_json("1.3.", dtype='int'))
+            assert False
+        except Exception as err:
+            assert ('Error parsing JSON:\n  type: int32\n  value: 1.3.' in str(err))
+
+        actual = hl.eval(hl.parse_json("1.3.", dtype='int', return_exceptions=True))
+        assert actual.val is None
+        assert ('Error parsing JSON:\n  type: int32\n  value: 1.3.' in actual.err)
+
+        ht = hl.Table.parallelize([hl.Struct(x=x) for x in ["1.3.", "1.3", "13", "abc", "0x3", "{"]], n_partitions=4)
+        actual = ht.annotate(x = hl.parse_json(ht.x, dtype='int', return_exceptions=True)).x.collect()
+        expected_vals = [None, None, 13, None, None, None]
+        assert [x.val for x in actual] == expected_vals
+        assert all(
+            "Error parsing JSON:\n  type: int32\n  value: " in actual[i].err
+            for i in [0, 1, 3, 4, 5]
+        )
+        assert actual[2].err is None
+
+    def test_parse_json_return_exceptions_even_for_nested_invalid_types(self):
+        actual = hl.eval(hl.parse_json(
+            '{"a": 1.3, "b": [], "c": [123, {}]}',
+            dtype=hl.tstruct(
+                a=hl.tint,
+                b=hl.tint,
+                c=hl.tarray(hl.tint),
+                d=hl.tfloat64
+            )
+        ))
+        assert actual == hl.Struct(a=None, b=None, c=[123, None], d=None)
+        actual = hl.eval(hl.parse_json(
+            '{"a": 1.3, "b": [], "c": [123, {}]}',
+            dtype=hl.tstruct(
+                a=hl.tint,
+                b=hl.tint,
+                c=hl.tarray(hl.tint),
+                d=hl.tfloat64
+            ),
+            return_exceptions=True
+        ))
+        assert actual.val is None
+        assert "Can't convert JSON value JDouble(1.3) to type int32 at <root>.a" in actual.err
 
     def test_expr_persist(self):
         # need to test laziness, so we will overwrite a file

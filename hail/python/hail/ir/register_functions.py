@@ -15,6 +15,7 @@ def register_functions():
     register_function("getReferenceSequence", (dtype("str"), dtype("int32"), dtype("int32"), dtype("int32"),), dtype("str"), (locusVar,))
 
     register_function("parse_json", (dtype("str"),), dtype("tuple(?T)"), (dtype("?T"),))
+    register_function("parse_json_return_exceptions", (dtype("str"),), dtype("struct{val: ?T, err: str}"), (dtype("?T"),))
 
     register_function("flatten", (dtype("array<array<?T>>"),), dtype("array<?T>"))
     register_function("difference", (dtype("set<?T>"), dtype("set<?T>"),), dtype("set<?T>"))
@@ -170,6 +171,7 @@ def register_functions():
     register_function("contig", (dtype("?T:locus"),), dtype("str"))
     register_function("Call", (dtype("bool"),), dtype("call"))
     register_function("Call", (dtype("str"),), dtype("call"))
+    register_function("CallOrMissing", (dtype("str"),), dtype("call"))
     register_function("Call", (dtype("int32"), dtype("bool"),), dtype("call"))
     register_function("Call", (dtype("int32"), dtype("int32"), dtype("bool"),), dtype("call"))
     register_function("Call", (dtype("array<int32>"), dtype("bool"),), dtype("call"))
@@ -188,6 +190,7 @@ def register_functions():
     register_function("toFloat64", (dtype("bool"),), dtype("float64"))
     register_function("dbeta", (dtype("float64"), dtype("float64"), dtype("float64"),), dtype("float64"))
     register_function("Locus", (dtype("str"),), dtype("?T:locus"))
+    register_function("LocusOrMissing", (dtype("str"),), dtype("?T:locus"))
     register_function("Locus", (dtype("str"), dtype("int32"),), dtype("?T:locus"))
     register_function("LocusAlleles", (dtype("str"),), dtype("struct{locus: ?T, alleles: array<str>}"))
     register_function("LocusInterval", (dtype("str"), dtype("bool"),), dtype("interval<?T:locus>"))
