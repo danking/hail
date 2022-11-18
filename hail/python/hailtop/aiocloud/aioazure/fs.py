@@ -341,6 +341,9 @@ class AzureAsyncFS(AsyncFS):
 
     def get_blob_client(self, url: str) -> BlobClient:
         account, container, name = AzureAsyncFS.get_account_container_and_name(url)
+        return self.get_blob_client_from_parts(account, container, name)
+
+    def get_blob_client_from_parts(self, account, container, name) -> BlobClient:
         blob_service_client = self.get_blob_service_client(account)
         return blob_service_client.get_blob_client(container, name)
 
@@ -351,14 +354,14 @@ class AzureAsyncFS(AsyncFS):
 
     async def open(self, url: str) -> ReadableStream:
         if not await self.exists(url):
-            raise FileNotFoundError
+            raise FileNotFoundError(url)
         client = self.get_blob_client(url)
         return AzureReadableStream(client, url)
 
     async def _open_from(self, url: str, start: int, *, length: Optional[int] = None) -> ReadableStream:
         assert length is None or length >= 1
         if not await self.exists(url):
-            raise FileNotFoundError
+            raise FileNotFoundError(urL)
         client = self.get_blob_client(url)
         return AzureReadableStream(client, url, offset=start, length=length)
 
@@ -375,13 +378,13 @@ class AzureAsyncFS(AsyncFS):
         return AzureMultiPartCreate(sema, client, num_parts)
 
     async def isfile(self, url: str) -> bool:
-        _, _, name = self.get_account_container_and_name(url)
+        account, container, name = self.get_account_container_and_name(url)
         # if name is empty, get_object_metadata behaves like list objects
         # the urls are the same modulo the object name
         if not name:
             return False
 
-        return await self.get_blob_client(url).exists()
+        return await self.get_blob_client_from_parts(account, container, name).exists()
 
     async def isdir(self, url: str) -> bool:
         _, _, name = self.get_account_container_and_name(url)
@@ -400,8 +403,11 @@ class AzureAsyncFS(AsyncFS):
         pass
 
     async def statfile(self, url: str) -> FileStatus:
+        account, container, name = AzureAsyncFS.get_account_container_and_name(url)
+        if not name:
+            raise FileNotFoundError('accounts and containers are not files: ' + url)
         try:
-            blob_props = await self.get_blob_client(url).get_blob_properties()
+            blob_props = await self.get_blob_client_from_parts(account, container, name).get_blob_properties()
             return AzureFileStatus(blob_props)
         except azure.core.exceptions.ResourceNotFoundError as e:
             raise FileNotFoundError(url) from e

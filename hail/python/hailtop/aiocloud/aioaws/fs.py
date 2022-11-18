@@ -397,6 +397,8 @@ class S3AsyncFS(AsyncFS):
 
     async def statfile(self, url: str) -> FileStatus:
         bucket, name = self.get_bucket_and_name(url)
+        if not name:
+            raise FileNotFoundError('bucket is not a file: ' + url)
         try:
             resp = await blocking_to_async(self._thread_pool, self._s3.head_object,
                                            Bucket=bucket,

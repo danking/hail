@@ -625,8 +625,10 @@ class GoogleStorageAsyncFS(AsyncFS):
         pass
 
     async def statfile(self, url: str) -> GetObjectFileStatus:
+        bucket, name = self.get_bucket_and_name(url)
+        if not name:
+            raise FileNotFoundError('bucket is not a file: ' + url)
         try:
-            bucket, name = self.get_bucket_and_name(url)
             return GetObjectFileStatus(await self._storage_client.get_object_metadata(bucket, name))
         except aiohttp.ClientResponseError as e:
             if e.status == 404:
