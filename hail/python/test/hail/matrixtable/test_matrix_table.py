@@ -2118,3 +2118,24 @@ def test_upcast_tuples():
     t = t.annotate_cols(x=t.foo[1])
     t = t.drop('foo')
     t.cols().collect()
+
+
+def test_write_table_per_column():
+    mt = hl.utils.range_matrix_table(10, 1024, n_partitions=4)
+    mt = mt.annotate_entries(
+        sum = mt.row_idx + mt.col_idx,
+        prod = mt.row_idx * mt.col_idx
+    )
+    with hl.TemporaryDirectory(ensure_exists=True) as outdir:
+        mt.write_table_per_column(outdir)
+
+    ht = hl.read_table(outdir + '/0.ht')
+    assert list(ht.row) == ['0.ht.sum', '0.ht.prod', 'row_idx']
+    assert ht.sum.collect() == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    assert ht.prod.collect() == ([0] * 10)
+    assert ht.col_idx
+
+    ht = hl.read_table(outdir + '/30.ht')
+    assert list(ht.row) == ['0.ht.sum', '0.ht.prod', 'row_idx']
+    assert ht.sum.collect() == [30, 31, 32, 33, 34, 35, 36, 37, 38, 39]
+    assert ht.prod.collect() == [0, 30, 60, 90, 120, 150, 180, 210, 240, 270]

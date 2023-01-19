@@ -4298,6 +4298,9 @@ class MatrixTable(ExprContainer):
 
         n_cols = self.count_cols()
         col_keys = self.col_key.collect()
+        dupe_counts = Counter(col_keys)
+        if dupe_counts.most_common(1)[0][1] > 1:
+            raise ValueError(f'must have unique column keys but found duplicates: {dupe_counts}')
         t = self.localize_entries('entries', 'cols')
 
         try:
