@@ -1,5 +1,7 @@
 from typing import Optional, Callable, Tuple
-from rich.progress import MofNCompleteColumn, BarColumn, TextColumn, TimeRemainingColumn, TimeElapsedColumn, Progress, ProgressColumn, TaskProgressColumn
+from rich import filesize
+from rich.progress import MofNCompleteColumn, BarColumn, TextColumn, TimeRemainingColumn, TimeElapsedColumn, Progress, ProgressColumn, TaskProgressColumn, TransferSpeedColumn, Task
+from rich.text import Text
 
 
 class SimpleRichProgressBarTask:
@@ -55,6 +57,50 @@ def make_listener(progress: Progress, tid) -> Callable[[int], None]:
     return listen
 
 
+class BytesOrCount(ProgressColumn):
+    def __init__(
+        self, table_column = None
+    ) -> None:
+
+        super().__init__(table_column=table_column)
+
+    def render(self, task: "Task") -> Text:
+        completed = int(task.completed)
+
+        unit_and_suffix_calculation_base = (
+            int(task.total) if task.total is not None else completed
+        )
+
+        if task.description == 'files':
+            units = ["files", "K files", "M files", "G files", "T files", "P files", "E files", "Z files", "Y files"]
+            magnitude = 1000
+        else:
+            units = ["bytes", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"]
+            magnitude = 1024
+
+        unit, suffix = filesize.pick_unit_and_suffix(
+            unit_and_suffix_calculation_base,
+            units,
+            magnitude
+        )
+
+        precision = 0 if unit == 1 else 1
+
+        completed_ratio = completed / unit
+        completed_str = f"{completed_ratio:,.{precision}f}"
+
+        if task.total is not None:
+            total = int(task.total)
+            total_ratio = total / unit
+            total_str = f"{total_ratio:,.{precision}f}"
+        else:
+            total_str = "?"
+
+        download_status = f"{completed_str}/{total_str} {suffix}"
+        download_text = Text(download_status, style="progress.download")
+        return download_text
+
+
 class RichProgressBar:
     def __init__(self, *args, **kwargs):
         if len(args) == 0:
@@ -67,6 +113,8 @@ class RichProgressBar:
             TextColumn("[progress.description]{task.description}"),
             BarColumn(complete_style="bar.finished"),
             TaskProgressColumn(),
+            BytesOrCount(),
+            TransferSpeedColumn(),
             TimeRemainingColumn(),
             TimeElapsedColumn()
         )

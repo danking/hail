@@ -266,6 +266,9 @@ class AsyncFS(abc.ABC):
         try:
             it = await self.listfiles(url, recursive=True, exclude_trailing_slash_files=False)
         except FileNotFoundError:
+            listener(1)
+            await self._remove_doesnt_exist_ok(url)
+            listener(-1)
             return
 
         async with OnlineBoundedGather2(sema) as pool:

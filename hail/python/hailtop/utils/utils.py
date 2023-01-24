@@ -591,7 +591,7 @@ RETRY_ONCE_BAD_REQUEST_ERROR_MESSAGES = {
 }
 
 
-def is_limited_retries_error(e):
+def is_limited_retries_error(e: BaseException) -> bool:
     # An exception is a "retry once error" if a rare, known bug in a dependency or in a cloud
     # provider can manifest as this exception *and* that manifestation is indistinguishable from a
     # true error.
@@ -607,11 +607,11 @@ def is_limited_retries_error(e):
     if isinstance(e, ConnectionRefusedError):
         return True
     if e.__cause__ is not None:
-        return is_transient_error(e.__cause__)
+        return is_limited_retries_error(e.__cause__)
     return False
 
 
-def is_transient_error(e):
+def is_transient_error(e: BaseException) -> bool:
     # observed exceptions:
     #
     # aiohttp.client_exceptions.ClientConnectorError: Cannot connect to host <host> ssl:None [Connect call failed ('<ip>', 80)]
@@ -660,6 +660,8 @@ def is_transient_error(e):
     # https://hail.zulipchat.com/#narrow/stream/223457-Batch-support/topic/ssl.20error
     import hailtop.aiocloud.aiogoogle.client.compute_client  # pylint: disable=import-outside-toplevel,cyclic-import
     import hailtop.httpx  # pylint: disable=import-outside-toplevel,cyclic-import
+    from aiohttp import client_exceptions as aiohttp_client_exceptions
+    from urllib3 import exceptions as urllib3_exceptions
     if (isinstance(e, aiohttp.ClientResponseError)
             and e.status in RETRYABLE_HTTP_STATUS_CODES):
         return True
@@ -677,7 +679,7 @@ def is_transient_error(e):
         return True
     if isinstance(e, asyncio.TimeoutError):
         return True
-    if (isinstance(e, aiohttp.ClientConnectorError)
+    if (isinstance(e, aiohttp_client_exceptions.ClientConnectorError)
             and hasattr(e, 'os_error')
             and is_transient_error(e.os_error)):
         return True
@@ -689,7 +691,7 @@ def is_transient_error(e):
         return True
     if isinstance(e, OSError) and e.errno in RETRYABLE_ERRNOS:
         return True
-    if isinstance(e, urllib3.exceptions.ReadTimeoutError):
+    if isinstance(e, urllib3_exceptions.ReadTimeoutError):
         return True
     if isinstance(e, requests.exceptions.ReadTimeout):
         return True
@@ -700,6 +702,10 @@ def is_transient_error(e):
     if isinstance(e, socket.gaierror) and e.errno in (socket.EAI_AGAIN, socket.EAI_NONAME):
         # socket.EAI_AGAIN: [Errno -3] Temporary failure in name resolution
         # socket.EAI_NONAME: [Errno 8] nodename nor servname provided, or not known
+        return True
+    if isinstance(e, google.api_core.exceptions.GatewayTimeout):
+        return True
+    if isinstance(e, google.api_core.exceptions.ServiceUnavailable):
         return True
     if isinstance(e, botocore.exceptions.ConnectionClosedError):
         return True
@@ -722,7 +728,7 @@ def is_transient_error(e):
     return False
 
 
-def is_delayed_warning_error(e):
+def is_delayed_warning_error(e: BaseException) -> bool:
     if isinstance(e, aiohttp.ClientResponseError) and e.status in (503, 429):
         # 503 service unavailable
         # 429 "Temporarily throttled, too many requests"
@@ -765,8 +771,8 @@ def sync_sleep_before_try(
     time.sleep(delay_ms_for_try(tries, base_delay_ms, max_delay_ms) / 1000.0)
 
 
-def retry_all_errors(msg=None, error_logging_interval=10):
-    async def _wrapper(f, *args, **kwargs):
+def retry_all_errors(msg: Optional[str] = None, error_logging_interval: int = 10):
+    async def _wrapper(f: Callable[..., Awaitable[T]], *args, **kwargs) -> T:
         tries = 0
         while True:
             try:
@@ -783,7 +789,7 @@ def retry_all_errors(msg=None, error_logging_interval=10):
     return _wrapper
 
 
-def retry_all_errors_n_times(max_errors=10, msg=None, error_logging_interval=10):
+def retry_all_errors_n_times(max_errors: int = 10, msg: Optional[str] = None, error_logging_interval: int = 10):
     async def _wrapper(f: Callable[P, Awaitable[T]], *args: P.args, **kwargs: P.kwargs) -> T:
         tries = 0
         while True:
@@ -844,7 +850,7 @@ async def retry_transient_errors_with_debug_string(debug_string: str, warning_de
         await asyncio.sleep(delay)
 
 
-def sync_retry_transient_errors(f, *args, **kwargs):
+def sync_retry_transient_errors(f: Callable[..., T], *args, **kwargs) -> T:
     tries = 0
     while True:
         try:
@@ -878,7 +884,7 @@ def retry_response_returning_functions(fun, *args, **kwargs):
     return response
 
 
-def external_requests_client_session(headers=None, timeout=5) -> requests.Session:
+def external_requests_client_session(headers: Dict[str, Any] = None, timeout: int = 5) -> requests.Session:
     session = requests.Session()
     adapter = TimeoutHTTPAdapter(max_retries=1, timeout=timeout)
     session.mount('http://', adapter)
@@ -937,7 +943,7 @@ async def retry_long_running(name: str, f: Callable[P, Awaitable[T]], *args: P.a
                 30.0)
 
 
-async def run_if_changed(changed, f, *args, **kwargs):
+async def run_if_changed(changed: asyncio.Event, f: Callable[..., Awaitable[bool]], *args, **kwargs):
     while True:
         changed.clear()
         should_wait = await f(*args, **kwargs)
@@ -952,7 +958,7 @@ async def run_if_changed(changed, f, *args, **kwargs):
             await changed.wait()
 
 
-async def run_if_changed_idempotent(changed, f, *args, **kwargs):
+async def run_if_changed_idempotent(changed: asyncio.Event, f: Callable[..., Awaitable[bool]], *args, **kwargs):
     while True:
         should_wait = await f(*args, **kwargs)
         changed.clear()
@@ -960,7 +966,7 @@ async def run_if_changed_idempotent(changed, f, *args, **kwargs):
             await changed.wait()
 
 
-async def periodically_call(period: int, f, *args, **kwargs):
+async def periodically_call(period: Union[int, float], f: Callable[..., Awaitable[Any]], *args, **kwargs):
     async def loop():
         log.info(f'starting loop for {f.__name__}')
         while True:
@@ -969,7 +975,7 @@ async def periodically_call(period: int, f, *args, **kwargs):
     await retry_long_running(f.__name__, loop)
 
 
-async def periodically_call_with_dynamic_sleep(period: Callable[[], int], f, *args, **kwargs):
+async def periodically_call_with_dynamic_sleep(period: Callable[[], Union[int, float]], f, *args, **kwargs):
     async def loop():
         log.info(f'starting loop for {f.__name__}')
         while True:

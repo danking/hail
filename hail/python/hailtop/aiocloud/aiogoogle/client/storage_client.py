@@ -454,6 +454,8 @@ class GoogleStorageFileListEntry(FileListEntry):
         self._status: Optional[GetObjectFileStatus] = None
 
     def name(self) -> str:
+        if self._is_dir():
+            return os.path.basename(self._name[:-1])
         return os.path.basename(self._name)
 
     async def url(self) -> str:
@@ -462,8 +464,11 @@ class GoogleStorageFileListEntry(FileListEntry):
     async def is_file(self) -> bool:
         return self._items is not None
 
-    async def is_dir(self) -> bool:
+    def _is_dir(self) -> bool:
         return self._items is None
+
+    async def is_dir(self) -> bool:
+        return self._is_dir()
 
     async def status(self) -> FileStatus:
         if self._status is None:

@@ -89,7 +89,7 @@ class ClientSession:
     def __init__(self,
                  *args,
                  raise_for_status: bool = True,
-                 timeout: Union[aiohttp.ClientTimeout, float, None] = None,
+                 timeout: Union[aiohttp.ClientTimeout, float, int, None] = None,
                  **kwargs):
         location = get_deploy_config().location()
         if location == 'external':
@@ -105,6 +105,9 @@ class ClientSession:
 
         if timeout is None:
             timeout = aiohttp.ClientTimeout(total=5)
+        elif not isinstance(timeout, aiohttp.ClientTimeout):
+            assert isinstance(timeout, float) or isinstance(timeout, int)
+            timeout = aiohttp.ClientTimeout(total=timeout)
 
         self.raise_for_status = raise_for_status
         self.client_session = aiohttp.ClientSession(

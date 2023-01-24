@@ -151,6 +151,8 @@ class S3FileListEntry(FileListEntry):
         self._status: Optional[S3ListFilesFileStatus] = None
 
     def name(self) -> str:
+        if self._is_dir():
+            return os.path.basename(self._key[:-1])
         return os.path.basename(self._key)
 
     async def url(self) -> str:
@@ -159,8 +161,11 @@ class S3FileListEntry(FileListEntry):
     async def is_file(self) -> bool:
         return self._item is not None
 
-    async def is_dir(self) -> bool:
+    def _is_dir(self) -> bool:
         return self._item is None
+
+    async def is_dir(self) -> bool:
+        return self._is_dir()
 
     async def status(self) -> FileStatus:
         if self._status is None:
@@ -299,12 +304,14 @@ class S3AsyncFSURL(AsyncFSURL):
 class S3AsyncFS(AsyncFS):
     schemes: ClassVar[Set[str]] = {'s3'}
 
-    def __init__(self, thread_pool: Optional[ThreadPoolExecutor] = None, max_workers: Optional[int] = None, *, max_pool_connections: int = 10):
+    def __init__(self, thread_pool: Optional[ThreadPoolExecutor] = None, max_workers: Optional[int] = None, *, max_pool_connections: int = 10, timeout = None):
         if not thread_pool:
             thread_pool = ThreadPoolExecutor(max_workers=max_workers)
         self._thread_pool = thread_pool
         config = botocore.config.Config(
             max_pool_connections=max_pool_connections,
+            connect_timeout=timeout,
+            read_timeout=timeout,
         )
         self._s3 = boto3.client('s3', config=config)
 
