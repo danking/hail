@@ -306,16 +306,20 @@ class S3AsyncFS(AsyncFS):
                  thread_pool: Optional[ThreadPoolExecutor] = None,
                  max_workers: Optional[int] = None,
                  *,
-                 max_pool_connections: int = 10,
+                 max_pool_connections: int = 100,
+                 botocore_config_kwargs: Optional[Dict[str, Any]] = None,
                  s3_client_kwargs: Optional[Dict[str, Any]] = None,
                  protocol: str = 's3'):
         if s3_client_kwargs is None:
             s3_client_kwargs = {}
+        if botocore_config_kwargs is None:
+            botocore_config_kwargs = {}
         if not thread_pool:
             thread_pool = ThreadPoolExecutor(max_workers=max_workers)
         self._thread_pool = thread_pool
         config = botocore.config.Config(
             max_pool_connections=max_pool_connections,
+            **botocore_config_kwargs
         )
         self._s3 = boto3.client(
             's3',
