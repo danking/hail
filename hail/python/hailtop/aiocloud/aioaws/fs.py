@@ -144,20 +144,23 @@ class S3CreateManager(AsyncContextManager[WritableStream]):
 
 
 class S3FileListEntry(FileListEntry):
-    def __init__(self, bucket: str, key: str, item: Optional[Dict[str, Any]]):
+    def __init__(self, bucket: str, key: str, item: Optional[Dict[str, Any]], protocol: str):
         self._bucket = bucket
         self._key = key
         self._item = item
         self._status: Optional[S3ListFilesFileStatus] = None
+        self._protocol = protocol
 
     def name(self) -> str:
+        if self._key[-1] == '/':
+            return os.path.basename(self._key[:-1])
         return os.path.basename(self._key)
 
     async def url(self) -> str:
-        return f's3://{self._bucket}/{self._key}'
+        return f'{self._protocol}://{self._bucket}/{self._key}'
 
     def url_maybe_trailing_slash(self) -> str:
-        return f's3://{self._bucket}/{self._key}'
+        return f'{self._protocol}://{self._bucket}/{self._key}'
 
     async def is_file(self) -> bool:
         return self._item is not None
@@ -168,7 +171,7 @@ class S3FileListEntry(FileListEntry):
     async def status(self) -> FileStatus:
         if self._status is None:
             if self._item is None:
-                raise IsADirectoryError(f's3://{self._bucket}/{self._key}')
+                raise IsADirectoryError(f'{self._protocol}//{self._bucket}/{self._key}')
             self._status = S3ListFilesFileStatus(self._item)
         return self._status
 
@@ -272,9 +275,10 @@ class S3MultiPartCreate(MultiPartCreate):
 
 
 class S3AsyncFSURL(AsyncFSURL):
-    def __init__(self, bucket: str, path: str):
+    def __init__(self, bucket: str, path: str, protocol: str):
         self._bucket = bucket
         self._path = path
+        self._protocol = protocol
 
     @property
     def bucket_parts(self) -> List[str]:
@@ -289,26 +293,38 @@ class S3AsyncFSURL(AsyncFSURL):
         return 's3'
 
     def with_path(self, path) -> 'S3AsyncFSURL':
-        return S3AsyncFSURL(self._bucket, path)
+        return S3AsyncFSURL(self._bucket, path, self.protocol)
 
     def __str__(self) -> str:
-        return f's3://{self._bucket}/{self._path}'
+        return f'{self._protocol}://{self._bucket}/{self._path}'
 
 
 class S3AsyncFS(AsyncFS):
     schemes: Set[str] = {'s3'}
 
-    def __init__(self, thread_pool: Optional[ThreadPoolExecutor] = None, max_workers: Optional[int] = None, *, max_pool_connections: int = 10):
+    def __init__(self,
+                 thread_pool: Optional[ThreadPoolExecutor] = None,
+                 max_workers: Optional[int] = None,
+                 *,
+                 max_pool_connections: int = 10,
+                 s3_client_kwargs: Optional[Dict[str, Any]] = None,
+                 protocol: str = 's3'):
+        if s3_client_kwargs is None:
+            s3_client_kwargs = {}
         if not thread_pool:
             thread_pool = ThreadPoolExecutor(max_workers=max_workers)
         self._thread_pool = thread_pool
         config = botocore.config.Config(
             max_pool_connections=max_pool_connections,
         )
-        self._s3 = boto3.client('s3', config=config)
+        self._s3 = boto3.client(
+            's3',
+            **s3_client_kwargs,
+            config=config)
+        self._protocol = protocol
 
     def parse_url(self, url: str) -> S3AsyncFSURL:
-        return S3AsyncFSURL(*self.get_bucket_and_name(url))
+        return S3AsyncFSURL(*self.get_bucket_and_name(url), self._protocol)
 
     @staticmethod
     def get_bucket_and_name(url: str) -> Tuple[str, str]:
@@ -419,6 +435,8 @@ class S3AsyncFS(AsyncFS):
 
     async def statfile(self, url: str) -> FileStatus:
         bucket, name = self.get_bucket_and_name(url)
+        if name == '':
+            raise FileNotFoundError(f'{url} is a bucket not an object.')
         try:
             resp = await blocking_to_async(self._thread_pool, self._s3.head_object,
                                            Bucket=bucket,
@@ -436,7 +454,7 @@ class S3AsyncFS(AsyncFS):
             contents = page.get('Contents')
             if contents:
                 for item in contents:
-                    yield S3FileListEntry(bucket, item['Key'], item)
+                    yield S3FileListEntry(bucket, item['Key'], item, self._protocol)
 
     async def _listfiles_flat(self, bucket: str, name: str) -> AsyncIterator[S3FileListEntry]:
         assert not name or name.endswith('/')
@@ -444,11 +462,11 @@ class S3AsyncFS(AsyncFS):
             prefixes = page.get('CommonPrefixes')
             if prefixes is not None:
                 for prefix in prefixes:
-                    yield S3FileListEntry(bucket, prefix['Prefix'], None)
+                    yield S3FileListEntry(bucket, prefix['Prefix'], None, self._protocol)
             contents = page.get('Contents')
             if contents:
                 for item in contents:
-                    yield S3FileListEntry(bucket, item['Key'], item)
+                    yield S3FileListEntry(bucket, item['Key'], item, self._protocol)
 
     async def listfiles(self,
                         url: str,

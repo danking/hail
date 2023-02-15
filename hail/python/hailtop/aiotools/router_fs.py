@@ -2,7 +2,7 @@ from typing import Any, Optional, List, Set, AsyncIterator, Dict, AsyncContextMa
 import asyncio
 import urllib
 
-from ..aiocloud import aioaws, aioazure, aiogoogle
+from ..aiocloud import aioaws, aioazure, aiogoogle, aiocloudflare
 from .fs import (AsyncFS, MultiPartCreate, FileStatus, FileListEntry, ReadableStream,
                  WritableStream, AsyncFSURL)
 from .local_fs import LocalAsyncFS
@@ -16,7 +16,8 @@ class RouterAsyncFS(AsyncFS):
                  local_kwargs: Optional[Dict[str, Any]] = None,
                  gcs_kwargs: Optional[Dict[str, Any]] = None,
                  azure_kwargs: Optional[Dict[str, Any]] = None,
-                 s3_kwargs: Optional[Dict[str, Any]] = None):
+                 s3_kwargs: Optional[Dict[str, Any]] = None,
+                 r2_kwargs: Optional[Dict[str, Any]] = None):
         scheme_fs: Dict[str, AsyncFS] = {}
 
         filesystems = [] if filesystems is None else filesystems
@@ -34,6 +35,7 @@ class RouterAsyncFS(AsyncFS):
         self._gcs_kwargs = gcs_kwargs or {}
         self._azure_kwargs = azure_kwargs or {}
         self._s3_kwargs = s3_kwargs or {}
+        self._r2_kwargs = r2_kwargs or {}
 
     def get_scheme(self, uri: str) -> str:
         scheme = urllib.parse.urlparse(uri).scheme or self._default_scheme
@@ -59,6 +61,8 @@ class RouterAsyncFS(AsyncFS):
             fs = aioazure.AzureAsyncFS(**self._azure_kwargs)
         elif scheme in aioaws.S3AsyncFS.schemes:
             fs = aioaws.S3AsyncFS(**self._s3_kwargs)
+        elif scheme in aiocloudflare.R2AsyncFS.schemes:
+            fs = aiocloudflare.R2AsyncFS(**self._r2_kwargs)
         else:
             raise ValueError(f'no file system found for scheme {scheme}')
 

@@ -383,7 +383,7 @@ class SourceCopier:
 
         async def copy_source(srcentry: FileListEntry) -> None:
             srcfile = srcentry.url_maybe_trailing_slash()
-            assert srcfile.startswith(src)
+            assert srcfile.startswith(src), (srcfile, src)
 
             # skip files with empty names
             if srcfile.endswith('/'):
