@@ -293,7 +293,7 @@ class S3AsyncFSURL(AsyncFSURL):
         return 's3'
 
     def with_path(self, path) -> 'S3AsyncFSURL':
-        return S3AsyncFSURL(self._bucket, path, self.protocol)
+        return S3AsyncFSURL(self._bucket, path, self._protocol)
 
     def __str__(self) -> str:
         return f'{self._protocol}://{self._bucket}/{self._path}'
