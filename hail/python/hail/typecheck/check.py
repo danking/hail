@@ -1,3 +1,4 @@
+from typing import TypeVar, Callable, Dict, Any, Tuple, List, cast
 import re
 import inspect
 import abc
@@ -506,7 +507,12 @@ def check_meta(f, checks, is_method):
         f.__checked = True
 
 
-def check_all(f, args, kwargs, checks, is_method):
+def check_all(f: Callable[..., Any],
+              args: Tuple[Any, ...],
+              kwargs: Dict[str, Any],
+              checks: Dict[str, Any],
+              is_method: bool
+              ) -> Tuple[List[Any], Dict[str, Any]]:
     spec = get_signature(f)
     check_meta(f, checks, is_method)
     name = f.__name__
@@ -560,19 +566,22 @@ def check_all(f, args, kwargs, checks, is_method):
     return args_, kwargs_
 
 
-def typecheck_method(**checkers):
+T = TypeVar('T')
+
+
+def typecheck_method(**checkers: Any) -> Callable[[Callable[..., T]], Callable[..., T]]:
     return _make_dec(checkers, is_method=True)
 
 
-def typecheck(**checkers):
+def typecheck(**checkers: Any) -> Callable[[Callable[..., T]], Callable[..., T]]:
     return _make_dec(checkers, is_method=False)
 
 
-def _make_dec(checkers, is_method):
+def _make_dec(checkers: Dict[str, Any], is_method: bool):
     checkers = {k: only(v) for k, v in checkers.items()}
 
     @decorator
-    def wrapper(__original_func, *args, **kwargs):
+    def wrapper(__original_func: Callable[..., T], *args, **kwargs) -> T:
         args_, kwargs_ = check_all(__original_func, args, kwargs, checkers, is_method=is_method)
         return __original_func(*args_, **kwargs_)
 
