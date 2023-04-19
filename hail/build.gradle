@@ -97,8 +97,8 @@ configurations {
 	    }
     }
 
-    compile.extendsFrom bundled, unbundled
-    testCompile.extendsFrom compile, hailTest
+    implementation.extendsFrom bundled, unbundled
+    testImplementation.extendsFrom implementation, hailTest
     hailJar.extendsFrom bundled
     hailJar {
         exclude group: 'org.scala-lang', module: 'scala-library'
