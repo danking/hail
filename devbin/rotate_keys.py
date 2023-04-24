@@ -126,7 +126,7 @@ class IAMKey:
         return self.older_than(60)
 
     def recently_created(self) -> bool:
-        return not self.older_than(30)
+        return not self.older_than(3)
 
     def older_than(self, days: int) -> bool:
         return self.created < datetime.now(pytz.utc) - timedelta(days=days)
@@ -313,7 +313,22 @@ async def add_new_keys(service_accounts: List[ServiceAccount],
         sa.list_keys(sys.stdout)
 
 
-async def delete_old_keys(service_accounts: List[ServiceAccount], iam_manager: IAMManager, focus: Optional[RotationState] = None):
+async def delete_old_keys(service_accounts: List[ServiceAccount],
+                          iam_manager: IAMManager,
+                          focus: Optional[RotationState],
+                          interactive: bool):
+    service_accounts_under_consideration = [
+        sa
+        for sa in service_accounts
+        if not sa.disabled and (focus is None or sa.rotation_state() == focus)
+    ]
+
+    if not interactive:
+        accounts_str = '\n'.join(str(sa) for sa in service_accounts_under_consideration)
+        print(accounts_str)
+        if input('All but newest keys will be deleted for the above accounts. Proceed? Only yes will be accepted: ') != 'yes':
+            return
+
     async def delete_old_and_refresh(sa: ServiceAccount):
         to_delete = sa.redundant_user_keys()
         await asyncio.gather(*[iam_manager.delete_key(sa.email, k) for k in to_delete])
@@ -323,28 +338,29 @@ async def delete_old_keys(service_accounts: List[ServiceAccount], iam_manager: I
         sa.keys = await iam_manager.get_sa_keys(sa.email)
         sa.list_keys(sys.stdout)
 
-    for sa in service_accounts:
-        rotation_state = sa.rotation_state()
-        if sa.disabled or focus is not None and rotation_state != focus:
-            continue
+    for sa in service_accounts_under_consideration:
         sa.list_keys(sys.stdout)
-        if input('Delete all but the newest key?\nOnly yes will be accepted: ') == 'yes':
-            if rotation_state == RotationState.READY_FOR_DELETE:
+        if interactive:
+            if input('Delete all but the newest key?\nOnly yes will be accepted: ') != 'yes':
+                continue
+
+        rotation_state = sa.rotation_state()
+        if rotation_state == RotationState.READY_FOR_DELETE:
+            await delete_old_and_refresh(sa)
+        elif rotation_state == RotationState.IN_PROGRESS:
+            warnings.warn(
+                'The most recent key was generated less than '
+                'thirty days ago. Old keys should not be deleted '
+                'as they might still be in use.',
+                stacklevel=2,
+            )
+            if input('Are you sure you want to delete old keys? ') == 'yes':
                 await delete_old_and_refresh(sa)
-            elif rotation_state == RotationState.IN_PROGRESS:
-                warnings.warn(
-                    'The most recent key was generated less than '
-                    'thirty days ago. Old keys should not be deleted '
-                    'as they might still be in use.',
-                    stacklevel=2,
-                )
-                if input('Are you sure you want to delete old keys? ') == 'yes':
-                    await delete_old_and_refresh(sa)
-            else:
-                warnings.warn(
-                    f'Cannot delete keys in rotation state: {rotation_state}',
-                    stacklevel=2,
-                )
+        else:
+            warnings.warn(
+                f'Cannot delete keys in rotation state: {rotation_state}',
+                stacklevel=2,
+            )
 
 
 async def main():
@@ -402,7 +418,7 @@ async def main():
         for secret in other_secrets:
             print(f'\t{secret.metadata.name} ({secret.metadata.namespace})')
 
-        action = input('What action would you like to take?[update/update-all/delete/delete-ready-only/delete-in-progress-only]: ')
+        action = input('What action would you like to take?[update/interactive-update/interactive-delete/delete-ready-only/delete-in-progress-only]: ')
         if action == 'update':
             await add_new_keys(service_accounts, iam_manager, k8s_manager,
                                exclude={RotationState.UP_TO_DATE,
@@ -411,12 +427,12 @@ async def main():
                                interactive=False)
         if action == 'interactive-update':
             await add_new_keys(service_accounts, iam_manager, k8s_manager, interactive=True)
-        elif action == 'delete':
-            await delete_old_keys(service_accounts, iam_manager)
+        elif action == 'interactive-delete':
+            await delete_old_keys(service_accounts, iam_manager, focus=None, interactive=True)
         elif action == 'delete-ready-only':
-            await delete_old_keys(service_accounts, iam_manager, focus=RotationState.READY_FOR_DELETE)
+            await delete_old_keys(service_accounts, iam_manager, focus=RotationState.READY_FOR_DELETE, interactive=False)
         elif action == 'delete-in-progress-only':
-            await delete_old_keys(service_accounts, iam_manager, focus=RotationState.IN_PROGRESS)
+            await delete_old_keys(service_accounts, iam_manager, focus=RotationState.IN_PROGRESS, interactive=False)
         else:
             print('Doing nothing')
     finally:
