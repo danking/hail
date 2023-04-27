@@ -514,7 +514,7 @@ class BatchPoolFuture:
         :class:`.concurrent.futures.CancelledError`.
 
         If the job has timed out, this method raises an
-        :class:`.concurrent.futures.TimeoutError`.
+        :class:`.asyncio.TimeoutError`.
 
         Parameters
         ----------
@@ -530,7 +530,7 @@ class BatchPoolFuture:
         :class:`.concurrent.futures.CancelledError`.
 
         If the job has timed out, this method raises an
-        :class"`.concurrent.futures.TimeoutError`.
+        :class"`.asyncio.TimeoutError`.
 
         Parameters
         ----------
