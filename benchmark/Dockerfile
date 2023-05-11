@@ -28,6 +28,7 @@ RUN wget -O - https://packages.adoptium.net/artifactory/api/gpg/key/public | apt
 COPY requirements.txt .
 RUN mkdir hailtop
 COPY hailtop_requirements.txt hailtop/requirements.txt
+COPY hailtop_pinned_requirements.txt hailtop/pinned-requirements.txt
 RUN python3 -m pip install --upgrade --no-cache-dir --upgrade pip && \
   python3 -m pip install --upgrade --no-cache-dir setuptools && \
   python3 -m pip install --upgrade --no-cache-dir -r requirements.txt && \
