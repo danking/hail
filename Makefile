@@ -198,13 +198,13 @@ batch-worker-image: batch/jvm-entryway/build/libs/jvm-entryway.jar $(SERVICES_IM
 vep-grch37-image: hail-ubuntu-image
 	$(eval VEP_GRCH37_IMAGE := $(DOCKER_PREFIX)/hailgenetics/vep-grch37-85:$(TOKEN))
 	python3 ci/jinja2_render.py '{"hail_ubuntu_image":{"image":"'$$(cat hail-ubuntu-image)'"}}' vep/grch37/85/Dockerfile vep/grch37/85/Dockerfile.out
-	./docker-build.sh docker/vep/grch37/85/Dockerfile.out $(VEP_GRCH37_IMAGE)
+	./docker-build.sh . docker/vep/grch37/85/Dockerfile.out $(VEP_GRCH37_IMAGE)
 	echo $(VEP_GRCH37_IMAGE) > $@
 
 vep-grch38-image: hail-ubuntu-image
 	$(eval VEP_GRCH38_IMAGE := $(DOCKER_PREFIX)/hailgenetics/vep-grch38-95:$(TOKEN))
 	python3 ci/jinja2_render.py '{"hail_ubuntu_image":{"image":"'$$(cat hail-ubuntu-image)'"}}' vep/grch38/95/Dockerfile vep/grch38/95/Dockerfile.out
-	./docker-build.sh docker/vep/grch38/95/Dockerfile.out $(VEP_GRCH38_IMAGE)
+	./docker-build.sh . docker/vep/grch38/95/Dockerfile.out $(VEP_GRCH38_IMAGE)
 	echo $(VEP_GRCH38_IMAGE) > $@
 
 .PHONY: benchmark-wheel
@@ -217,11 +217,12 @@ install-benchmark: benchmark-wheel
 	-$(PIP) uninstall -y benchmark_hail
 	$(PIP) -q install $(BENCHMARK_WHEEL)
 
-benchmark-image: benchmark-wheel
-	$(eval BENCHMARK_IMAGE := $(DOCKER_PREFIX)/benchmark_$(shell whoami):$(TOKEN))
+BENCHMARK_IMAGE_REPO ?= us-docker.pkg.dev/broad-ctsa/hail-benchmarks/
+benchmark-image: benchmark-wheel hail/python/pinned-requirements.txt
+	$(eval BENCHMARK_IMAGE := $(BENCHMARK_IMAGE_REPO)benchmark_$(shell whoami):$(TOKEN))
 	$(MAKE) -C hail wheel
 	python3 ci/jinja2_render.py '{"global":{"docker_root_image":"ubuntu:20.04"},"hail_pip_version":"'$$(cat hail/python/hail/hail_pip_version)'"}' benchmark/Dockerfile benchmark/Dockerfile.out
-	./docker-build.sh benchmark/Dockerfile.out $(BENCHMARK_IMAGE)
+	./docker-build.sh . benchmark/Dockerfile.out $(BENCHMARK_IMAGE)
 	echo $(BENCHMARK_IMAGE) > $@
 
 BENCHMARK_ITERS ?= 3

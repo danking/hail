@@ -27,17 +27,17 @@ RUN curl -L https://packages.adoptium.net/artifactory/api/gpg/key/public | apt-k
 
 RUN mkdir hailtop
 
-COPY hail/python/requirements.txt .
-COPY hail/python/hailtop/requirements.txt hailtop/requirements.txt
-COPY hail/python/hailtop/pinned-requirements.txt hailtop/pinned-requirements.txt
+COPY hail/python/pinned-requirements.txt hail/python/pinned-requirements.txt
+COPY hail/python/dev/pinned-requirements.txt hail/python/dev/pinned-requirements.txt
 
 RUN python3 -m pip install --upgrade --no-cache-dir --upgrade pip && \
   python3 -m pip install --upgrade --no-cache-dir setuptools && \
-  python3 -m pip install --upgrade --no-cache-dir -r requirements.txt && \
+  python3 -m pip install --upgrade --no-cache-dir -r hail/python/pinned-requirements.txt -r hail/python/dev/pinned-requirements.txt && \
   python3 -m pip install --upgrade --no-cache-dir aiomysql && \
   python3 -m pip check
 
-COPY hail/build/build/deploy/dist/hail-{{ hail_pip_version }}-py3-none-any.whl .
+COPY hail hail
+RUN ls hail && exit 1
 
 RUN python3 -m pip install --upgrade --no-cache-dir --quiet hail-{{ hail_pip_version }}-py3-none-any.whl && \
   python3 -m pip check
