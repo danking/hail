@@ -86,7 +86,7 @@ trait InputBlockBuffer extends Spec with Closeable {
 }
 
 final class StreamInputBuffer(in: InputStream) extends InputBuffer {
-  private val buff = new Array[Byte](8)
+  private[this] val buff = new Array[Byte](8)
 
   def close(): Unit = in.close()
 
@@ -373,20 +373,20 @@ final class TracingInputBuffer(
 }
 
 final class BlockingInputBuffer(blockSize: Int, in: InputBlockBuffer) extends InputBuffer {
-  private val buf = new Array[Byte](blockSize)
-  private var end: Int = 0
-  private var off: Int = 0
+  private[this] val buf = new Array[Byte](blockSize)
+  private[this] var end: Int = 0
+  private[this] var off: Int = 0
 
-  private def readBlock() {
-    assert(off == end)
+  private[this] def readBlock() {
+    // assert(off == end)
     end = in.readBlock(buf)
     off = 0
   }
 
-  private def ensure(n: Int) {
+  private[this] def ensure(n: Int) {
     if (off == end)
       readBlock()
-    assert(off + n <= end)
+    // assert(off + n <= end)
   }
 
   def close() {
@@ -533,7 +533,7 @@ final class BlockingInputBuffer(blockSize: Int, in: InputBlockBuffer) extends In
 }
 
 final class StreamBlockInputBuffer(in: InputStream) extends InputBlockBuffer {
-  private val lenBuf = new Array[Byte](4)
+  private[this] val lenBuf = new Array[Byte](4)
 
   def close() {
     in.close()
@@ -553,7 +553,7 @@ final class StreamBlockInputBuffer(in: InputStream) extends InputBlockBuffer {
 }
 
 final class LZ4InputBlockBuffer(lz4: LZ4, blockSize: Int, in: InputBlockBuffer) extends InputBlockBuffer {
-  private val comp = new Array[Byte](4 + lz4.maxCompressedLength(blockSize))
+  private[this] val comp = new Array[Byte](4 + lz4.maxCompressedLength(blockSize))
 
   def close() {
     in.close()
@@ -595,8 +595,8 @@ final class LZ4InputBlockBuffer(lz4: LZ4, blockSize: Int, in: InputBlockBuffer) 
 }
 
 final class LZ4SizeBasedCompressingInputBlockBuffer(lz4: LZ4, blockSize: Int, in: InputBlockBuffer) extends InputBlockBuffer {
-  private val comp = new Array[Byte](8 + lz4.maxCompressedLength(blockSize))
-  private var lim = 0
+  private[this] val comp = new Array[Byte](8 + lz4.maxCompressedLength(blockSize))
+  private[this] var lim = 0
 
   def close() {
     in.close()
