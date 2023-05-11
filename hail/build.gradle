@@ -207,6 +207,8 @@ dependencies {
     bundled 'com.github.luben:zstd-jni:1.5.2-1'
 
     bundled project(path: ':shadedazure', configuration: 'shadow')
+
+    bundled 'software.amazon.cryptools:AmazonCorrettoCryptoProvider:2.+:linux-x86_64'
 }
 
 task(checkSettings) doLast {

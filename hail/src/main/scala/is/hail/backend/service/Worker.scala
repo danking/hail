@@ -13,6 +13,7 @@ import is.hail.services._
 import is.hail.utils._
 import org.apache.commons.io.IOUtils
 import org.apache.log4j.Logger
+import com.amazon.corretto.crypto.provider.{AmazonCorrettoCryptoProvider, SelfTestStatus}
 
 import scala.collection.mutable
 import scala.concurrent.duration.{Duration, MILLISECONDS}
@@ -108,6 +109,12 @@ object Worker {
     val n = argv(6).toInt
     val timer = new WorkerTimer()
 
+    if (AmazonCorrettoCryptoProvider.INSTANCE.getLoadingError() != null ||
+      !AmazonCorrettoCryptoProvider.INSTANCE.runSelfTests().equals(SelfTestStatus.PASSED)) {
+      log.info(
+        s"Not using Corretto Crypto: ${AmazonCorrettoCryptoProvider.INSTANCE.getLoadingError()}. " +
+          s"${AmazonCorrettoCryptoProvider.INSTANCE.runSelfTests()}")
+    }
     val deployConfig = DeployConfig.fromConfigFile(
       s"$scratchDir/secrets/deploy-config/deploy-config.json")
     DeployConfig.set(deployConfig)

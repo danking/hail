@@ -2,10 +2,13 @@ package is.hail.backend.service
 
 import is.hail.HailContext
 import org.apache.log4j.{LogManager, PropertyConfigurator}
+import com.amazon.corretto.crypto.provider.AmazonCorrettoCryptoProvider
 
 import java.util.Properties
 
 object Main {
+  AmazonCorrettoCryptoProvider.install()
+
   val WORKER = "worker"
   val DRIVER = "driver"
 
