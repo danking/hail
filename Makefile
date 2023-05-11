@@ -8,8 +8,7 @@ SERVICES_IMAGES := $(patsubst %, %-image, $(SERVICES_PLUS_ADMIN_POD))
 SERVICES_MODULES := $(SERVICES) gear web_common
 CHECK_SERVICES_MODULES := $(patsubst %, check-%, $(SERVICES_MODULES))
 
-HAILTOP_VERSION := hail/python/hailtop/hail_version
-SERVICES_IMAGE_DEPS = hail-ubuntu-image $(HAILTOP_VERSION) $(shell git ls-files hail/python/hailtop gear web_common)
+SERVICES_IMAGE_DEPS = hail-ubuntu-image hail/python/hailtop/hail_version $(shell git ls-files hail/python/hailtop gear web_common)
 
 EMPTY :=
 SPACE := $(EMPTY) $(EMPTY)
@@ -131,8 +130,21 @@ generate-pip-lockfiles: batch/pinned-requirements.txt
 generate-pip-lockfiles: ci/pinned-requirements.txt
 generate-pip-lockfiles: memory/pinned-requirements.txt
 
-$(HAILTOP_VERSION):
+.PHONY: hail/python/hailtop/hail_version # hail/Makefile should handle dependencies, not us
+hail/python/hailtop/hail_version:
 	$(MAKE) -C hail python/hailtop/hail_version
+
+.PHONY: hail/python/hail/hail_pip_version # hail/Makefile should handle dependencies, not us
+hail/python/hail/hail_pip_version:
+	$(MAKE) -C hail python/hail/hail_pip_version
+
+.PHONY: hail/python/hail/hail_version # hail/Makefile should handle dependencies, not us
+hail/python/hail/hail_version:
+	$(MAKE) -C hail python/hail/hail_version
+
+.PHONY: wheel # hail/Makefile should handle dependencies, not us
+wheel:
+	$(MAKE) -C hail wheel
 
 hail-ubuntu-image: $(shell git ls-files docker/hail-ubuntu)
 	$(eval HAIL_UBUNTU_IMAGE := $(DOCKER_PREFIX)/hail-ubuntu:$(TOKEN))
@@ -146,9 +158,11 @@ base-image: hail-ubuntu-image docker/Dockerfile.base
 	./docker-build.sh . docker/Dockerfile.base.out $(BASE_IMAGE)
 	echo $(BASE_IMAGE) > $@
 
-private-repo-hailgenetics-hail-image: hail-ubuntu-image docker/hailgenetics/hail/Dockerfile $(shell git ls-files hail/src/main hail/python)
+private-repo-hailgenetics-hail-image: hail-ubuntu-image
+private-repo-hailgenetics-hail-image: hail/python/hail/hail_pip_version
+private-repo-hailgenetics-hail-image: docker/hailgenetics/hail/Dockerfile
+private-repo-hailgenetics-hail-image: wheel
 	$(eval PRIVATE_REPO_HAILGENETICS_HAIL_IMAGE := $(DOCKER_PREFIX)/hailgenetics/hail:$(TOKEN))
-	$(MAKE) -C hail wheel
 	tar -cvf wheel-container.tar \
 		-C hail/build/deploy/dist \
 		hail-$$(cat hail/python/hail/hail_pip_version)-py3-none-any.whl
@@ -207,20 +221,22 @@ vep-grch38-image: hail-ubuntu-image
 	./docker-build.sh . docker/vep/grch38/95/Dockerfile.out $(VEP_GRCH38_IMAGE)
 	echo $(VEP_GRCH38_IMAGE) > $@
 
-.PHONY: benchmark-wheel
-benchmark-wheel:
-	$(MAKE) -C hail python/hail/hail_pip_version
-	cd benchmark/python/ && HAIL_BENCHMARK_VERSION=$$(cat python/hail/hail_pip_version) python3 setup.py -q bdist_wheel
+benchmark-wheel: $(shell git ls-files benchmark/python) hail/python/hail/hail_pip_version
+	cd benchmark/python && HAIL_BENCHMARK_VERSION=$$(cat ../../hail/python/hail/hail_pip_version) python3 setup.py -q bdist_wheel
+	touch benchmark-wheel
 
 .PHONY: install
 install-benchmark: benchmark-wheel
-	-$(PIP) uninstall -y benchmark_hail
-	$(PIP) -q install $(BENCHMARK_WHEEL)
+	-python3 -m pip uninstall -y benchmark_hail
+	python3 -m pip -q install benchmark/python/dist/benchmark_hail-$$(cat hail/python/hail/hail_pip_version)-py3-none-any.whl
 
 BENCHMARK_IMAGE_REPO ?= us-docker.pkg.dev/broad-ctsa/hail-benchmarks/
-benchmark-image: benchmark-wheel hail/python/pinned-requirements.txt
+benchmark-image: wheel
+benchmark-image: benchmark-wheel
+benchmark-image: hail/python/hail/hail_pip_version
+benchmark-image: hail/python/pinned-requirements.txt
+benchmark-image: hail/python/dev/pinned-requirements.txt
 	$(eval BENCHMARK_IMAGE := $(BENCHMARK_IMAGE_REPO)benchmark_$(shell whoami):$(TOKEN))
-	$(MAKE) -C hail wheel
 	python3 ci/jinja2_render.py '{"global":{"docker_root_image":"ubuntu:20.04"},"hail_pip_version":"'$$(cat hail/python/hail/hail_pip_version)'"}' benchmark/Dockerfile benchmark/Dockerfile.out
 	./docker-build.sh . benchmark/Dockerfile.out $(BENCHMARK_IMAGE)
 	echo $(BENCHMARK_IMAGE) > $@
@@ -230,10 +246,9 @@ BENCHMARK_REPLICATES ?= 5
 HAIL_WHEEL_DESCRIPTOR ?= $(HAIL_PIP_VERSION)-$(SHORT_REVISION)
 BENCHMARK_BUCKET ?= gs://hail-benchmarks-2
 .PHONY: benchmark
-benchmark: benchmark-image install-benchmark
+benchmark: benchmark-image install-benchmark python/hail/hail_version
 	@echo Using pushed image $$(cat benchmark-image)
-	$(MAKE) -c hail python/hail/hail_version
-	python3 scripts/benchmark_in_batch.py $(cat benchmark-image) $(BENCHMARK_BUCKET)/$(shell whoami) $$(cat python/hail/hail_version) $(BENCHMARK_REPLICATES) $(BENCHMARK_ITERS)
+	python3 scripts/benchmark_in_batch.py $(cat benchmark-image) $(BENCHMARK_BUCKET)/$(shell whoami) $$(cat hail/python/hail/hail_version) $(BENCHMARK_REPLICATES) $(BENCHMARK_ITERS)
 
 clean-benchmark:
 	rm benchmark-image

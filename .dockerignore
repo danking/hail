@@ -13,7 +13,6 @@ hail/.pytest_cache/
 hail/.ensime.cache.d/
 hail/.ensime_cache.d/
 hail/.ensime_cache/
-hail/build/
 hail/hail.iml
 hail/hail.log
 hail/out/

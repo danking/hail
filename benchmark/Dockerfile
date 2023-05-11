@@ -36,11 +36,12 @@ RUN python3 -m pip install --upgrade --no-cache-dir --upgrade pip && \
   python3 -m pip install --upgrade --no-cache-dir aiomysql && \
   python3 -m pip check
 
-COPY hail hail
-RUN ls hail && exit 1
+COPY hail/build/deploy/dist/hail-0.2.116-py3-none-any.whl hail/build/deploy/dist/hail-0.2.116-py3-none-any.whl .
 
 RUN python3 -m pip install --upgrade --no-cache-dir --quiet hail-{{ hail_pip_version }}-py3-none-any.whl && \
   python3 -m pip check
 
-RUN python3 -m pip install --upgrade --no-cache-dir --quiet benchmark/python/dist/benchmark_hail-{{ hail_pip_version }}-py3-none-any.whl && \
+COPY benchmark/python/dist/benchmark_hail-{{ hail_pip_version }}-py3-none-any.whl .
+
+RUN python3 -m pip install --upgrade --no-cache-dir --quiet benchmark_hail-{{ hail_pip_version }}-py3-none-any.whl && \
   python3 -m pip check
