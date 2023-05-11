@@ -206,3 +206,36 @@ vep-grch38-image: hail-ubuntu-image
 	python3 ci/jinja2_render.py '{"hail_ubuntu_image":{"image":"'$$(cat hail-ubuntu-image)'"}}' vep/grch38/95/Dockerfile vep/grch38/95/Dockerfile.out
 	./docker-build.sh docker/vep/grch38/95/Dockerfile.out $(VEP_GRCH38_IMAGE)
 	echo $(VEP_GRCH38_IMAGE) > $@
+
+.PHONY: benchmark-wheel
+benchmark-wheel:
+	$(MAKE) -C hail python/hail/hail_pip_version
+	cd benchmark/python/ && HAIL_BENCHMARK_VERSION=$$(cat python/hail/hail_pip_version) python3 setup.py -q bdist_wheel
+
+.PHONY: install
+install-benchmark: benchmark-wheel
+	-$(PIP) uninstall -y benchmark_hail
+	$(PIP) -q install $(BENCHMARK_WHEEL)
+
+benchmark-image: benchmark-wheel
+	$(eval BENCHMARK_IMAGE := $(DOCKER_PREFIX)/benchmark_$(shell whoami):$(TOKEN))
+	$(MAKE) -C hail wheel
+	python3 ci/jinja2_render.py '{"global":{"docker_root_image":"ubuntu:20.04"},"hail_pip_version":"'$$(cat hail/python/hail/hail_pip_version)'"}' benchmark/Dockerfile benchmark/Dockerfile.out
+	./docker-build.sh benchmark/Dockerfile.out $(BENCHMARK_IMAGE)
+	echo $(BENCHMARK_IMAGE) > $@
+
+BENCHMARK_ITERS ?= 3
+BENCHMARK_REPLICATES ?= 5
+HAIL_WHEEL_DESCRIPTOR ?= $(HAIL_PIP_VERSION)-$(SHORT_REVISION)
+BENCHMARK_BUCKET ?= gs://hail-benchmarks-2
+.PHONY: benchmark
+benchmark: benchmark-image install-benchmark
+	@echo Using pushed image $$(cat benchmark-image)
+	$(MAKE) -c hail python/hail/hail_version
+	python3 scripts/benchmark_in_batch.py $(cat benchmark-image) $(BENCHMARK_BUCKET)/$(shell whoami) $$(cat python/hail/hail_version) $(BENCHMARK_REPLICATES) $(BENCHMARK_ITERS)
+
+clean-benchmark:
+	rm benchmark-image
+	rm -rf benchmark/python/dist/*
+	rm -rf benchmark/python/build/*
+	rm benchmark/Dockerfile.out
