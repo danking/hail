@@ -3,7 +3,7 @@ package is.hail
 import is.hail.annotations.ExtendedOrdering
 import is.hail.check.Gen
 import is.hail.expr.ir.ByteArrayBuilder
-import is.hail.io.fs.{FS, FileListEntry}
+import is.hail.io.fs.{FS, FileStatus}
 import org.apache.commons.io.output.TeeOutputStream
 import org.apache.commons.lang3.StringUtils
 import org.apache.hadoop.fs.PathIOException
@@ -104,41 +104,41 @@ package object utils extends Logging
 
   def checkGzipOfGlobbedFiles(
     globPaths: Seq[String],
-    fileListEntries: Array[FileListEntry],
+    fileStatuses: Array[_ <: FileStatus],
     forceGZ: Boolean,
     gzAsBGZ: Boolean,
     maxSizeMB: Int = 128
   ) = {
-    if (fileListEntries.isEmpty)
+    if (fileStatuses.isEmpty)
       fatal(s"arguments refer to no files: ${globPaths.toIndexedSeq}.")
     if (!gzAsBGZ) {
-      fileListEntries.foreach { fileListEntry =>
-        val path = fileListEntry.getPath
+      fileStatuses.foreach { fileStatus =>
+        val path = fileStatus.getPath
         if (path.endsWith(".gz"))
-          checkGzippedFile(fileListEntry, forceGZ, false, maxSizeMB)
+          checkGzippedFile(fileStatus, forceGZ, false, maxSizeMB)
       }
     }
   }
 
   def checkGzippedFile(
-    fileListEntry: FileListEntry,
+    fileStatus: FileStatus,
     forceGZ: Boolean,
     gzAsBGZ: Boolean,
     maxSizeMB: Int = 128
   ) {
     if (!forceGZ && !gzAsBGZ)
       fatal(
-        s"""Cannot load file '${fileListEntry.getPath}'
+        s"""Cannot load file '${fileStatus.getPath}'
            |  .gz cannot be loaded in parallel. Is the file actually *block* gzipped?
            |  If the file is actually block gzipped (even though its extension is .gz),
            |  use the 'force_bgz' argument to treat all .gz file extensions as .bgz.
            |  If you are sure that you want to load a non-block-gzipped file serially
            |  on one core, use the 'force' argument.""".stripMargin)
     else if (!gzAsBGZ) {
-      val fileSize = fileListEntry.getLen
+      val fileSize = fileStatus.getLen
       if (fileSize > 1024 * 1024 * maxSizeMB)
         warn(
-          s"""file '${fileListEntry.getPath}' is ${ readableBytes(fileSize) }
+          s"""file '${fileStatus.getPath}' is ${ readableBytes(fileSize) }
              |  It will be loaded serially (on one core) due to usage of the 'force' argument.
              |  If it is actually block-gzipped, either rename to .bgz or use the 'force_bgz'
              |  argument.""".stripMargin)

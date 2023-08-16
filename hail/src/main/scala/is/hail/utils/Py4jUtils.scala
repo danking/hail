@@ -2,7 +2,7 @@ package is.hail.utils
 
 import is.hail.HailContext
 import is.hail.expr.JSONAnnotationImpex
-import is.hail.io.fs.{FS, FileListEntry, SeekableDataInputStream}
+import is.hail.io.fs.{FS, FileListEntry, FileStatus, SeekableDataInputStream}
 import is.hail.types.virtual.Type
 import org.json4s.JsonAST._
 import org.json4s.jackson.JsonMethods
@@ -51,20 +51,24 @@ trait Py4jUtils {
   def makeDouble(d: Double): Double = d
 
   def ls(fs: FS, path: String): String = {
-    val statuses = fs.listDirectory(path)
-    JsonMethods.compact(JArray(statuses.map(fs => fileListEntryToJson(fs)).toList))
+    val fileListEntries = fs.listDirectory(path)
+    JsonMethods.compact(JArray(fileListEntries.map(fileListEntry => fileListEntryToJson(fileListEntry)).toList))
+  }
+
+  def fileStatus(fs: FS, path: String): String = {
+    val stat = fs.fileStatus(path)
+    JsonMethods.compact(fileStatusToJson(stat))
   }
 
   def fileListEntry(fs: FS, path: String): String = {
-    val stat = fs.fileListEntry(path)
-    JsonMethods.compact(fileListEntryToJson(stat))
+    val fileListEntry = fs.fileListEntry(path)
+    JsonMethods.compact(fileListEntryToJson(fileListEntry))
   }
 
-  private def fileListEntryToJson(fs: FileListEntry): JObject = {
+  private def fileStatusToJson(fs: FileStatus): JObject = {
     JObject(
       "path" -> JString(fs.getPath.toString),
       "size" -> JInt(fs.getLen),
-      "is_dir" -> JBool(fs.isDirectory),
       "is_link" -> JBool(fs.isSymlink),
       "modification_time" ->
         (if (fs.getModificationTime != null)
@@ -78,6 +82,10 @@ trait Py4jUtils {
           JString(fs.getOwner)
         else
           JNull))
+  }
+
+  private def fileListEntryToJson(fs: FileListEntry): JObject = {
+    JObject(fileStatusToJson(fs).obj :+ ("is_dir" -> JBool(fs.isDirectory)))
   }
 
   private val kilo: Long = 1024

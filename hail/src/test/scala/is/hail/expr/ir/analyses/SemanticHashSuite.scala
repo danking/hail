@@ -297,6 +297,7 @@ class SemanticHashSuite extends HailSuite {
           override def isSymlink: Boolean = ???
           override def isFile: Boolean = true
           override def getOwner: String = ???
+          override def getActualUrl: String = ???
         })
     }
 }

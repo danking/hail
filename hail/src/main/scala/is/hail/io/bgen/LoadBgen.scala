@@ -225,7 +225,7 @@ object LoadBgen {
   }
 
   def getIndexFileNames(fs: FS, files: Array[String], indexFileMap: Map[String, String]): Array[String] = {
-    def absolutePath(rel: String): String = fs.fileListEntry(rel).getPath.toString
+    def absolutePath(rel: String): String = fs.fileStatus(rel).getPath
 
     val fileMapping = Option(indexFileMap)
       .getOrElse(Map.empty[String, String])
