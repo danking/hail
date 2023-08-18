@@ -22,7 +22,10 @@ import scala.{concurrent => scalaConcurrent}
 import scala.reflect.ClassTag
 
 
-case class GoogleStorageFSURL(val bucket: String, val path: String) extends FSURL[GoogleStorageFSURL] {
+case class GoogleStorageFSURL(
+  val bucket: String,
+  val path: String
+) extends FSURL[GoogleStorageFSURL] {
   def addPathComponent(c: String): GoogleStorageFSURL = {
     if (path == "")
       withPath(c)
@@ -83,7 +86,10 @@ object GoogleStorageFileListEntry {
 }
 
 object RequesterPaysConfiguration {
-  def fromFlags(requesterPaysProject: String, requesterPaysBuckets: String): Option[RequesterPaysConfiguration] = {
+  def fromFlags(
+    requesterPaysProject: String,
+    requesterPaysBuckets: String
+  ): Option[RequesterPaysConfiguration] = {
     if (requesterPaysProject == null) {
       if (requesterPaysBuckets == null) {
         None
@@ -101,7 +107,6 @@ object RequesterPaysConfiguration {
   }
 }
 
-
 case class RequesterPaysConfiguration(
   val project: String,
   val buckets: Option[Set[String]] = None
@@ -113,10 +118,330 @@ class GoogleStorageFS(
 ) extends FS {
   type URL = GoogleStorageFSURL
 
-  import GoogleStorageFS._
+  import GoogleStorageFS.log
+
+  private lazy val storage: Storage = {
+    val transportOptions = HttpTransportOptions.newBuilder()
+      .setConnectTimeout(5000)
+      .setReadTimeout(5000)
+      .build()
+    serviceAccountKey match {
+      case None =>
+        log.info("Initializing google storage client from latent credentials")
+        StorageOptions.newBuilder()
+          .setTransportOptions(transportOptions)
+          .build()
+          .getService
+      case Some(keyData) =>
+        log.info("Initializing google storage client from service account key")
+        StorageOptions.newBuilder()
+          .setCredentials(
+            ServiceAccountCredentials.fromStream(new ByteArrayInputStream(keyData.getBytes)))
+          .setTransportOptions(transportOptions)
+          .build()
+          .getService
+    }
+  }
 
   def validUrl(filename: String): Boolean = {
     filename.startsWith("gs://")
+  }
+
+  def parseUrl(filename: String): URL = GoogleStorageFS.parseUrl(filename)
+
+  def openNoCompression(filename: String): SeekableDataInputStream = retryTransientErrors {
+    val url = parseUrl(filename)
+
+    new WrappedSeekableDataInputStream(new FSSeekableInputStream {
+      private[this] var reader: ReadChannel = null
+
+      private[this] def retryingRead(): Int = {
+        retryTransientErrors(
+          { reader.read(bb) },
+          reset = Some({ () => reader.seek(getPosition) })
+        )
+      }
+
+      private[this] def readHandlingRequesterPays(bb: ByteBuffer): Int = {
+        if (reader != null) {
+          retryingRead()
+        } else {
+          handleRequesterPays(
+            { (options: Seq[BlobSourceOption]) =>
+              reader = retryTransientErrors { storage.reader(url.bucket, url.path, options:_*) }
+              reader.seek(getPosition)
+              retryingRead()
+            },
+            BlobSourceOption.userProject _,
+            url.bucket
+          )
+        }
+      }
+
+      override def close(): Unit = {
+        if (!closed) {
+          if (reader != null) {
+            reader.close()
+          }
+          closed = true
+        }
+      }
+
+      override def fill(): Int = {
+        bb.clear()
+
+        // read some bytes
+        var n = 0
+        while (n == 0) {
+          n = readHandlingRequesterPays(bb)
+          if (n == -1) {
+            return -1
+          }
+        }
+        bb.flip()
+
+        assert(bb.position() == 0 && bb.remaining() > 0)
+        return n
+      }
+
+      override def physicalSeek(newPos: Long): Unit = {
+        if (reader != null) {
+          reader.seek(newPos)
+        }
+      }
+    })
+  }
+
+  override def readNoCompression(filename: String): Array[Byte] = retryTransientErrors {
+    val url = parseUrl(filename)
+    storage.readAllBytes(url.bucket, url.path)
+  }
+
+  def createNoCompression(filename: String): PositionedDataOutputStream = retryTransientErrors {
+    log.info(f"createNoCompression: ${filename}")
+    val url = parseUrl(filename)
+    val blobInfo = BlobInfo.newBuilder(BlobId.of(url.bucket, url.path)).build()
+
+    new WrappedPositionedDataOutputStream(new FSPositionedOutputStream(8 * 1024 * 1024) {
+      private[this] var writer: WriteChannel = null
+
+      private[this] def doHandlingRequesterPays(f: => Unit): Unit = {
+        if (writer != null) {
+          f
+        } else {
+          handleRequesterPays(
+            { (options: Seq[BlobWriteOption]) =>
+              writer = retryTransientErrors { storage.writer(blobInfo, options:_*) }
+              f
+            },
+            BlobWriteOption.userProject _,
+            url.bucket
+          )
+        }
+      }
+
+      override def flush(): Unit = {
+        bb.flip()
+
+        while (bb.remaining() > 0)
+          doHandlingRequesterPays {
+            writer.write(bb)
+          }
+
+        bb.clear()
+      }
+
+      override def close(): Unit = {
+        log.info(f"close: ${filename}")
+        if (!closed) {
+          flush()
+          retryTransientErrors {
+            doHandlingRequesterPays {
+              writer.close()
+            }
+          }
+          closed = true
+        }
+        log.info(f"closed: ${filename}")
+      }
+    })
+  }
+
+  def delete(filename: String, recursive: Boolean): Unit = retryTransientErrors {
+    val url = parseUrl(filename)
+    if (recursive) {
+      var page = retryTransientErrors {
+        handleRequesterPays(
+          (options: Seq[BlobListOption]) => storage.list(url.bucket, (BlobListOption.prefix(url.path) +: options):_*),
+          BlobListOption.userProject _,
+          url.bucket
+        )
+      }
+      while (page != null) {
+        val blobIds = page.getValues.asScala.map(_.getBlobId).toArray
+        if (blobIds.length > 0) {
+          retryTransientErrors {
+            handleRequesterPays(
+              { (options: Seq[BlobSourceOption]) =>
+                if (options.size == 0) {
+                  storage.delete(blobIds: _*)
+                } else {
+                  blobIds.foreach(storage.delete(_, options:_*))
+                }
+              },
+              BlobSourceOption.userProject _,
+              url.bucket
+            )
+          }
+        }
+        page = page.getNextPage()
+      }
+    } else {
+      // Storage.delete is idempotent. it returns a Boolean which is false if the file did not exist
+      handleRequesterPays(
+        (options: Seq[BlobSourceOption]) => storage.delete(url.bucket, url.path, options:_*),
+        BlobSourceOption.userProject _,
+        url.bucket
+      )
+    }
+  }
+
+  override def listDirectory(filename: String): Array[FileListEntry] = retryTransientErrors {
+    val url = parseUrl(filename)
+    val path = if (url.path.endsWith("/")) url.path else url.path + "/"
+
+    val blobs = retryTransientErrors {
+      handleRequesterPays(
+        (options: Seq[BlobListOption]) => storage.list(url.bucket, (BlobListOption.prefix(path) +: BlobListOption.currentDirectory() +: options):_*),
+        BlobListOption.userProject _,
+        url.bucket
+      )
+    }
+
+    blobs.getValues.iterator.asScala
+      .filter(b => b.getName != path) // elide the self-referential entry
+      .map(b => GoogleStorageFileListEntry(b))
+      .toArray
+  }
+
+  override def fileStatus(filename: String): FileStatus = retryTransientErrors {
+    val url = parseUrl(filename)
+    if (url.path == "")
+      return GoogleStorageFileListEntry.dir(url)
+
+    val blob = retryTransientErrors {
+      handleRequesterPays(
+        (options: Seq[BlobGetOption]) =>
+        storage.get(url.bucket, url.path, options:_*),
+        BlobGetOption.userProject _,
+        url.bucket
+      )
+    }
+
+    if (blob == null) {
+      throw new FileNotFoundException(url.toString)
+    }
+
+    new BlobStorageFileStatus(
+      url.toString,
+      blob.getUpdateTimeOffsetDateTime.toInstant().toEpochMilli(),
+      blob.getSize
+    )
+  }
+
+  override def getFileListEntry(filename: String): FileListEntry = retryTransientErrors {
+    val url = parseUrl(filename)
+    if (url.getPath == "") {
+      return GoogleStorageFileListEntry.dir(url)
+    }
+
+    val prefix = dropTrailingSlash(url.getPath)
+    val obj = retryTransientErrors {
+       handleRequesterPays(
+         (options: Seq[BlobListOption]) => storage.list(url.bucket, (BlobListOption.prefix(prefix) +: BlobListOption.currentDirectory() +: options):_*),
+         BlobListOption.userProject _,
+         url.bucket
+       )
+    }
+    val it = obj.iterateAll().iterator.asScala.map(GoogleStorageFileListEntry.apply _)
+
+    FS.fileListEntryFromIterator(url, it)
+  }
+
+  def makeQualified(filename: String): String = {
+    if (!filename.startsWith("gs://"))
+      throw new IllegalArgumentException(s"Invalid path, expected gs://bucket/path $filename")
+    filename
+  }
+
+  override def copy(src: String, dst: String, deleteSource: Boolean = false): Unit = {
+    val srcUrl = parseUrl(src)
+    val dstUrl = parseUrl(dst)
+    val srcId = BlobId.of(srcUrl.bucket, srcUrl.path)
+    val dstId = BlobId.of(dstUrl.bucket, dstUrl.path)
+
+    // There is only one userProject for the whole request, the source takes precedence over the target.
+    // https://github.com/googleapis/java-storage/blob/0bd17b1f70e47081941a44f018e3098b37ba2c47/google-cloud-storage/src/main/java/com/google/cloud/storage/spi/v1/HttpStorageRpc.java#L1016-L1019
+    def retryCopyIfRequesterPays(exc: Exception, message: String, code: Int): Unit = {
+      if (message == null) {
+        throw exc
+      }
+
+      val probablyNeedsRequesterPays = message.equals("userProjectMissing") || (code == 400 && message.contains("requester pays"))
+      if (!probablyNeedsRequesterPays) {
+        throw exc
+      }
+
+      val config = requesterPaysConfiguration match {
+        case None =>
+          throw exc
+        case Some(RequesterPaysConfiguration(project, None)) =>
+          Storage.CopyRequest.newBuilder()
+            .setSourceOptions(BlobSourceOption.userProject(project))
+            .setSource(srcId)
+            .setTarget(dstId)
+            .build()
+        case Some(RequesterPaysConfiguration(project, Some(buckets))) =>
+          if (buckets.contains(srcUrl.bucket) && buckets.contains(dstUrl.bucket)) {
+            Storage.CopyRequest.newBuilder()
+              .setSourceOptions(BlobSourceOption.userProject(project))
+              .setSource(srcId)
+              .setTarget(dstId)
+              .build()
+          } else if (buckets.contains(srcUrl.bucket) || buckets.contains(dstUrl.bucket)) {
+            throw new RuntimeException(s"both ${srcUrl.bucket} and ${dstUrl.bucket} must be specified in the requester_pays_buckets to copy between these buckets", exc)
+          } else {
+            throw exc
+          }
+      }
+      storage.copy(config).getResult() // getResult is necessary to cause this to go to completion
+    }
+
+    def discoverExceptionThenRetryCopyIfRequesterPays(exc: Throwable): Unit = exc match {
+      case exc: IOException if exc.getCause() != null =>
+        discoverExceptionThenRetryCopyIfRequesterPays(exc.getCause())
+      case exc: StorageException =>
+        retryCopyIfRequesterPays(exc, exc.getMessage(), exc.getCode())
+      case exc: GoogleJsonResponseException =>
+        retryCopyIfRequesterPays(exc, exc.getMessage(), exc.getStatusCode())
+      case exc: Throwable =>
+        throw exc
+    }
+
+    try {
+      storage.copy(
+        Storage.CopyRequest.newBuilder()
+          .setSource(srcId)
+          .setTarget(dstId)
+          .build()
+      ).getResult() // getResult is necessary to cause this to go to completion
+    } catch {
+      case exc: Throwable =>
+        discoverExceptionThenRetryCopyIfRequesterPays(exc)
+    }
+
+    if (deleteSource)
+      storage.delete(srcId)
   }
 
   def getConfiguration(): Option[RequesterPaysConfiguration] = {
@@ -127,7 +452,10 @@ class GoogleStorageFS(
     requesterPaysConfiguration = config.asInstanceOf[Option[RequesterPaysConfiguration]]
   }
 
-  private[this] def requesterPaysOptions[T](bucket: String, makeUserProjectOption: String => T): Seq[T] = {
+  private[this] def requesterPaysOptions[T](
+    bucket: String,
+    makeUserProjectOption: String => T
+  ): Seq[T] = {
     requesterPaysConfiguration match {
       case None =>
         Seq()
@@ -189,340 +517,5 @@ class GoogleStorageFS(
       case exc: Throwable =>
         retryIfRequesterPays(exc, makeRequest, makeUserProjectOption, bucket)
     }
-  }
-
-  private lazy val storage: Storage = {
-    val transportOptions = HttpTransportOptions.newBuilder()
-      .setConnectTimeout(5000)
-      .setReadTimeout(5000)
-      .build()
-    serviceAccountKey match {
-      case None =>
-        log.info("Initializing google storage client from latent credentials")
-        StorageOptions.newBuilder()
-          .setTransportOptions(transportOptions)
-          .build()
-          .getService
-      case Some(keyData) =>
-        log.info("Initializing google storage client from service account key")
-        StorageOptions.newBuilder()
-          .setCredentials(
-            ServiceAccountCredentials.fromStream(new ByteArrayInputStream(keyData.getBytes)))
-          .setTransportOptions(transportOptions)
-          .build()
-          .getService
-    }
-  }
-
-  def openNoCompression(filename: String, _debug: Boolean = false): SeekableDataInputStream = retryTransientErrors {
-    assert(!_debug)
-    val url = parseUrl(filename)
-
-    val is: SeekableInputStream = new FSSeekableInputStream {
-      private[this] var reader: ReadChannel = null
-
-      private[this] def retryingRead(): Int = {
-        retryTransientErrors(
-          { reader.read(bb) },
-          reset = Some({ () => reader.seek(getPosition) })
-        )
-      }
-
-      private[this] def readHandlingRequesterPays(bb: ByteBuffer): Int = {
-        if (reader != null) {
-          retryingRead()
-        } else {
-          handleRequesterPays(
-            { (options: Seq[BlobSourceOption]) =>
-              reader = retryTransientErrors { storage.reader(url.bucket, url.path, options:_*) }
-              reader.seek(getPosition)
-              retryingRead()
-            },
-            BlobSourceOption.userProject _,
-            url.bucket
-          )
-        }
-      }
-
-      override def close(): Unit = {
-        if (!closed) {
-          if (reader != null) {
-            reader.close()
-          }
-          closed = true
-        }
-      }
-
-      override def fill(): Int = {
-        bb.clear()
-
-        // read some bytes
-        var n = 0
-        while (n == 0) {
-          n = readHandlingRequesterPays(bb)
-          if (n == -1) {
-            return -1
-          }
-        }
-        bb.flip()
-
-        assert(bb.position() == 0 && bb.remaining() > 0)
-        return n
-      }
-
-      override def physicalSeek(newPos: Long): Unit = {
-        if (reader != null) {
-          reader.seek(newPos)
-        }
-      }
-    }
-
-    new WrappedSeekableDataInputStream(is)
-  }
-
-  override def readNoCompression(filename: String): Array[Byte] = retryTransientErrors {
-    val url = parseUrl(filename)
-    storage.readAllBytes(url.bucket, url.path)
-  }
-
-  def createNoCompression(filename: String): PositionedDataOutputStream = retryTransientErrors {
-    log.info(f"createNoCompression: ${filename}")
-    val url = parseUrl(filename)
-
-    val blobId = BlobId.of(url.bucket, url.path)
-    val blobInfo = BlobInfo.newBuilder(blobId)
-      .build()
-
-    val os: PositionedOutputStream = new FSPositionedOutputStream(8 * 1024 * 1024) {
-      private[this] var writer: WriteChannel = null
-
-      private[this] def doHandlingRequesterPays(f: => Unit): Unit = {
-        if (writer != null) {
-          f
-        } else {
-          handleRequesterPays(
-            { (options: Seq[BlobWriteOption]) =>
-              writer = retryTransientErrors { storage.writer(blobInfo, options:_*) }
-              f
-            },
-            BlobWriteOption.userProject _,
-            url.bucket
-          )
-        }
-      }
-
-      override def flush(): Unit = {
-        bb.flip()
-
-        while (bb.remaining() > 0)
-          doHandlingRequesterPays {
-            writer.write(bb)
-          }
-
-        bb.clear()
-      }
-
-      override def close(): Unit = {
-        log.info(f"close: ${filename}")
-        if (!closed) {
-          flush()
-          retryTransientErrors {
-            doHandlingRequesterPays {
-              writer.close()
-            }
-          }
-          closed = true
-        }
-        log.info(f"closed: ${filename}")
-      }
-    }
-
-    new WrappedPositionedDataOutputStream(os)
-  }
-
-  override def copy(src: String, dst: String, deleteSource: Boolean = false): Unit = {
-    val srcUrl = parseUrl(src)
-    val dstUrl = parseUrl(dst)
-    val srcId = BlobId.of(srcUrl.bucket, srcUrl.path)
-    val dstId = BlobId.of(dstUrl.bucket, dstUrl.path)
-
-    // There is only one userProject for the whole request, the source takes precedence over the target.
-    // https://github.com/googleapis/java-storage/blob/0bd17b1f70e47081941a44f018e3098b37ba2c47/google-cloud-storage/src/main/java/com/google/cloud/storage/spi/v1/HttpStorageRpc.java#L1016-L1019
-    def retryCopyIfRequesterPays(exc: Exception, message: String, code: Int): Unit = {
-      if (message == null) {
-        throw exc
-      }
-
-      val probablyNeedsRequesterPays = message.equals("userProjectMissing") || (code == 400 && message.contains("requester pays"))
-      if (!probablyNeedsRequesterPays) {
-        throw exc
-      }
-
-      val config = requesterPaysConfiguration match {
-        case None =>
-          throw exc
-        case Some(RequesterPaysConfiguration(project, None)) =>
-          Storage.CopyRequest.newBuilder()
-            .setSourceOptions(BlobSourceOption.userProject(project))
-            .setSource(srcId)
-            .setTarget(dstId)
-            .build()
-        case Some(RequesterPaysConfiguration(project, Some(buckets))) =>
-          if (buckets.contains(srcUrl.bucket) && buckets.contains(dstUrl.bucket)) {
-            Storage.CopyRequest.newBuilder()
-              .setSourceOptions(BlobSourceOption.userProject(project))
-              .setSource(srcId)
-              .setTarget(dstId)
-              .build()
-          } else if (buckets.contains(srcUrl.bucket) || buckets.contains(dstUrl.bucket)) {
-            throw new RuntimeException(s"both ${srcUrl.bucket} and ${dstUrl.bucket} must be specified in the requester_pays_buckets to copy between these buckets", exc)
-          } else {
-            throw exc
-          }
-      }
-      storage.copy(config).getResult() // getResult is necessary to cause this to go to completion
-    }
-
-    def discoverExceptionThenRetryCopyIfRequesterPays(exc: Throwable): Unit = exc match {
-      case exc: IOException if exc.getCause() != null =>
-        discoverExceptionThenRetryCopyIfRequesterPays(exc.getCause())
-      case exc: StorageException =>
-        retryCopyIfRequesterPays(exc, exc.getMessage(), exc.getCode())
-      case exc: GoogleJsonResponseException =>
-        retryCopyIfRequesterPays(exc, exc.getMessage(), exc.getStatusCode())
-      case exc: Throwable =>
-        throw exc
-    }
-
-
-    try {
-      storage.copy(
-        Storage.CopyRequest.newBuilder()
-          .setSource(srcId)
-          .setTarget(dstId)
-          .build()
-      ).getResult() // getResult is necessary to cause this to go to completion
-    } catch {
-      case exc: Throwable =>
-        discoverExceptionThenRetryCopyIfRequesterPays(exc)
-    }
-
-    if (deleteSource)
-      storage.delete(srcId)
-  }
-
-  def delete(filename: String, recursive: Boolean): Unit = retryTransientErrors {
-    val url = parseUrl(filename)
-    if (recursive) {
-      var page = retryTransientErrors {
-        handleRequesterPays(
-          (options: Seq[BlobListOption]) => storage.list(url.bucket, (BlobListOption.prefix(url.path) +: options):_*),
-          BlobListOption.userProject _,
-          url.bucket
-        )
-      }
-      while (page != null) {
-        retryTransientErrors {
-          val blobs = page.getValues.asScala.map(_.getBlobId).asJava
-          if (blobs.iterator().hasNext) {
-            handleRequesterPays(
-              { (options: Seq[BlobSourceOption]) =>
-                if (options.size == 0) {
-                  storage.delete(blobs)
-                } else {
-                  blobs.asScala.foreach(storage.delete(_, options:_*))
-                }
-              },
-              BlobSourceOption.userProject _,
-              url.bucket
-            )
-          }
-        }
-        page = page.getNextPage()
-      }
-    } else {
-      // Storage.delete is idempotent. it returns a Boolean which is false if the file did not exist
-      handleRequesterPays(
-        (options: Seq[BlobSourceOption]) => storage.delete(url.bucket, url.path, options:_*),
-        BlobSourceOption.userProject _,
-        url.bucket
-      )
-    }
-  }
-
-  def glob(filename: String): Array[FileListEntry] = retryTransientErrors {
-    val url = parseUrl(filename)
-    globWithPrefix(url.withPath(""), path = dropTrailingSlash(url.path))
-  }
-
-  def listDirectory(filename: String): Array[FileListEntry] = listDirectory(parseUrl(filename))
-
-  override def listDirectory(url: GoogleStorageFSURL): Array[FileListEntry] = retryTransientErrors {
-    val path = if (url.path.endsWith("/")) url.path else url.path + "/"
-
-    val blobs = retryTransientErrors {
-      handleRequesterPays(
-        (options: Seq[BlobListOption]) => storage.list(url.bucket, (BlobListOption.prefix(path) +: BlobListOption.currentDirectory() +: options):_*),
-        BlobListOption.userProject _,
-        url.bucket
-      )
-    }
-
-    blobs.getValues.iterator.asScala
-      .filter(b => b.getName != path) // elide the self-referential entry
-      .map(b => GoogleStorageFileListEntry(b))
-      .toArray
-  }
-
-  override def fileStatus(filename: String): FileStatus = fileStatus(parseUrl(filename))
-
-  override def fileStatus(url: GoogleStorageFSURL): FileStatus = retryTransientErrors {
-    if (url.path == "")
-      return GoogleStorageFileListEntry.dir(url)
-
-    val blob = retryTransientErrors {
-      handleRequesterPays(
-        (options: Seq[BlobGetOption]) =>
-        storage.get(url.bucket, url.path, options:_*),
-        BlobGetOption.userProject _,
-        url.bucket
-      )
-    }
-
-    if (blob == null) {
-      throw new FileNotFoundException(url.toString)
-    }
-
-    new BlobStorageFileStatus(
-      url.toString,
-      blob.getUpdateTimeOffsetDateTime.toInstant().toEpochMilli(),
-      blob.getSize
-    )
-  }
-
-  override def getFileListEntry(filename: String): FileListEntry = getFileListEntry(parseUrl(filename))
-
-  override def getFileListEntry(url: URL): FileListEntry = {
-    if (url.getPath == "") {
-      return GoogleStorageFileListEntry.dir(url)
-    }
-
-    val prefix = dropTrailingSlash(url.getPath)
-    val obj = retryTransientErrors {
-       handleRequesterPays(
-         (options: Seq[BlobListOption]) => storage.list(url.bucket, (BlobListOption.prefix(prefix) +: BlobListOption.currentDirectory() +: options):_*),
-         BlobListOption.userProject _,
-         url.bucket
-       )
-    }
-    val it = obj.iterateAll().iterator.asScala.map(GoogleStorageFileListEntry.apply _)
-
-    FS.fileListEntryFromIterator(url, it)
-  }
-
-  def makeQualified(filename: String): String = {
-    if (!filename.startsWith("gs://"))
-      throw new IllegalArgumentException(s"Invalid path, expected gs://bucket/path $filename")
-    filename
   }
 }

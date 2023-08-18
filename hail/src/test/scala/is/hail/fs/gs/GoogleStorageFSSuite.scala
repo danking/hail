@@ -67,7 +67,7 @@ class GoogleStorageFSSuite extends TestNGSuite with FSSuite {
   @Test def testSeekAfterEOF(): Unit = {
     val prefix = s"$hail_test_storage_uri/google-storage-fs-suite/delete-many-files/${ java.util.UUID.randomUUID() }"
     val p = s"$prefix/seek_file"
-    using(fs.createCachedNoCompression(p)) { os =>
+    using(fs.createNoCompression(p)) { os =>
       os.write(1.toByte)
       os.write(2.toByte)
       os.write(3.toByte)

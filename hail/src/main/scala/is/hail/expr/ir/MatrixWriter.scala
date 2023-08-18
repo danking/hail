@@ -9,7 +9,7 @@ import is.hail.expr.ir.streams.StreamProducer
 import is.hail.expr.{JSONAnnotationImpex, Nat}
 import is.hail.io._
 import is.hail.io.bgen.BgenSettings
-import is.hail.io.fs.FS
+import is.hail.io.fs.{FS, getCodecExtension}
 import is.hail.io.gen.{BgenWriter, ExportGen}
 import is.hail.io.index.StagedIndexWriter
 import is.hail.io.plink.{BitPacker, ExportPlink}
@@ -472,7 +472,7 @@ case class MatrixVCFWriter(
     tm.requireColKeyString()
     ExportVCF.checkFormatSignature(tm.entryType)
 
-    val ext = ctx.fs.getCodecExtension(path)
+    val ext = getCodecExtension(path)
 
     val folder = if (exportType == ExportType.CONCATENATED)
       ctx.createTmpPath("write-vcf-concatenated")
@@ -842,7 +842,7 @@ case class VCFExportFinalizer(typ: MatrixType, outputPath: String, append: Optio
 
   def writeMetadata(writeAnnotations: => IEmitCode, cb: EmitCodeBuilder, region: Value[Region]): Unit = {
     val ctx: ExecuteContext = cb.emb.ctx
-    val ext = ctx.fs.getCodecExtension(outputPath)
+    val ext = getCodecExtension(outputPath)
 
     val annotations = writeAnnotations.get(cb).asBaseStruct
 

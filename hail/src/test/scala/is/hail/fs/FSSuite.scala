@@ -4,7 +4,7 @@ import java.io.FileNotFoundException
 import is.hail.fs.azure.AzureStorageFSSuite
 import is.hail.{HailSuite, TestUtils}
 import is.hail.backend.ExecuteContext
-import is.hail.io.fs.{FS, FileListEntry, GoogleStorageFS, Seekable, FileAndDirectoryException, dropTrailingSlash}
+import is.hail.io.fs.{FS, FileListEntry, GoogleStorageFS, Seekable, FileAndDirectoryException, dropTrailingSlash, getCodecExtension}
 import is.hail.utils._
 import org.apache.commons.codec.binary.Hex
 import org.apache.commons.io.IOUtils
@@ -265,11 +265,7 @@ trait FSSuite extends TestNGSuite {
   }
 
   @Test def testGetCodecExtension(): Unit = {
-    assert(fs.getCodecExtension("foo.vcf.bgz") == ".bgz")
-  }
-
-  @Test def testStripCodecExtension(): Unit = {
-    assert(fs.stripCodecExtension("foo.vcf.bgz") == "foo.vcf")
+    assert(getCodecExtension("foo.vcf.bgz") == ".bgz")
   }
 
   @Test def testReadWriteBytes(): Unit = {

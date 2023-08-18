@@ -56,13 +56,6 @@ class UtilsSuite extends HailSuite {
     assert(Array(1, 1).isSorted)
   }
 
-  @Test def testHadoopStripCodec() {
-    assert(fs.stripCodecExtension("file.tsv") == "file.tsv")
-    assert(fs.stripCodecExtension("file.tsv.gz") == "file.tsv")
-    assert(fs.stripCodecExtension("file.tsv.bgz") == "file.tsv")
-    assert(fs.stripCodecExtension("file") == "file")
-  }
-
   @Test def testPairRDDNoDup() {
     val answer1 = Array((1, (1, Option(1))), (2, (4, Option(2))), (3, (9, Option(3))), (4, (16, Option(4))))
     val pairRDD1 = sc.parallelize(Array(1, 2, 3, 4)).map { i => (i, i * i) }

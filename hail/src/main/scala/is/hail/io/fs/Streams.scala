@@ -1,3 +1,12 @@
+package is.hail.io.fs
+
+import is.hail.services._
+import is.hail.utils._
+
+import java.io._
+import java.nio.ByteBuffer
+import java.nio.charset._
+
 trait Positioned {
   def getPosition: Long
 }

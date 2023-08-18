@@ -1,25 +1,22 @@
 package is.hail.io.fs
 
 import is.hail.backend.BroadcastValue
-import is.hail.io.compress.{BGzipInputStream, BGzipOutputStream}
 import is.hail.services._
 import is.hail.utils._
 import is.hail.{HailContext, HailFeatureFlags}
-import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 import org.apache.commons.io.IOUtils
 import org.apache.hadoop
 
 import java.io._
-import java.nio.ByteBuffer
 import java.nio.charset._
 import java.nio.file.FileSystems
-import java.util.zip.GZIPOutputStream
 import scala.collection.mutable
 import scala.io.Source
 
 
 trait FSURL[T <: FSURL[T]] {
   def getPath: String
+  def withPath(newPath: String): T
   def addPathComponent(component: String): T
   def fromString(s: String): T
 
@@ -33,13 +30,11 @@ trait FileStatus {
   def getLen: Long
   def isSymlink: Boolean
   def getOwner: String
-  def isFileOrFileAndDirectory: Boolean = true
 }
 
 trait FileListEntry extends FileStatus {
   def isFile: Boolean
   def isDirectory: Boolean
-  override def isFileOrFileAndDirectory: Boolean = isFile
 }
 
 class BlobStorageFileStatus(
@@ -60,31 +55,9 @@ class BlobStorageFileListEntry(
 ) with FileListEntry {
   def isDirectory: Boolean = isDir
   def isFile: Boolean = !isDir
-  override def isFileOrFileAndDirectory = isFile
   override def toString: String = s"BSFLE($actualUrl $modificationTime $size $isDir)"
 
 }
-
-trait CompressionCodec {
-  def makeInputStream(is: InputStream): InputStream
-
-  def makeOutputStream(os: OutputStream): OutputStream
-}
-
-object GZipCompressionCodec extends CompressionCodec {
-  // java.util.zip.GZIPInputStream does not support concatenated files/multiple blocks
-  def makeInputStream(is: InputStream): InputStream = new GzipCompressorInputStream(is, true)
-
-  def makeOutputStream(os: OutputStream): OutputStream = new GZIPOutputStream(os)
-}
-
-object BGZipCompressionCodec extends CompressionCodec {
-  def makeInputStream(is: InputStream): InputStream = new BGzipInputStream(is)
-
-  def makeOutputStream(os: OutputStream): OutputStream = new BGzipOutputStream(os)
-}
-
-class FileAndDirectoryException(message: String) extends RuntimeException(message)
 
 object FS {
   def cloudSpecificFS(
@@ -160,72 +133,32 @@ object FS {
   }
 }
 
-trait FS extends Serializable {
+abstract class FS extends Serializable {
   type URL <: FSURL[URL]
 
   def validUrl(filename: String): Boolean
 
-  def openCachedNoCompression(filename: String): SeekableDataInputStream = openNoCompression(filename)
+  def parseUrl(filename: String): URL
 
-  def createCachedNoCompression(filename: String): PositionedDataOutputStream = createNoCompression(filename)
+  //////////////////////////////////////////////////////////////////////////////
+  // Read
 
-  def writeCached(filename: String)(writer: PositionedDataOutputStream => Unit) = writePDOS(filename)(writer)
+  def openNoCompression(filename: String): SeekableDataInputStream
 
-  def getCodecFromExtension(extension: String, gzAsBGZ: Boolean = false): CompressionCodec = {
-    extension match {
-      case ".gz" =>
-        if (gzAsBGZ)
-          BGZipCompressionCodec
-        else
-          GZipCompressionCodec
-      case ".bgz" =>
-        BGZipCompressionCodec
-      case ".tbi" =>
-        BGZipCompressionCodec
-      case _ =>
-        null
-    }
-  }
-
-  def getCodecFromPath(path: String, gzAsBGZ: Boolean = false): CompressionCodec =
-    getCodecFromExtension(getExtension(path), gzAsBGZ)
-
-  def getExtension(path: String): String = {
-    var i = path.length - 1
-    while (i >= 0) {
-      if (i == 0)
-        return ""
-
-      val c = path(i)
-      if (c == '.') {
-        if (path(i - 1) == '/')
-          return ""
-        else
-          return path.substring(i)
-      }
-      if (c == '/')
-        return ""
-      i -= 1
-    }
-
-    throw new AssertionError("unreachable")
-  }
-
-  def stripCodecExtension(path: String): String = {
-    val ext = getCodecExtension(path)
-    path.dropRight(ext.length)
-  }
-
-  def getCodecExtension(path: String): String = {
-    val ext = getExtension(path)
-    if (ext == ".gz" || ext == ".bgz" || ext == ".tbi")
-      ext
+  def open(path: String, codec: CompressionCodec): InputStream = {
+    val is = openNoCompression(path)
+    if (codec != null)
+      codec.makeInputStream(is)
     else
-      ""
+      is
+
   }
 
-  final def openNoCompression(filename: String): SeekableDataInputStream = openNoCompression(filename, false)
-  def openNoCompression(filename: String, _debug: Boolean): SeekableDataInputStream
+  def open(path: String): InputStream =
+    open(path, gzAsBGZ = false)
+
+  def open(path: String, gzAsBGZ: Boolean): InputStream =
+    open(path, getCodecFromPath(path, gzAsBGZ))
 
   def readNoCompression(filename: String): Array[Byte] = retryTransientErrors {
     using(openNoCompression(filename)) { is =>
@@ -233,43 +166,101 @@ trait FS extends Serializable {
     }
   }
 
+  //////////////////////////////////////////////////////////////////////////////
+  // Write
+
   def createNoCompression(filename: String): PositionedDataOutputStream
 
-  def mkDir(dirname: String): Unit = ()
+  def create(path: String): OutputStream = {
+    val os = createNoCompression(path)
+
+    val codec = getCodecFromPath(path, gzAsBGZ = false)
+    if (codec != null)
+      codec.makeOutputStream(os)
+    else
+      os
+  }
+
+  def write(filename: String)(writer: OutputStream => Unit) =
+    using(create(filename))(writer)
+
+  def writePDOS(filename: String)(writer: PositionedDataOutputStream => Unit) =
+    using(create(filename))(os => writer(outputStreamToPositionedDataOutputStream(os)))
+
+  def touch(filename: String): Unit = {
+    using(createNoCompression(filename))(_ => ())
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+  // Delete
 
   def delete(filename: String, recursive: Boolean)
+
+  //////////////////////////////////////////////////////////////////////////////
+  // Directories
+
+  def mkDir(dirname: String): Unit = ()
 
   def listDirectory(filename: String): Array[FileListEntry]
 
   def listDirectory(url: URL): Array[FileListEntry] = listDirectory(url.toString)
 
-  def glob(filename: String): Array[FileListEntry]
+  //////////////////////////////////////////////////////////////////////////////
+  // Metadata
 
-  private[this] def containsWildcard(path: String): Boolean = {
-    var i = 0
-    while (i < path.length) {
-      val c = path(i)
-      if (c == '\\') {
-        i += 1
-        if (i < path.length)
-          i += 1
-        else
-          return false
-      } else if (c == '*' || c == '{' || c == '?' || c == '[')
-        return true
+  def fileStatus(filename: String): FileStatus
 
-      i += 1
+  def fileStatus(url: URL): FileStatus = fileStatus(url.toString)
+
+  def getFileListEntry(filename: String): FileListEntry
+
+  def getFileListEntry(url: URL): FileListEntry = getFileListEntry(url.toString)
+
+  def getFileSize(filename: String): Long = fileStatus(filename).getLen
+
+  def isFile(filename: String): Boolean = {
+    try {
+      getFileListEntry(filename).isFile
+    } catch {
+      case _: FileNotFoundException => false
     }
-
-    false
   }
 
-  def globWithPrefix(prefix: URL, path: String): Array[FileListEntry] = {
-    val components =
-      if (path == "")
-        Array.empty[String]
-      else
-        path.split("/")
+  def isDir(filename: String): Boolean = {
+    try {
+      getFileListEntry(filename).isDirectory
+    } catch {
+      case _: FileNotFoundException => false
+    }
+  }
+
+  def exists(filename: String): Boolean = {
+    try {
+      getFileListEntry(filename)
+      true
+    } catch {
+      case _: FileNotFoundException => false
+    }
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+  // Glob
+
+  def globAll(filenames: Iterable[String]): Array[FileListEntry] = {
+    filenames.flatMap { filename =>
+      val fles = glob(filename)
+      if (fles.isEmpty)
+        warn(s"'$filename' refers to no files")
+      fles
+    }.toArray
+  }
+
+  def glob(filename: String): Array[FileListEntry] = glob(parseUrl(filename))
+
+  def glob(url: URL): Array[FileListEntry] = {
+    val path = dropTrailingSlash(url.getPath)
+
+    val components = if (path == "") Array.empty else path.split("/")
 
     val javaFS = FileSystems.getDefault
 
@@ -306,83 +297,18 @@ trait FS extends Serializable {
       }
     }
 
-    f(prefix, null, 0)
+    f(url.withPath(""), null, 0)
     ab.toArray
   }
 
-  def globAll(filenames: Iterable[String]): Array[FileListEntry] = filenames.flatMap(glob).toArray
-
-  def fileStatus(filename: String): FileStatus
-
-  def fileStatus(url: URL): FileStatus
-
-  def getFileListEntry(filename: String): FileListEntry
-
-  def getFileListEntry(url: URL): FileListEntry = getFileListEntry(url.toString)
+  //////////////////////////////////////////////////////////////////////////////
+  // Et cetera
 
   def makeQualified(path: String): String
 
   def deleteOnExit(filename: String): Unit = {
     Runtime.getRuntime.addShutdownHook(
       new Thread(() => delete(filename, recursive = false)))
-  }
-
-  def open(path: String, codec: CompressionCodec, _debug: Boolean = false): InputStream = {
-    val is = openNoCompression(path, _debug)
-    if (codec != null)
-      codec.makeInputStream(is)
-    else
-      is
-
-  }
-
-  def open(path: String): InputStream =
-    open(path, gzAsBGZ = false)
-
-  def open(path: String, gzAsBGZ: Boolean): InputStream =
-    open(path, getCodecFromPath(path, gzAsBGZ))
-
-  def create(path: String): OutputStream = {
-    val os = createNoCompression(path)
-
-    val codec = getCodecFromPath(path, gzAsBGZ = false)
-    if (codec != null)
-      codec.makeOutputStream(os)
-    else
-      os
-  }
-
-  def write(filename: String)(writer: OutputStream => Unit) =
-    using(create(filename))(writer)
-
-  def writePDOS(filename: String)(writer: PositionedDataOutputStream => Unit) =
-    using(create(filename))(os => writer(outputStreamToPositionedDataOutputStream(os)))
-
-  def getFileSize(filename: String): Long = fileStatus(filename).getLen
-
-  def isFile(filename: String): Boolean = {
-    try {
-      getFileListEntry(filename).isFile
-    } catch {
-      case _: FileNotFoundException => false
-    }
-  }
-
-  def isDir(filename: String): Boolean = {
-    try {
-      getFileListEntry(filename).isDirectory
-    } catch {
-      case _: FileNotFoundException => false
-    }
-  }
-
-  def exists(filename: String): Boolean = {
-    try {
-      getFileListEntry(filename)
-      true
-    } catch {
-      case _: FileNotFoundException => false
-    }
   }
 
   def copy(src: String, dst: String, deleteSource: Boolean = false) {
@@ -405,7 +331,12 @@ trait FS extends Serializable {
       delete(src, recursive = false)
   }
 
-  def readLines[T](filename: String, filtAndReplace: TextInputFilterAndReplace = TextInputFilterAndReplace())(reader: Iterator[WithContext[String]] => T): T = {
+  def readLines[T](
+    filename: String,
+    filtAndReplace: TextInputFilterAndReplace = TextInputFilterAndReplace()
+  )(
+    reader: Iterator[WithContext[String]] => T
+  ): T = {
     using(open(filename)) {
       is =>
         val lines = Source.fromInputStream(is)
@@ -420,7 +351,11 @@ trait FS extends Serializable {
     }
   }
 
-  def writeTable(filename: String, lines: Traversable[String], header: Option[String] = None): Unit = {
+  def writeTable(
+    filename: String,
+    lines: Traversable[String],
+    header: Option[String] = None
+  ): Unit = {
     using(new OutputStreamWriter(create(filename))) { fw =>
       header.foreach { h =>
         fw.write(h)
@@ -453,19 +388,17 @@ trait FS extends Serializable {
     else if (!header && headerFLEs.nonEmpty)
       fatal(s"Found unexpected header file")
 
-    val partFileStatuses = partFilesOpt match {
+    val partitions = partFilesOpt match {
       case None => glob(sourceFolder + "/part-*")
       case Some(files) => files.map(f => fileStatus(sourceFolder + "/" + f)).toArray
     }
 
-    val sortedPartFileStatuses = partFileStatuses.sortBy { fileStatus =>
-      getPartNumber(fileStatus.getPath)
-    }
+    val partitionsInOrder = partitions.sortBy(part => getPartNumber(part.getPath))
 
-    if (sortedPartFileStatuses.length != numPartFilesExpected)
-      fatal(s"Expected $numPartFilesExpected part files but found ${ sortedPartFileStatuses.length }")
+    if (partitionsInOrder.length != numPartFilesExpected)
+      fatal(s"Expected $numPartFilesExpected part files but found ${ partitionsInOrder.length }")
 
-    val filesToMerge: Array[FileStatus] = headerFLEs ++ sortedPartFileStatuses
+    val filesToMerge: Array[FileStatus] = headerFLEs ++ partitionsInOrder
 
     info(s"merging ${ filesToMerge.length } files totalling " +
       s"${ readableBytes(filesToMerge.map(_.getLen).sum) }...")
@@ -483,16 +416,16 @@ trait FS extends Serializable {
     }
   }
 
-  def copyMergeList(srcFileStatuses: Array[FileStatus], destFilename: String, deleteSource: Boolean = true) {
-    val codec = Option(getCodecFromPath(destFilename))
-    val isBGzip = codec.exists(_ == BGZipCompressionCodec)
+  def copyMergeList(
+    srcFileStatuses: Array[FileStatus],
+    destFilename: String,
+    deleteSource: Boolean = true
+  ) {
+    val isBGzip = BGZipCompressionCodec == getCodecFromPath(destFilename)
 
-    require(srcFileStatuses.forall {
-      fileStatus => fileStatus.getPath != destFilename && fileStatus.isFileOrFileAndDirectory
-    })
+    require(srcFileStatuses.forall(_.getPath != destFilename))
 
     using(createNoCompression(destFilename)) { os =>
-
       var i = 0
       while (i < srcFileStatuses.length) {
         val fileStatus = srcFileStatuses(i)
@@ -527,13 +460,28 @@ trait FS extends Serializable {
     info(s"while writing:\n    $destFilename\n  merge time: ${ formatTime(timing) }")
   }
 
-  def touch(filename: String): Unit = {
-    using(createNoCompression(filename))(_ => ())
-  }
-
   lazy val broadcast: BroadcastValue[FS] = HailContext.backend.broadcast(this)
 
   def getConfiguration(): Any
 
   def setConfiguration(config: Any): Unit
+
+  private[this] def containsWildcard(path: String): Boolean = {
+    var i = 0
+    while (i < path.length) {
+      val c = path(i)
+      if (c == '\\') {
+        i += 1
+        if (i < path.length)
+          i += 1
+        else
+          return false
+      } else if (c == '*' || c == '{' || c == '?' || c == '[')
+        return true
+
+      i += 1
+    }
+
+    false
+  }
 }

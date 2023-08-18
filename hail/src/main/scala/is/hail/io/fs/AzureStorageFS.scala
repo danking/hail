@@ -191,7 +191,8 @@ class AzureBlobServiceClientCache(credential: TokenCredential, val httpClientOpt
 class AzureStorageFS(val credentialsJSON: Option[String] = None) extends FS {
   type URL = AzureStorageFSURL
 
-  import AzureStorageFS._
+  import AzureStorageFS.log
+  import AzureStorageFS.schemes
 
   def validUrl(filename: String): Boolean = {
     try {
@@ -201,6 +202,8 @@ class AzureStorageFS(val credentialsJSON: Option[String] = None) extends FS {
       case _: IllegalArgumentException => false
     }
   }
+
+  def parseUrl(filename: String): AzureStorageFSURL = AzureStorageFS.parseUrl(filename)
 
   def getConfiguration(): Unit = ()
 
@@ -258,7 +261,7 @@ class AzureStorageFS(val credentialsJSON: Option[String] = None) extends FS {
     serviceClientCache.getServiceClient(url).getBlobContainerClient(url.container)
   }
 
-  def openNoCompression(filename: String, _debug: Boolean): SeekableDataInputStream = handlePublicAccessError(filename) {
+  def openNoCompression(filename: String): SeekableDataInputStream = handlePublicAccessError(filename) {
     val url = parseUrl(filename)
     val blobClient: BlobClient = getBlobClient(url)
     val blobSize = blobClient.getProperties.getBlobSize
@@ -291,17 +294,8 @@ class AzureStorageFS(val credentialsJSON: Option[String] = None) extends FS {
         if (response.getStatusCode >= 200 && response.getStatusCode < 300) {
           bb.flip()
           assert(bb.position() == 0 && bb.remaining() > 0)
-
-          if (_debug) {
-            val byteContents = bb.array().map("%02X" format _).mkString
-            log.info(s"AzureStorageFS.openNoCompression SeekableInputStream: pos=$pos blobSize=$blobSize count=$count response.getStatusCode()=${response.getStatusCode()} bb.toString()=${bb} byteContents=${byteContents}")
-          }
-
           bb.remaining()
         } else {
-          if (_debug) {
-            log.info(s"AzureStorageFS.openNoCompression SeekableInputStream: pos=$pos blobSize=$blobSize count=$count response.getStatusCode()=${response.getStatusCode()}")
-          }
           -1
         }
       }
@@ -401,11 +395,6 @@ class AzureStorageFS(val credentialsJSON: Option[String] = None) extends FS {
     statList.toArray
   }
 
-  def glob(filename: String): Array[FileListEntry] = handlePublicAccessError(filename) {
-    val url = parseUrl(filename)
-    globWithPrefix(prefix = url.withPath(""), path = dropTrailingSlash(url.path))
-  }
-
   override def fileStatus(filename: String): FileStatus = handlePublicAccessError(filename) {
     fileStatus(parseUrl(filename))
   }
@@ -428,7 +417,7 @@ class AzureStorageFS(val credentialsJSON: Option[String] = None) extends FS {
 
   override def getFileListEntry(filename: String): FileListEntry = getFileListEntry(AzureStorageFS.parseUrl(filename))
 
-  override def getFileListEntry(url: URL): FileListEntry = {
+  override def getFileListEntry(url: URL): FileListEntry = handlePublicAccessError(url.toString) {
     if (url.getPath == "")
       return AzureStorageFileListEntry.dir(url)
 

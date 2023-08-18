@@ -8,7 +8,7 @@ import is.hail.rvd.RVDContext
 import is.hail.sparkextras._
 import is.hail.utils._
 import is.hail.io.compress.{BGzipCodec, ComposableBGzipCodec, ComposableBGzipOutputStream}
-import is.hail.io.fs.FS
+import is.hail.io.fs.{FS, getCodecExtension}
 import org.apache.hadoop
 import org.apache.hadoop.io.compress.CompressionCodecFactory
 import org.apache.spark.{NarrowDependency, Partition, Partitioner, TaskContext}
@@ -80,7 +80,7 @@ class RichRDD[T](val r: RDD[T]) extends AnyVal {
     }
 
     if (exportType == ExportType.PARALLEL_SEPARATE_HEADER) {
-      val headerExt = fs.getCodecExtension(filename)
+      val headerExt = getCodecExtension(filename)
       using(new OutputStreamWriter(fs.create(parallelOutputPath + "/header" + headerExt))) { out =>
         header.foreach { h =>
           out.write(h)
@@ -90,7 +90,7 @@ class RichRDD[T](val r: RDD[T]) extends AnyVal {
     }
 
     if (exportType == ExportType.PARALLEL_COMPOSABLE) {
-      val ext = fs.getCodecExtension(filename)
+      val ext = getCodecExtension(filename)
       val headerPath = parallelOutputPath + "/header" + ext
       val headerOs = if (ext == ".bgz") {
         val os = fs.createNoCompression(headerPath)
