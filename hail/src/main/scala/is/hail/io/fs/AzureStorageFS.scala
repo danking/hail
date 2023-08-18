@@ -8,7 +8,6 @@ import is.hail.shadedazure.com.azure.storage.blob.{BlobClient, BlobContainerClie
 import is.hail.shadedazure.com.azure.core.http.HttpClient
 import is.hail.shadedazure.com.azure.core.util.HttpClientOptions
 import is.hail.services.retryTransientErrors
-import is.hail.io.fs.FSUtil.{containsWildcard, dropTrailingSlash}
 import is.hail.services.Requester.httpClient
 import org.apache.log4j.Logger
 import org.apache.commons.io.IOUtils

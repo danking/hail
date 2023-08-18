@@ -4,8 +4,7 @@ import java.io.FileNotFoundException
 import is.hail.fs.azure.AzureStorageFSSuite
 import is.hail.{HailSuite, TestUtils}
 import is.hail.backend.ExecuteContext
-import is.hail.io.fs.FSUtil.dropTrailingSlash
-import is.hail.io.fs.{FS, FileListEntry, GoogleStorageFS, Seekable, FileAndDirectoryException}
+import is.hail.io.fs.{FS, FileListEntry, GoogleStorageFS, Seekable, FileAndDirectoryException, dropTrailingSlash}
 import is.hail.utils._
 import org.apache.commons.codec.binary.Hex
 import org.apache.commons.io.IOUtils

@@ -2,7 +2,6 @@ package is.hail.io.fs
 
 import is.hail.backend.BroadcastValue
 import is.hail.io.compress.{BGzipInputStream, BGzipOutputStream}
-import is.hail.io.fs.FSUtil.{containsWildcard, dropTrailingSlash}
 import is.hail.services._
 import is.hail.utils._
 import is.hail.{HailContext, HailFeatureFlags}
@@ -86,40 +85,6 @@ object BGZipCompressionCodec extends CompressionCodec {
 }
 
 class FileAndDirectoryException(message: String) extends RuntimeException(message)
-
-object FSUtil {
-  def dropTrailingSlash(path: String): String = {
-    if (path.isEmpty)
-      return path
-
-    if (path.last != '/')
-      return path
-
-    var i = path.length - 1
-    while (i > 0 && path(i - 1) == '/')
-      i -= 1
-    path.substring(0, i)
-  }
-
-  def containsWildcard(path: String): Boolean = {
-    var i = 0
-    while (i < path.length) {
-      val c = path(i)
-      if (c == '\\') {
-        i += 1
-        if (i < path.length)
-          i += 1
-        else
-          return false
-      } else if (c == '*' || c == '{' || c == '?' || c == '[')
-        return true
-
-      i += 1
-    }
-
-    false
-  }
-}
 
 object FS {
   def cloudSpecificFS(
@@ -279,6 +244,25 @@ trait FS extends Serializable {
   def listDirectory(url: URL): Array[FileListEntry] = listDirectory(url.toString)
 
   def glob(filename: String): Array[FileListEntry]
+
+  private[this] def containsWildcard(path: String): Boolean = {
+    var i = 0
+    while (i < path.length) {
+      val c = path(i)
+      if (c == '\\') {
+        i += 1
+        if (i < path.length)
+          i += 1
+        else
+          return false
+      } else if (c == '*' || c == '{' || c == '?' || c == '[')
+        return true
+
+      i += 1
+    }
+
+    false
+  }
 
   def globWithPrefix(prefix: URL, path: String): Array[FileListEntry] = {
     val components =

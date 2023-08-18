@@ -17,4 +17,17 @@ package object fs {
     new WrappedPositionedDataOutputStream(
       new WrappedPositionOutputStream(
         os))
+
+  def dropTrailingSlash(path: String): String = {
+    if (path.isEmpty)
+      return path
+
+    if (path.last != '/')
+      return path
+
+    var i = path.length - 1
+    while (i > 0 && path(i - 1) == '/')
+      i -= 1
+    path.substring(0, i)
+  }
 }
