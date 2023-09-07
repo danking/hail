@@ -2927,6 +2927,28 @@ steps:
       - hail_dev_image
       - deploy_batch
   - kind: runImage
+    name: test_batch_client_without_deploy_config
+    resources:
+      memory: standard
+      cpu: '0.25'
+    image:
+      valueFrom: hailgenetics_hail_image.image
+    script: |
+      set -ex
+
+      ls /deploy-config/deploy-config.json
+      mv /deploy-config /not-a-deploy-config  # replicate a user-like environment
+
+      cat | python3 <<EOF
+      import hailtop.batch as hb
+      b = hb.Batch(backend=hb.ServiceBackend())
+      j = b.new_job()
+      j.command('echo Hello world!')
+      b.run()
+      EOF
+    dependsOn:
+      - hailgenetics_hail_image
+  - kind: runImage
     name: test_hailctl_batch
     resources:
       memory: standard
