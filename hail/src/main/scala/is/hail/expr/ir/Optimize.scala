@@ -11,8 +11,15 @@ object Optimize {
     var iter = 0
     val maxIter = HailContext.get.optimizerIterations
 
+    def render(context: String): Unit = {
+      if (ctx.shouldLogIR())
+        log.info(s"$context: IR size ${ IRSize(ir) }: \n" + Pretty(ctx, ir, elideLiterals = true))
+    }
+
     def runOpt(f: BaseIR => BaseIR, iter: Int, optContext: String): Unit = {
+      render(context + ": before " + optContext)
       ir = ctx.timer.time(optContext)(f(ir).asInstanceOf[T])
+      render(context + ": before " + optContext)
     }
 
     ctx.timer.time("Optimize") {
