@@ -19,7 +19,7 @@ object Optimize {
     def runOpt(f: BaseIR => BaseIR, iter: Int, optContext: String): Unit = {
       render(context + ": before " + optContext)
       ir = ctx.timer.time(optContext)(f(ir).asInstanceOf[T])
-      render(context + ": before " + optContext)
+      render(context + ": after " + optContext)
     }
 
     ctx.timer.time("Optimize") {

@@ -1223,7 +1223,7 @@ object PruneDeadFields {
           bodyEnv.deleteEval(valueName).deleteEval(accumName),
           memoizeValueIR(ctx, a, TStream(valueType), memo)
         )
-        
+
       case StreamJoinRightDistinct(left, right, lKey, rKey, l, r, join, joinType) =>
         val lElemType = TIterable.elementType(left.typ).asInstanceOf[TStruct]
         val rElemType = TIterable.elementType(right.typ).asInstanceOf[TStruct]
@@ -1244,12 +1244,12 @@ object PruneDeadFields {
           TIterable.elementType(a.typ),
           Array(TIterable.elementType(requestedType)) ++ uses(left, compEnv.eval) ++ uses(right, compEnv.eval)
         )
-        
+
         unifyEnvs(
           compEnv.deleteEval(left).deleteEval(right),
           memoizeValueIR(ctx, a, TStream(requestedElementType), memo)
         )
-        
+
       case ArrayMaximalIndependentSet(a, tiebreaker) =>
         tiebreaker.foreach { case (_, _, tb) => memoizeValueIR(ctx, tb, tb.typ, memo) }
         memoizeValueIR(ctx, a, a.typ, memo)
@@ -1613,18 +1613,18 @@ object PruneDeadFields {
       case TableKeyBy(child, _, isSorted) =>
         var child2 = rebuild(ctx, child, memo)
         val keys2 = requestedType.key
-        // fully upcast before shuffle
-        if (!isSorted && keys2.nonEmpty)
-          child2 = upcastTable(ctx, child2, memo.requestedType.lookup(child).asInstanceOf[TableType], upcastGlobals = false)
+        // // fully upcast before shuffle
+        // if (!isSorted && keys2.nonEmpty)
+        //   child2 = upcastTable(ctx, child2, memo.requestedType.lookup(child).asInstanceOf[TableType], upcastGlobals = false)
         TableKeyBy(child2, keys2, isSorted)
       case TableOrderBy(child, sortFields) =>
-        val child2 = if (sortFields.forall(_.sortOrder == Ascending) && child.typ.key.startsWith(sortFields.map(_.field)))
-          rebuild(ctx, child, memo)
-        else {
-          // fully upcast before shuffle
-          upcastTable(ctx, rebuild(ctx, child, memo), memo.requestedType.lookup(child).asInstanceOf[TableType], upcastGlobals = false)
-        }
-        TableOrderBy(child2, sortFields)
+        // val child2 = if (sortFields.forall(_.sortOrder == Ascending) && child.typ.key.startsWith(sortFields.map(_.field)))
+        //   rebuild(ctx, child, memo)
+        // else {
+        //   // fully upcast before shuffle
+        //   upcastTable(ctx, rebuild(ctx, child, memo), memo.requestedType.lookup(child).asInstanceOf[TableType], upcastGlobals = false)
+        // }
+        TableOrderBy(rebuild(ctx, child, memo), sortFields)
       case TableLeftJoinRightDistinct(left, right, root) =>
         if (requestedType.rowType.hasField(root))
           TableLeftJoinRightDistinct(rebuild(ctx, left, memo), rebuild(ctx, right, memo), root)
