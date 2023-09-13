@@ -11,11 +11,23 @@ object Simplify {
 
   /** Transform 'ir' using simplification rules until none apply.
     */
-  def apply(ctx: ExecuteContext, ir: BaseIR): BaseIR = ir match {
-    case ir: IR => simplifyValue(ctx)(ir)
-    case tir: TableIR => simplifyTable(ctx)(tir)
-    case mir: MatrixIR => simplifyMatrix(ctx)(mir)
-    case bmir: BlockMatrixIR => simplifyBlockMatrix(ctx)(bmir)
+  def apply(ctx: ExecuteContext, ir: BaseIR): BaseIR =
+    new Simplify(ctx, ir).execute()
+}
+
+class Simplify(
+  ctx: ExecuteContext,
+  ir: BaseIR
+) {
+  private[this] val requiredness: RequirednessAnalysis = Requiredness(ir, ctx)
+
+  def execute(): BaseIR = {
+    ir match {
+      case ir: IR => simplifyValue(ir)
+      case tir: TableIR => simplifyTable(tir)
+      case mir: MatrixIR => simplifyMatrix(mir)
+      case bmir: BlockMatrixIR => simplifyBlockMatrix(bmir)
+    }
   }
 
   private[this] def visitNode[T <: BaseIR](
@@ -27,42 +39,43 @@ object Simplify {
     transform(t1).map(post).getOrElse(t1)
   }
 
-  private[this] def simplifyValue(ctx: ExecuteContext): IR => IR =
+  private[this] def simplifyValue(ir: IR): IR =
     visitNode(
       Simplify(ctx, _),
       rewriteValueNode,
-      simplifyValue(ctx))
+      simplifyValue
+    )(ir)
 
-  private[this] def simplifyTable(ctx: ExecuteContext)(tir: TableIR): TableIR =
+  private[this] def simplifyTable(tir: TableIR): TableIR =
     visitNode(
       Simplify(ctx, _),
-      rewriteTableNode(ctx),
-      simplifyTable(ctx)
+      rewriteTableNode,
+      simplifyTable
     )(tir)
 
-  private[this] def simplifyMatrix(ctx: ExecuteContext)(mir: MatrixIR): MatrixIR =
+  private[this] def simplifyMatrix(mir: MatrixIR): MatrixIR =
     visitNode(
       Simplify(ctx, _),
-      rewriteMatrixNode(),
-      simplifyMatrix(ctx)
+      rewriteMatrixNode,
+      simplifyMatrix
     )(mir)
 
-  private[this] def simplifyBlockMatrix(ctx: ExecuteContext)(bmir: BlockMatrixIR): BlockMatrixIR = {
+  private[this] def simplifyBlockMatrix(bmir: BlockMatrixIR): BlockMatrixIR = {
     visitNode(
       Simplify(ctx, _),
       rewriteBlockMatrixNode,
-      simplifyBlockMatrix(ctx)
+      simplifyBlockMatrix
     )(bmir)
   }
 
   private[this] def rewriteValueNode(ir: IR): Option[IR] =
     valueRules.lift(ir).orElse(numericRules(ir))
 
-  private[this] def rewriteTableNode(ctx: ExecuteContext)(tir: TableIR): Option[TableIR] =
-    tableRules(ctx).lift(tir)
+  private[this] def rewriteTableNode(tir: TableIR): Option[TableIR] =
+    tableRules.lift(tir)
 
-  private[this] def rewriteMatrixNode()(mir: MatrixIR): Option[MatrixIR] =
-    matrixRules().lift(mir)
+  private[this] def rewriteMatrixNode(mir: MatrixIR): Option[MatrixIR] =
+    matrixRules.lift(mir)
 
   private[this] def rewriteBlockMatrixNode: BlockMatrixIR => Option[BlockMatrixIR] = blockMatrixRules.lift
 
@@ -105,18 +118,7 @@ object Simplify {
 
   /** Returns true if 'x' will never evaluate to missing.
     */
-  private[this] def isDefinitelyDefined(x: IR): Boolean = {
-    x match {
-      case _: MakeArray |
-           _: MakeStruct |
-           _: MakeTuple |
-           _: IsNA |
-           ApplyComparisonOp(EQWithNA(_, _), _, _) |
-           ApplyComparisonOp(NEQWithNA(_, _), _, _) |
-           _: I32 | _: I64 | _: F32 | _: F64 | True() | False() => true
-      case _ => false
-    }
-  }
+  private[this] def isDefinitelyDefined(x: IR): Boolean = requiredness(x).required
 
   private def numericRules: IR => Option[IR] = {
 
@@ -218,7 +220,7 @@ object Simplify {
     ).reduce((f, g) => ir => f(ir).orElse(g(ir)))
   }
 
-  private[this] def valueRules: PartialFunction[IR, IR] = {
+  private[this] val valueRules: PartialFunction[IR, IR] = {
     // propagate NA
     case x: IR if hasMissingStrictChild(x) =>
       NA(x.typ)
@@ -678,7 +680,7 @@ object Simplify {
     case LiftMeOut(child) if IsConstant(child) => child
   }
 
-  private[this] def tableRules(ctx: ExecuteContext): PartialFunction[TableIR, TableIR] = {
+  private[this] val tableRules: PartialFunction[TableIR, TableIR] = {
 
     case TableRename(child, m1, m2) if m1.isTrivial && m2.isTrivial => child
 
@@ -955,7 +957,7 @@ object Simplify {
       TableRead(t, false, TableNativeZippedReader(tr.pathLeft, tr.pathRight, Some(newOpts), tr.specLeft, tr.specRight))
   }
 
-  private[this] def matrixRules(): PartialFunction[MatrixIR, MatrixIR] = {
+  private[this] val matrixRules: PartialFunction[MatrixIR, MatrixIR] = {
     case MatrixMapRows(child, Ref("va", _)) => child
 
     case MatrixKeyRowsBy(MatrixKeyRowsBy(child, _, _), keys, false) =>
@@ -1053,7 +1055,7 @@ object Simplify {
     case MatrixColsHead(MatrixRename(child, glob, col, row, entry), n) => MatrixRename(MatrixColsHead(child, n), glob, col, row, entry)
   }
 
-  private[this] def blockMatrixRules: PartialFunction[BlockMatrixIR, BlockMatrixIR] = {
+  private[this] val blockMatrixRules: PartialFunction[BlockMatrixIR, BlockMatrixIR] = {
     case BlockMatrixBroadcast(child, IndexedSeq(0, 1), _, _) => child
     case BlockMatrixSlice(BlockMatrixMap(child, n, f, reqDense), slices) => BlockMatrixMap(BlockMatrixSlice(child, slices), n, f, reqDense)
     case BlockMatrixSlice(BlockMatrixMap2(l, r, ln, rn, f, sparsityStrategy), slices) =>
