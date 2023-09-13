@@ -64,7 +64,7 @@ class Requiredness(val usesAndDefs: UsesAndDefs, ctx: ExecuteContext) {
       case _ =>
     }
     node.children.foreach {
-      case c: MatrixIR => fatal("Requiredness analysis only works on lowered MatrixTables. ")
+      case c: MatrixIR => fatal("Requiredness analysis only works on lowered MatrixTables.")
       case c if supportedType(node) =>
         initializeState(c)
         if (node.typ != TVoid)

@@ -19,11 +19,16 @@ class Simplify(
   ctx: ExecuteContext,
   ir: BaseIR
 ) {
-  private[this] val requiredness: RequirednessAnalysis = if (ir.isInstanceOf[TableIR] || ir.isInstanceOf[IR]) {
+  private[this] val requiredness: RequirednessAnalysis = try {
     Requiredness(ir, ctx)
-  } else { null }
+  } catch {
+    case exc: HailException if exc.getMessage == "Requiredness analysis only works on lowered MatrixTables." =>
+      null
+  }
 
-  def execute(): BaseIR = {
+  def execute(): BaseIR = simplify(ir)
+
+  private[this] def simplify(ir: BaseIR = ir): BaseIR = {
     ir match {
       case ir: IR => simplifyValue(ir)
       case tir: TableIR => simplifyTable(tir)
@@ -43,28 +48,28 @@ class Simplify(
 
   private[this] def simplifyValue(ir: IR): IR =
     visitNode(
-      Simplify(ctx, _),
+      simplify,
       rewriteValueNode,
       simplifyValue
     )(ir)
 
   private[this] def simplifyTable(tir: TableIR): TableIR =
     visitNode(
-      Simplify(ctx, _),
+      simplify,
       rewriteTableNode,
       simplifyTable
     )(tir)
 
   private[this] def simplifyMatrix(mir: MatrixIR): MatrixIR =
     visitNode(
-      Simplify(ctx, _),
+      simplify,
       rewriteMatrixNode,
       simplifyMatrix
     )(mir)
 
   private[this] def simplifyBlockMatrix(bmir: BlockMatrixIR): BlockMatrixIR = {
     visitNode(
-      Simplify(ctx, _),
+      simplify,
       rewriteBlockMatrixNode,
       simplifyBlockMatrix
     )(bmir)
