@@ -19,7 +19,9 @@ class Simplify(
   ctx: ExecuteContext,
   ir: BaseIR
 ) {
-  private[this] val requiredness: RequirednessAnalysis = Requiredness(ir, ctx)
+  private[this] val requiredness: RequirednessAnalysis = if (ir.isInstanceOf[TableIR] || ir.isInstanceOf[IR]) {
+    Requiredness(ir, ctx)
+  } else { null }
 
   def execute(): BaseIR = {
     ir match {
@@ -118,7 +120,23 @@ class Simplify(
 
   /** Returns true if 'x' will never evaluate to missing.
     */
-  private[this] def isDefinitelyDefined(x: IR): Boolean = requiredness(x).required
+  private[this] def isDefinitelyDefined(x: IR): Boolean = if (requiredness == null) {
+    x match {
+      case _: MakeArray |
+          _: MakeStruct |
+          _: MakeTuple |
+          _: IsNA |
+          ApplyComparisonOp(EQWithNA(_, _), _, _) |
+          ApplyComparisonOp(NEQWithNA(_, _), _, _) |
+          _: I32 | _: I64 | _: F32 | _: F64 | True() | False() => true
+      case _ => false
+    }
+  } else {
+    requiredness.lookupOpt(x) match {
+      case None => false
+      case Some(r) => r.required
+    }
+  }
 
   private def numericRules: IR => Option[IR] = {
 
