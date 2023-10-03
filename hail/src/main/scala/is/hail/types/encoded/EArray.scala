@@ -108,8 +108,28 @@ final case class EArray(val elementType: EType, override val required: Boolean =
     if (!elementType.required)
       cb += in.readBytes(region, array + const(arrayType.lengthHeaderBytes), arrayType.nMissingBytes(len))
 
-    cb.forLoop(cb.assign(i, 0), i < len, cb.assign(i, i + 1), {
-      val elemAddr = cb.memoize(arrayType.elementOffset(array, len, i))
+    cb.assign(i, 0)
+    cb.ifx(len > 64,
+      cb.forLoop({}, i + 8 < len, cb.assign(i, i + 8), {
+        if (elementType.required) {
+          for (_ <- 0 to 7) {
+            val elemAddr = cb.memoize(arrayType.elementOffset(array, len, i), "elemAddr")
+            readElemF(cb, region, elemAddr, in)
+          }
+        } else {
+          for (k <- 0 to 7) {
+            cb.ifx(arrayType.isElementDefined(array, i + k),
+              {
+                val elemAddr = cb.memoize(arrayType.elementOffset(array, len, i), "elemAddr")
+                readElemF(cb, region, elemAddr, in)
+              }
+            )
+          }
+        }
+      })
+    )
+    cb.forLoop({}, i < len, cb.assign(i, i + 1), {
+      val elemAddr = cb.memoize(arrayType.elementOffset(array, len, i), "elemAddr")
       if (elementType.required)
         readElemF(cb, region, elemAddr, in)
       else
