@@ -114,29 +114,34 @@ final case class EArray(val elementType: EType, override val required: Boolean =
       cb.forLoop({}, i + 8 < len, cb.assign(i, i + 8), {
         if (elementType.required) {
           for (_ <- 0 to 7) {
-            cb.assign(elemAddr, arrayType.elementOffset(array, len, i))
             readElemF(cb, region, elemAddr, in)
+            cb.assign(elemAddr, arrayType.nextElementAddress(elemAddr))
           }
         } else {
           for (k <- 0 to 7) {
             cb.ifx(arrayType.isElementDefined(array, i + k),
               {
-                cb.assign(elemAddr, arrayType.elementOffset(array, len, i))
                 readElemF(cb, region, elemAddr, in)
+                cb.assign(elemAddr, arrayType.nextElementAddress(elemAddr))
               }
             )
           }
         }
       })
     )
-    cb.forLoop({}, i < len, cb.assign(i, i + 1), {
-      cb.assign(elemAddr, arrayType.elementOffset(array, len, i))
-      if (elementType.required)
-        readElemF(cb, region, elemAddr, in)
-      else
-        cb.ifx(arrayType.isElementDefined(array, i),
-          readElemF(cb, region, elemAddr, in))
-    })
+    cb.forLoop({}, i < len,
+      {
+        cb.assign(i, i + 1)
+        cb.assign(elemAddr, arrayType.nextElementAddress(elemAddr))
+      },
+      {
+        if (elementType.required)
+          readElemF(cb, region, elemAddr, in)
+        else
+          cb.ifx(arrayType.isElementDefined(array, i),
+            readElemF(cb, region, elemAddr, in))
+      }
+    )
 
     new SIndexablePointerValue(st, array, len, cb.memoize(arrayType.firstElementOffset(array, len)))
   }
