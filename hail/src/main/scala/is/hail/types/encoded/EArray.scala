@@ -106,24 +106,25 @@ final case class EArray(val elementType: EType, override val required: Boolean =
     val i = cb.newLocal[Int]("i")
     val mbyteOffset = cb.newLocal[Long]("mbyteOffset", array + arrayType.lengthHeaderBytes)
     val mbyte = cb.newLocal[Byte]("mbyte", 0.toByte)
+    val missingLong = cb.newLocal[Long]("missingLong", 0)
     val readElemF = elementType.buildInplaceDecoder(arrayType.elementType, cb.emb.ecb)
 
     if (!elementType.required)
       cb += in.readBytes(region, array + const(arrayType.lengthHeaderBytes), arrayType.nMissingBytes(len))
 
     cb.assign(i, 0)
-    cb.ifx(len > 64,
-      cb.forLoop({}, i + 8 < len, cb.assign(i, i + 8), {
+    cb.ifx(len >= 64,
+      cb.forLoop({}, i + 64 < len, cb.assign(i, i + 64), {
         if (elementType.required) {
-          for (_ <- 0 to 7) {
+          for (_ <- 0 to 63) {
             readElemF(cb, region, elemAddr, in)
             cb.assign(elemAddr, arrayType.nextElementAddress(elemAddr))
           }
         } else {
-          cb.assign(mbyte, Region.loadByte(mbyteOffset))
-          cb.assign(mbyteOffset, mbyteOffset + 1)
-          for (k <- 0 to 7) {
-            cb.ifx((mbyte.load() & (1 << k)).ceq(0),
+          cb.assign(missingLong, Region.loadLong(mbyteOffset))
+          cb.assign(mbyteOffset, mbyteOffset + 8)
+          for (k <- 0 to 63) {
+            cb.ifx((missingLong & (1L << k)).ceq(0),
               readElemF(cb, region, elemAddr, in))
             cb.assign(elemAddr, arrayType.nextElementAddress(elemAddr))
           }
