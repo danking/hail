@@ -100,6 +100,7 @@ final case class EArray(val elementType: EType, override val required: Boolean =
 
     val len = cb.newLocal[Int]("len", in.readInt())
     val array = cb.newLocal[Long]("array", arrayType.allocate(region, len))
+    val elemAddr = cb.newLocal[Long]("elemAddr", arrayType.firstElementOffset(array, len))
     arrayType.storeLength(cb, array, len)
 
     val i = cb.newLocal[Int]("i")
@@ -113,14 +114,14 @@ final case class EArray(val elementType: EType, override val required: Boolean =
       cb.forLoop({}, i + 8 < len, cb.assign(i, i + 8), {
         if (elementType.required) {
           for (_ <- 0 to 7) {
-            val elemAddr = cb.memoize(arrayType.elementOffset(array, len, i), "elemAddr")
+            cb.assign(elemAddr, arrayType.elementOffset(array, len, i))
             readElemF(cb, region, elemAddr, in)
           }
         } else {
           for (k <- 0 to 7) {
             cb.ifx(arrayType.isElementDefined(array, i + k),
               {
-                val elemAddr = cb.memoize(arrayType.elementOffset(array, len, i), "elemAddr")
+                cb.assign(elemAddr, arrayType.elementOffset(array, len, i))
                 readElemF(cb, region, elemAddr, in)
               }
             )
@@ -129,7 +130,7 @@ final case class EArray(val elementType: EType, override val required: Boolean =
       })
     )
     cb.forLoop({}, i < len, cb.assign(i, i + 1), {
-      val elemAddr = cb.memoize(arrayType.elementOffset(array, len, i), "elemAddr")
+      cb.assign(elemAddr, arrayType.elementOffset(array, len, i))
       if (elementType.required)
         readElemF(cb, region, elemAddr, in)
       else
