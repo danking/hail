@@ -104,6 +104,8 @@ final case class EArray(val elementType: EType, override val required: Boolean =
     arrayType.storeLength(cb, array, len)
 
     val i = cb.newLocal[Int]("i")
+    val mbyteOffset = cb.newLocal[Long]("mbyteOffset", array + arrayType.lengthHeaderBytes)
+    val mbyte = cb.newLocal[Byte]("mbyte", 0.toByte)
     val readElemF = elementType.buildInplaceDecoder(arrayType.elementType, cb.emb.ecb)
 
     if (!elementType.required)
@@ -118,13 +120,12 @@ final case class EArray(val elementType: EType, override val required: Boolean =
             cb.assign(elemAddr, arrayType.nextElementAddress(elemAddr))
           }
         } else {
+          cb.assign(mbyte, Region.loadByte(mbyteOffset))
+          cb.assign(mbyteOffset, mbyteOffset + 1)
           for (k <- 0 to 7) {
-            cb.ifx(arrayType.isElementDefined(array, i + k),
-              {
-                readElemF(cb, region, elemAddr, in)
-                cb.assign(elemAddr, arrayType.nextElementAddress(elemAddr))
-              }
-            )
+            cb.ifx((mbyte.load() & (1 << k)).ceq(0),
+              readElemF(cb, region, elemAddr, in))
+            cb.assign(elemAddr, arrayType.nextElementAddress(elemAddr))
           }
         }
       })
@@ -135,11 +136,18 @@ final case class EArray(val elementType: EType, override val required: Boolean =
         cb.assign(elemAddr, arrayType.nextElementAddress(elemAddr))
       },
       {
-        if (elementType.required)
+        if (elementType.required) {
           readElemF(cb, region, elemAddr, in)
-        else
-          cb.ifx(arrayType.isElementDefined(array, i),
+        } else {
+          cb.ifx((i % 8).ceq(0),
+            {
+              cb.assign(mbyte, Region.loadByte(mbyteOffset))
+              cb.assign(mbyteOffset, mbyteOffset + 1)
+            }
+          )
+          cb.ifx((mbyte.load() & (const(1) << (i & 7))).ceq(0),
             readElemF(cb, region, elemAddr, in))
+        }
       }
     )
 
