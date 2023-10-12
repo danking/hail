@@ -560,7 +560,7 @@ case class SparsePCRelate(
     )
   }
 
-  lazy val children: IndexedSeq[BaseIR] = Array(g, u, s, v)
+  override lazy val childrenSeq: IndexedSeq[BaseIR] = FastSeq(g, u, s, v)
 
   def copy(newChildren: IndexedSeq[BaseIR]): SparsePCRelate = {
     assert(newChildren.length == 4)

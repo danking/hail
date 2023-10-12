@@ -1201,8 +1201,7 @@ object LowerBlockMatrixIR {
           u.ctxType,
           TArray(TTuple(v.ctxType, g.ctxType, g.ctxType)))
         new BlockMatrixStage(
-          FastIndexedSeq(g, v, s, u).map(_.letBindings).flatten,
-          FastIndexedSeq(g, v, s, u).map(_.broadcastVals).flatten.toArray,
+          FastSeq(g, v, s, u).map(_.broadcastVals).flatten,
           newCtxType
         ) {
           def blockContext(idx: (Int, Int)): IR = {
@@ -1245,7 +1244,7 @@ object LowerBlockMatrixIR {
 
           def ndtranspose(x: IR): IR = {
             val ndt = x.typ.asInstanceOf[TNDArray]
-            NDArrayReindex(x, Array.tabulate(ndt.nDims)(i => ndt.nDims - i - 1).toFastIndexedSeq)
+            NDArrayReindex(x, Array.tabulate(ndt.nDims)(i => ndt.nDims - i - 1))
           }
 
           def trace(message: String, v: IR): IR = {

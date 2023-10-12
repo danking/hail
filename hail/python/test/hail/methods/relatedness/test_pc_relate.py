@@ -1,6 +1,8 @@
 import hail as hl
 
+from hail.methods.relatedness.pc_relate import fast_pc_relate
 from ...helpers import resource, skip_when_service_backend, test_timeout, skip_when_service_backend_in_azure, qobtest
+
 
 
 @test_timeout(local=6 * 60, batch=14 * 60)
@@ -131,3 +133,12 @@ def test_pc_relate_issue_5263():
                            GT=hl.call(hl.rand_bool(0.5), hl.rand_bool(0.5)))
     actual = hl.pc_relate(mt.GT2, 0.10, k=2, statistics='all')
     assert expected._same(actual, tolerance=1e-3)
+
+
+def test_pc_relate_against_sparse_pc_relate():
+    mt = hl.balding_nichols_model(3, 50, 100)
+    expected = hl.pc_relate(mt.GT, 0.10, k=2, statistics='all')
+
+    kin = fast_pc_relate(mt, minimum_kinship=1/8)
+    expected = expected.filter(expected.kin > 1/8)
+    kin._same(expected, tolerance=1e-3)
