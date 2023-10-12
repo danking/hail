@@ -200,6 +200,11 @@ package object ir {
     StreamZip(ss, refs.map(_.name), f(refs), behavior, errorId)
   }
 
+  def ndArrayMapIR(a: IR)(f: Ref => IR): IR = {
+    val ref = Ref(genUID(), tcoerce[TNDArray](a.typ).elementType)
+    NDArrayMap(a, ref.name, f(ref))
+  }
+
   def makestruct(fields: (String, IR)*): MakeStruct = MakeStruct(fields.toArray[(String, IR)])
   def maketuple(fields: IR*): MakeTuple = MakeTuple(fields.toArray.zipWithIndex.map { case (field, idx) => (idx, field) })
 

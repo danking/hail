@@ -137,8 +137,16 @@ def test_pc_relate_issue_5263():
 
 def test_pc_relate_against_sparse_pc_relate():
     mt = hl.balding_nichols_model(3, 50, 100)
-    expected = hl.pc_relate(mt.GT, 0.10, k=2, statistics='all')
+    eigs, scores, loadings = hl.hwe_normalized_pca(mt.GT, 2, compute_loadings=True)
 
-    kin = fast_pc_relate(mt, minimum_kinship=1/8)
-    expected = expected.filter(expected.kin > 1/8)
-    kin._same(expected, tolerance=1e-3)
+    expected = hl.pc_relate(mt.GT,
+                            0.0,
+                            k=2,
+                            scores_expr=scores[mt.col_key].scores,
+                            statistics='kin')
+
+    kin = fast_pc_relate(mt, minimum_kinship=0.0)
+    kin = kin.filter(kin.i != kin.j)
+    expected = expected.select('kin')
+    expected = expected.key_by(i=hl.int64(expected.i.sample_idx), j=hl.int64(expected.j.sample_idx))
+    assert kin._same(expected, tolerance=1e-3)
