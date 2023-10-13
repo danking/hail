@@ -141,11 +141,15 @@ def test_pc_relate_against_sparse_pc_relate():
 
     expected = hl.pc_relate(mt.GT,
                             0.0,
-                            k=2,
                             scores_expr=scores[mt.col_key].scores,
                             statistics='kin')
 
-    kin = fast_pc_relate(mt, minimum_kinship=0.0)
+    usv = (
+        ,
+        ,
+        
+    )
+    kin = fast_pc_relate(mt, minimum_kinship=0.0, usv)
     kin = kin.filter(kin.i != kin.j)
     expected = expected.select('kin')
     expected = expected.key_by(i=hl.int64(expected.i.sample_idx), j=hl.int64(expected.j.sample_idx))
