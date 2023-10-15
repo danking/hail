@@ -1,4 +1,5 @@
 from typing import List, Optional, Dict
+import aiomonitor
 import argparse
 import asyncio
 import json
@@ -22,6 +23,9 @@ except ImportError as e:
         pass
 
 
+log = logging.getLogger('hailtop.aiotools.copy')
+
+
 async def copy(*,
                max_simultaneous_transfers: Optional[int] = None,
                local_kwargs: Optional[dict] = None,
@@ -33,7 +37,7 @@ async def copy(*,
                ) -> None:
     with ThreadPoolExecutor() as thread_pool:
         if max_simultaneous_transfers is None:
-            max_simultaneous_transfers = 75
+            max_simultaneous_transfers = 5 # 75
         if local_kwargs is None:
             local_kwargs = {}
         if 'thread_pool' not in local_kwargs:
@@ -126,4 +130,7 @@ async def main() -> None:
 
 if __name__ == '__main__':
     uvloop_install()
-    asyncio.run(main())
+    loop = asyncio.new_event_loop()
+    with aiomonitor.start_monitor(loop=loop) as monitor:
+        print(f'aiomonitor available on {monitor.host} {monitor.port}')
+        loop.run_until_complete(main())
