@@ -289,8 +289,6 @@ class SourceCopier:
             destfile: str,
             return_exceptions: bool
     ) -> None:
-        source_report.start_files(1)
-        source_report.start_bytes(await srcstat.size())
         success = False
         try:
             await self._copy_file_multi_part_main(sema, source_report, srcfile, srcstat, destfile, return_exceptions)
@@ -350,6 +348,8 @@ class SourceCopier:
         if full_dest_type == AsyncFS.DIR:
             raise IsADirectoryError(full_dest)
 
+        source_report.start_files(1)
+        source_report.start_bytes(await srcstat.size())
         await self._copy_file_multi_part(sema, source_report, src, srcstat, full_dest, return_exceptions)
 
     async def copy_as_dir(self, sema: asyncio.Semaphore, source_report: SourceReport, return_exceptions: bool):
@@ -399,9 +399,14 @@ class SourceCopier:
             if srcentries is None:
                 srcentries = await files_iterator()
             try:
-                return [
-                    functools.partial(copy_source, srcentry)
-                    async for srcentry in srcentries]
+                copy_thunks = []
+                async for srcentry in srcentries:
+                    source_report.start_files(1)
+                    source_report.start_bytes(
+                        # this is almost never a syscall/net-request (afaik: only local symlinks)
+                        await (await srcentry.status()).size())
+                    copy_thunks.append(functools.partial(copy_source, srcentry))
+                return copy_thunks
             finally:
                 srcentries = None
 
