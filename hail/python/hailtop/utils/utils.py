@@ -16,7 +16,7 @@ import logging
 import asyncio
 import aiohttp
 import urllib.parse
-import urllib3.exceptions
+import google.api_core.exceptions
 import secrets
 import socket
 import requests
@@ -24,6 +24,8 @@ import botocore.exceptions
 import time
 from requests.adapters import HTTPAdapter
 from urllib3.poolmanager import PoolManager
+from aiohttp import client_exceptions as aiohttp_client_exceptions
+from urllib3 import exceptions as urllib3_exceptions
 
 from .time import time_msecs
 
@@ -660,8 +662,6 @@ def is_transient_error(e: BaseException) -> bool:
     # https://hail.zulipchat.com/#narrow/stream/223457-Batch-support/topic/ssl.20error
     import hailtop.aiocloud.aiogoogle.client.compute_client  # pylint: disable=import-outside-toplevel,cyclic-import
     import hailtop.httpx  # pylint: disable=import-outside-toplevel,cyclic-import
-    from aiohttp import client_exceptions as aiohttp_client_exceptions
-    from urllib3 import exceptions as urllib3_exceptions
     if (isinstance(e, aiohttp.ClientResponseError)
             and e.status in RETRYABLE_HTTP_STATUS_CODES):
         return True
@@ -680,8 +680,16 @@ def is_transient_error(e: BaseException) -> bool:
     if isinstance(e, asyncio.TimeoutError):
         return True
     if (isinstance(e, aiohttp_client_exceptions.ClientConnectorError)
-            and hasattr(e, 'os_error')
             and is_transient_error(e.os_error)):
+        return True
+    if (isinstance(e, aiohttp_client_exceptions.ClientOSError)
+            and not print(repr(e.args))
+            and len(e.args) >= 2
+            and e.args[0] == 1
+            and 'sslv3 alert bad record mac' in e.args[1]):
+        # aiohttp.client_exceptions.ClientOSError: [Errno 1] [SSL: SSLV3_ALERT_BAD_RECORD_MAC] sslv3 alert bad record mac (_ssl.c:2548)
+        #
+        # This appears to be a symptom of Google rate-limiting us as of 2023-10-15
         return True
     # appears to happen when the connection is lost prematurely, see:
     # https://github.com/aio-libs/aiohttp/issues/4581
@@ -721,6 +729,7 @@ def is_transient_error(e: BaseException) -> bool:
         if e.status == 500 and 'unknown' in e.message:
             return False
         return e.status in RETRYABLE_HTTP_STATUS_CODES
+
     if isinstance(e, TransientError):
         return True
     if e.__cause__ is not None:
