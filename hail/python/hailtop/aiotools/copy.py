@@ -46,7 +46,6 @@ class GrowingSempahore(AsyncContextManager[asyncio.Semaphore]):
             )
             new_max = min(int(self.current_max * 1.5), self.target_max)
             diff = new_max - self.current_max
-            print(f'growing semaphore from {self.current_max} to {new_max} {self.sema._value}')
             self.sema._value += diff
             self.sema._wake_up_next()
             self.current_max = new_max
