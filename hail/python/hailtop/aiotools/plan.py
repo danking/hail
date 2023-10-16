@@ -127,14 +127,6 @@ async def find_all_copy_pairs(
         n_files = 0
         n_bytes = 0
 
-        # if len(srcfiles) > 100 or len(dstfiles) > 100:
-        #     informed = True
-        #     print(src)
-        #     sys.stdout.flush()
-        #     sys.stderr.flush()
-        # else:
-        #     informed = False
-
         child_directory_tasks: List[asyncio.Task] = []
         while srcidx < len(srcfiles) and dstidx < len(dstfiles):
             srcf = srcfiles[srcidx]
@@ -144,9 +136,6 @@ async def find_all_copy_pairs(
             dstname, dsturl, dstisdir, dstsize = dstf
             if srcname == dstname:
                 if srcisdir and dstisdir:
-                    # if not informed:
-                    #     informed = True
-                    #     print(src)
                     child_directory_tasks.append(
                         asyncio.create_task(find_all_copy_pairs(
                             fs, matches, differs, srconly, dstonly, plan, srcurl, dsturl, progress, sema
@@ -167,9 +156,6 @@ async def find_all_copy_pairs(
                 if srcisdir:
                     if src[-1] != '/':
                         src += '/'
-                    # if not informed:
-                    #     informed = True
-                    #     print(src)
                     child_directory_tasks.append(
                         asyncio.create_task(find_all_copy_pairs(
                             fs, matches, differs, srconly, dstonly, plan, srcurl, os.path.join(dst, removeprefix(srcurl, src)), progress, sema
@@ -194,9 +180,6 @@ async def find_all_copy_pairs(
             if srcisdir:
                 if src[-1] != '/':
                     src += '/'
-                # if not informed:
-                #     informed = True
-                #     print(src)
                 child_directory_tasks.append(
                     asyncio.create_task(find_all_copy_pairs(
                         fs, matches, differs, srconly, dstonly, plan, srcurl, os.path.join(dst, removeprefix(srcurl, src)), progress, sema
