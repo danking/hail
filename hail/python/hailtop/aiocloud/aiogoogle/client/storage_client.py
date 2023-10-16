@@ -73,7 +73,8 @@ class InsertObjectStream(WritableStream):
         try:
             await asyncio.wait([fut, self._request_task], return_when=asyncio.FIRST_COMPLETED)
             if fut.done() and not fut.cancelled():
-                await fut  # retrieve exceptions
+                if exc := fut.exception():
+                    raise exc
                 return len(b)
             raise ValueError('request task finished early')
         finally:
@@ -87,7 +88,8 @@ class InsertObjectStream(WritableStream):
                 self._value = await resp.json()
         finally:
             if fut.done() and not fut.cancelled():
-                await fut  # retrieve exceptions
+                if exc := fut.exception():
+                    raise exc
             else:
                 fut.cancel()
 
