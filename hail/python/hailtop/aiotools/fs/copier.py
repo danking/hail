@@ -1,9 +1,10 @@
-from typing import Any, AsyncIterator, Awaitable, Optional, List, Union, Dict, Callable
+from typing import Any, AsyncIterator, Awaitable, Optional, List, Union, Dict, Callable, Tuple
 import os
 import os.path
 import asyncio
 import functools
 import humanize
+import random
 
 
 from ...utils import (retry_transient_errors, url_basename, url_join, bounded_gather2, time_msecs,
@@ -163,7 +164,10 @@ class CopyReport:
         print(f'  Time: {humanize_timedelta_msecs(self._duration)}')
         assert self._duration is not None
         if self._duration > 0:
-            print(f'  Average transfer rate: {humanize.naturalsize(total_bytes / (self._duration / 1000))}/s')
+            bandwidth = humanize.naturalsize(total_bytes / (self._duration / 1000))
+            print(f'  Average bandwidth: {bandwidth}/s')
+            file_rate = total_files / (self._duration / 1000)
+            print(f'  Average file rate: {file_rate:,.1f}/s')
 
         print('Sources:')
         for sr in source_reports:
@@ -199,6 +203,9 @@ class SourceCopier:
         assert not destfile.endswith('/')
 
         async with self.xfer_sema.acquire_manager(min(Copier.BUFFER_SIZE, size)):
+            await asyncio.sleep(
+                # jitter each request a bit for better load distribution
+                random.uniform(0.0, 0.300))
             async with await self.router_fs.open(srcfile) as srcf:
                 try:
                     dest_cm = await self.router_fs.create(destfile, retry_writes=False)
@@ -225,6 +232,9 @@ class SourceCopier:
                          return_exceptions: bool) -> None:
         try:
             async with self.xfer_sema.acquire_manager(min(Copier.BUFFER_SIZE, this_part_size)):
+                await asyncio.sleep(
+                    # jitter each request a bit for better load distribution
+                    random.uniform(0.0, 0.300))
                 async with await self.router_fs.open_from(srcfile, part_number * part_size, length=this_part_size) as srcf:
                     async with await part_creator.create_part(part_number, part_number * part_size, size_hint=this_part_size) as destf:
                         n = this_part_size
@@ -394,24 +404,23 @@ class SourceCopier:
 
             await self._copy_file_multi_part(sema, source_report, srcfile, await srcentry.status(), url_join(full_dest, relsrcfile), return_exceptions)
 
-        async def create_copies() -> List[Callable[[], Awaitable[None]]]:
+        async def create_copies() -> Tuple[List[Callable[[], Awaitable[None]]], int]:
             nonlocal srcentries
+            bytes_to_copy = 0
             if srcentries is None:
                 srcentries = await files_iterator()
             try:
                 copy_thunks = []
                 async for srcentry in srcentries:
-                    source_report.start_files(1)
-                    source_report.start_bytes(
-                        # this is almost never a syscall/net-request (afaik: only local symlinks)
-                        await (await srcentry.status()).size())
+                    bytes_to_copy += await (await srcentry.status()).size()  # this is almost never a syscall/net-request (afaik: only local symlinks)
                     copy_thunks.append(functools.partial(copy_source, srcentry))
-                return copy_thunks
+                return (copy_thunks, bytes_to_copy)
             finally:
                 srcentries = None
 
-        copies = await retry_transient_errors(create_copies)
-
+        copies, bytes_to_copy = await retry_transient_errors(create_copies)
+        source_report.start_files(len(copies))
+        source_report.start_bytes(bytes_to_copy)
         await bounded_gather2(sema, *copies, cancel_on_error=True)
 
     async def copy(self, sema: asyncio.Semaphore, source_report: SourceReport, return_exceptions: bool):

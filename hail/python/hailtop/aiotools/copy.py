@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, AsyncContextManager, Optional, Tuple
 import aiomonitor
 import argparse
 import asyncio
@@ -7,7 +7,9 @@ import logging
 import sys
 
 from concurrent.futures import ThreadPoolExecutor
+from rich.progress import Progress, TaskID
 
+from ..utils.utils import sleep_before_try
 from ..utils.rich_progress_bar import RichProgressBar, make_listener
 from . import Transfer, Copier
 from .router_fs import RouterAsyncFS
@@ -26,6 +28,48 @@ except ImportError as e:
 log = logging.getLogger('hailtop.aiotools.copy')
 
 
+class GrowingSempahore(AsyncContextManager[asyncio.Semaphore]):
+    def __init__(self, start_max: int, target_max: int, progress_and_tid: Optional[Tuple[Progress, TaskID]]):
+        self.task: Optional[asyncio.Task] = None
+        self.target_max = target_max
+        self.current_max = start_max
+        self.sema = asyncio.Semaphore(self.current_max)
+        self.progress_and_tid = progress_and_tid
+
+    async def _grow(self):
+        growths = 0
+        while self.current_max < self.target_max:
+            await sleep_before_try(
+                growths,
+                base_delay_ms=15_000,
+                max_delay_ms=5 * 60_000,
+            )
+            new_max = min(int(self.current_max * 1.5), self.target_max)
+            diff = new_max - self.current_max
+            print(f'growing semaphore from {self.current_max} to {new_max} {self.sema._value}')
+            self.sema._value += diff
+            self.sema._wake_up_next()
+            self.current_max = new_max
+            if self.progress_and_tid:
+                progress, tid = self.progress_and_tid
+                progress.update(tid, advance=diff)
+
+    async def __aenter__(self) -> asyncio.Semaphore:
+        self.task = asyncio.create_task(self._grow())
+        await self.sema.__aenter__()
+        return self.sema
+
+    async def __aexit__(self, exc_type, exc, tb):
+        try:
+            await self.sema.__aexit__(exc_type, exc, tb)
+        finally:
+            if self.task is not None:
+                if self.task.done():
+                    await self.task  # retrieve exceptions
+                else:
+                    self.task.cancel()
+
+
 async def copy(*,
                max_simultaneous_transfers: Optional[int] = None,
                local_kwargs: Optional[dict] = None,
@@ -37,7 +81,7 @@ async def copy(*,
                ) -> None:
     with ThreadPoolExecutor() as thread_pool:
         if max_simultaneous_transfers is None:
-            max_simultaneous_transfers = 5 # 75
+            max_simultaneous_transfers = 75
         if local_kwargs is None:
             local_kwargs = {}
         if 'thread_pool' not in local_kwargs:
@@ -54,9 +98,15 @@ async def copy(*,
                                  gcs_kwargs=gcs_kwargs,
                                  azure_kwargs=azure_kwargs,
                                  s3_kwargs=s3_kwargs) as fs:
-            sema = asyncio.Semaphore(max_simultaneous_transfers)
-            async with sema:
-                with RichProgressBar(transient=True, disable=not verbose) as progress:
+            with RichProgressBar(transient=True, disable=not verbose) as progress:
+                initial_simultaneous_transfers = 10
+                parallelism_tid = progress.add_task(description='parallelism',
+                                                    completed=initial_simultaneous_transfers,
+                                                    total=max_simultaneous_transfers,
+                                                    visible=verbose)
+                async with GrowingSempahore(initial_simultaneous_transfers,
+                                            max_simultaneous_transfers,
+                                            (progress, parallelism_tid)) as sema:
                     file_tid = progress.add_task(description='files', total=0, visible=verbose)
                     bytes_tid = progress.add_task(description='bytes', total=0, visible=verbose)
                     copy_report = await Copier.copy(

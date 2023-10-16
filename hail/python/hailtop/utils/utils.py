@@ -543,6 +543,8 @@ async def bounded_gather2_raise_exceptions(
             for task in tasks:
                 if not task.done():
                     task.cancel()
+                elif not task.cancelled():
+                    await task  # retrieve exception
             if tasks:
                 async with WithoutSemaphore(sema):
                     await asyncio.wait(tasks)
@@ -555,6 +557,8 @@ async def bounded_gather2(
         cancel_on_error: bool = False
 ) -> List[T]:
     if return_exceptions:
+        if cancel_on_error:
+            raise ValueError('cannot request return_exceptions and cancel_on_error')
         return await bounded_gather2_return_exceptions(sema, *pfs)  # type: ignore
     return await bounded_gather2_raise_exceptions(sema, *pfs, cancel_on_error=cancel_on_error)
 

@@ -1,4 +1,4 @@
-from typing import Optional, Callable, Tuple
+from typing import Optional, Callable, Tuple, List
 from rich import filesize
 from rich.progress import MofNCompleteColumn, BarColumn, TextColumn, TimeRemainingColumn, TimeElapsedColumn, Progress, ProgressColumn, TaskProgressColumn, TransferSpeedColumn, Task
 from rich.text import Text
@@ -57,33 +57,24 @@ def make_listener(progress: Progress, tid) -> Callable[[int], None]:
     return listen
 
 
-class BytesOrCount(ProgressColumn):
+def units(task: Task) -> Tuple[List[str], int]:
+    if task.description == 'files':
+        return ["files", "K files", "M files", "G files", "T files", "P files", "E files", "Z files", "Y files"], 1000
+    if task.description == 'bytes':
+        return ["bytes", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"], 1024
+    return ["", "K", "M", "G", "T", "P", "E", "Z", "Y"], 1000
+
+
+class BytesOrCountOrN(ProgressColumn):
     def __init__(
         self, table_column = None
     ) -> None:
-
         super().__init__(table_column=table_column)
 
     def render(self, task: "Task") -> Text:
         completed = int(task.completed)
-
-        unit_and_suffix_calculation_base = (
-            int(task.total) if task.total is not None else completed
-        )
-
-        if task.description == 'files':
-            units = ["files", "K files", "M files", "G files", "T files", "P files", "E files", "Z files", "Y files"]
-            magnitude = 1000
-        else:
-            units = ["bytes", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"]
-            magnitude = 1024
-
-        unit, suffix = filesize.pick_unit_and_suffix(
-            unit_and_suffix_calculation_base,
-            units,
-            magnitude
-        )
-
+        n = int(task.total) if task.total is not None else completed
+        unit, suffix = filesize.pick_unit_and_suffix(n, *units(task))
         precision = 0 if unit == 1 else 1
 
         completed_ratio = completed / unit
@@ -101,6 +92,18 @@ class BytesOrCount(ProgressColumn):
         return download_text
 
 
+class RateColumn(ProgressColumn):
+    def render(self, task: "Task") -> Text:
+        speed = task.finished_speed or task.speed
+        if speed is None:
+            return Text("?", style="progress.data.speed")
+
+        speed = int(speed)
+        unit, suffix = filesize.pick_unit_and_suffix(speed, *units(task))
+        precision = 0 if unit == 1 else 1
+        return Text(f"{speed / unit:,.{precision}f} {suffix}/s", style="progress.data.speed")
+
+
 class RichProgressBar:
     def __init__(self, *args, **kwargs):
         if len(args) == 0:
@@ -113,8 +116,8 @@ class RichProgressBar:
             TextColumn("[progress.description]{task.description}"),
             BarColumn(complete_style="bar.finished"),
             TaskProgressColumn(),
-            BytesOrCount(),
-            TransferSpeedColumn(),
+            BytesOrCountOrN(),
+            RateColumn(),
             TimeRemainingColumn(),
             TimeElapsedColumn()
         )
