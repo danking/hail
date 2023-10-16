@@ -678,12 +678,7 @@ class GoogleStorageAsyncFS(AsyncFS):
         return await self._storage_client.get_object(
             bucket, name, headers={'Range': range_str})
 
-    seen = set()
-
     async def create(self, url: str, *, retry_writes: bool = True) -> WritableStream:
-        if url in self.seen:
-            raise ValueError((url, self.seen))
-        self.seen.add(url)
         bucket, name = self.get_bucket_and_name(url)
         params = {
             'uploadType': 'resumable' if retry_writes else 'media'
@@ -695,9 +690,6 @@ class GoogleStorageAsyncFS(AsyncFS):
             sema: asyncio.Semaphore,
             url: str,
             num_parts: int) -> GoogleStorageMultiPartCreate:
-        if url in self.seen:
-            raise ValueError((url, self.seen))
-        self.seen.add(url)
         return GoogleStorageMultiPartCreate(sema, self, url, num_parts)
 
     async def staturl(self, url: str) -> str:
