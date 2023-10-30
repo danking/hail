@@ -5,7 +5,7 @@ import sys
 
 from .router_fs import RouterAsyncFS
 from .fs import FileListEntry, AsyncFS, WritableStream
-from ..utils.rich_progress_bar import RichProgressBar, Progress
+from ..utils.rich_progress_bar import CopyToolProgressBar, Progress
 
 try:
     import uvloop
@@ -45,7 +45,7 @@ async def plan(
              await fs.create(os.path.join(folder, 'srconly')) as srconly, \
              await fs.create(os.path.join(folder, 'dstonly')) as dstonly, \
              await fs.create(os.path.join(folder, 'plan')) as plan:
-            with RichProgressBar(transient=True, disable=not verbose) as progress:
+            with CopyToolProgressBar(transient=True, disable=not verbose) as progress:
                 for src, dst in copy:
                     n_files, n_bytes = await find_all_copy_pairs(
                         fs,
