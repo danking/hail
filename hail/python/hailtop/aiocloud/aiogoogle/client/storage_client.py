@@ -460,7 +460,7 @@ class GoogleStorageFileListEntry(FileListEntry):
         self._status: Optional[GetObjectFileStatus] = None
 
     def name(self) -> str:
-        return os.path.basename(self._name)
+        return os.path.basename(self._name.rstrip('/'))
 
     async def url(self) -> str:
         return f'gs://{self._bucket}/{self._name}'
