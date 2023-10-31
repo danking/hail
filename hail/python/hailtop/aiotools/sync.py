@@ -32,6 +32,8 @@ async def sync(
         if not all(await asyncio.gather(*(fs.exists(os.path.join(plan_folder, x)) for x in ('matches', 'differs', 'srconly', 'dstonly', 'plan', 'summary')))):
             print('Run hailctl fs sync --make-plan first.')
             sys.exit(1)
+        results = (await fs.read(os.path.join(plan_folder, 'summary'))).decode('utf-8')
+        n_files, n_bytes = (int(x) for x in results.split('\t'))
         await copy(
             max_simultaneous_transfers=max_parallelism,
             local_kwargs=None,
@@ -39,7 +41,8 @@ async def sync(
             azure_kwargs={},
             s3_kwargs=s3_kwargs,
             transfers=[Transfer(src, dst, treat_dest_as=Transfer.DEST_IS_TARGET) async for src, dst in iterate_plan_file(plan_folder, fs)],
-            verbose=verbose
+            verbose=verbose,
+            totals=(n_files, n_bytes),
         )
 
 

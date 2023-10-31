@@ -66,6 +66,14 @@ class GrowingSempahore(AsyncContextManager[asyncio.Semaphore]):
                     self.task.cancel()
 
 
+def only_update_completions(progress: Progress, tid):
+    def listen(delta: int):
+        if delta < 0:
+            print(('delta', delta))
+            progress.update(tid, advance=-delta)
+    return listen
+
+
 async def copy(*,
                max_simultaneous_transfers: Optional[int] = None,
                local_kwargs: Optional[dict] = None,
@@ -74,6 +82,7 @@ async def copy(*,
                s3_kwargs: Optional[dict] = None,
                transfers: List[Transfer],
                verbose: bool = False,
+               totals: Optional[Tuple[int, int]] = None
                ) -> None:
     with ThreadPoolExecutor() as thread_pool:
         if max_simultaneous_transfers is None:
@@ -105,12 +114,24 @@ async def copy(*,
                                             (progress, parallelism_tid)) as sema:
                     file_tid = progress.add_task(description='files', total=0, visible=verbose)
                     bytes_tid = progress.add_task(description='bytes', total=0, visible=verbose)
+
+                    if totals:
+                        n_files, n_bytes = totals
+                        print((n_files, n_bytes))
+                        progress.update(file_tid, total=n_files)
+                        progress.update(bytes_tid, total=n_bytes)
+                        file_listener = only_update_completions(progress, file_tid)
+                        bytes_listener = only_update_completions(progress, bytes_tid)
+                    else:
+                        file_listener = make_listener(progress, file_tid)
+                        bytes_listener = make_listener(progress, bytes_tid)
+
                     copy_report = await Copier.copy(
                         fs,
                         sema,
                         transfers,
-                        files_listener=make_listener(progress, file_tid),
-                        bytes_listener=make_listener(progress, bytes_tid))
+                        files_listener=file_listener,
+                        bytes_listener=bytes_listener)
                 if verbose:
                     copy_report.summarize()
 
