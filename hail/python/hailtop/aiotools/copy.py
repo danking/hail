@@ -69,7 +69,6 @@ class GrowingSempahore(AsyncContextManager[asyncio.Semaphore]):
 def only_update_completions(progress: Progress, tid):
     def listen(delta: int):
         if delta < 0:
-            print(('delta', delta))
             progress.update(tid, advance=-delta)
     return listen
 
@@ -117,7 +116,6 @@ async def copy(*,
 
                     if totals:
                         n_files, n_bytes = totals
-                        print((n_files, n_bytes))
                         progress.update(file_tid, total=n_files)
                         progress.update(bytes_tid, total=n_bytes)
                         file_listener = only_update_completions(progress, file_tid)
@@ -133,7 +131,7 @@ async def copy(*,
                         files_listener=file_listener,
                         bytes_listener=bytes_listener)
                 if verbose:
-                    copy_report.summarize()
+                    copy_report.summarize(include_sources=totals is None)
 
 
 def make_transfer(json_object: Dict[str, str]) -> Transfer:

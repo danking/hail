@@ -134,7 +134,7 @@ class CopyReport:
         self._end_time = time_msecs()
         self._duration = self._end_time - self._start_time
 
-    def summarize(self):
+    def summarize(self, include_sources: bool = True):
         source_reports = []
 
         def add_source_reports(transfer_report):
@@ -168,9 +168,10 @@ class CopyReport:
             file_rate = total_files / (self._duration / 1000)
             print(f'  Average file rate: {file_rate:,.1f}/s')
 
-        print('Sources:')
-        for sr in source_reports:
-            print(f'  {sr._source}: {sr._files} files, {humanize.naturalsize(sr._bytes)}')
+        if include_sources:
+            print('Sources:')
+            for sr in source_reports:
+                print(f'  {sr._source}: {sr._files} files, {humanize.naturalsize(sr._bytes)}')
 
 
 class SourceCopier:
