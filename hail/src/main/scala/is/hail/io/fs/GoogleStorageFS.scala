@@ -14,8 +14,9 @@ import org.apache.log4j.Logger
 
 import java.io.{ByteArrayInputStream, FileNotFoundException, IOException}
 import java.net.URI
-import java.nio.ByteBuffer
-import java.nio.file.Paths
+import java.nio._
+import java.nio.channels._
+import java.nio.file._
 import scala.jdk.CollectionConverters.{asJavaIterableConverter, asScalaIteratorConverter, iterableAsScalaIterableConverter}
 
 
@@ -197,6 +198,24 @@ class GoogleStorageFS(
           .setTransportOptions(transportOptions)
           .build()
           .getService
+    }
+  }
+
+  def openNoCompressionNio(url: URL): SeekableByteChannel = retryTransientErrors {
+    // FIXME: need to wrap this and ensure we handle requester pays properly
+    val ch = storage.reader(url.bucket, url.path)
+    new SeekableByteChannel() {
+      def position(): Long = ???
+      def position(newPosition: Long): SeekableByteChannel = {
+        ch.seek(newPosition)
+        this
+      }
+      def read(dst: ByteBuffer): Int = ch.read(dst)
+      def size(): Long = ???
+      def truncate(size: Long): SeekableByteChannel = throw new NonWritableChannelException()
+      def write(src: ByteBuffer): Int = throw new NonWritableChannelException()
+      def close() = ch.close()
+      def isOpen(): Boolean = ch.isOpen()
     }
   }
 

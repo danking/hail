@@ -157,8 +157,9 @@ class ServiceBackend(
     collection: IndexedSeq[(Array[Byte], Int)],
     stageIdentifier: String,
     dependency: Option[TableStageDependency] = None
-  )(f: (Array[Byte], HailTaskContext, HailClassLoader, FS) => Array[Byte]
-  ): (Option[Throwable], IndexedSeq[(Array[Byte], Int)]) = {
+  )(
+    f: (Array[Byte], HailTaskContext, HailClassLoader, FS) => Array[Byte]
+  ): IndexedSeq[(Array[Byte], Int)] = {
     val backendContext = _backendContext.asInstanceOf[ServiceBackendContext]
     val n = collection.length
     val token = tokenUrlSafe(32)
@@ -277,32 +278,27 @@ class ServiceBackend(
 
     val startTime = System.nanoTime()
 
-    val r@(_, results) = runAllKeepFirstError(executor) {
+    // val r@(_, results) = runAllKeepFirstError(executor) {
+    val results =
       collection.map { case (_, i) =>
-        (
-          () => {
-            val bytes = fs.readNoCompression(s"$root/result.$i")
-            if (bytes(0) != 0) {
-              bytes.slice(1, bytes.length)
-            } else {
-              val errorInformationBytes = bytes.slice(1, bytes.length)
-              val is = new DataInputStream(new ByteArrayInputStream(errorInformationBytes))
-              val shortMessage = readString(is)
-              val expandedMessage = readString(is)
-              val errorId = is.readInt()
-              throw new HailWorkerException(i, shortMessage, expandedMessage, errorId)
-            }
-          },
-          i
-        )
+        val bytes = fs.readNoCompression(s"$root/result.$i")
+        if (bytes(0) != 0) {
+          (bytes.slice(1, bytes.length), i)
+        } else {
+          val errorInformationBytes = bytes.slice(1, bytes.length)
+          val is = new DataInputStream(new ByteArrayInputStream(errorInformationBytes))
+          val shortMessage = readString(is)
+          val expandedMessage = readString(is)
+          val errorId = is.readInt()
+          throw new HailWorkerException(i, shortMessage, expandedMessage, errorId)
+        }
       }
-    }
 
     val resultsReadingSeconds = (System.nanoTime() - startTime) / 1000000000.0
     val rate = results.length / resultsReadingSeconds
     val byterate = results.map(_._1.length).sum / resultsReadingSeconds / 1024 / 1024
     log.info(s"all results read. $resultsReadingSeconds s. $rate result/s. $byterate MiB/s.")
-    r
+    results
   }
 
   def stop(): Unit =

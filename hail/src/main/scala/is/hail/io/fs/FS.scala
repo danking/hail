@@ -11,9 +11,10 @@ import org.apache.commons.io.IOUtils
 import org.apache.hadoop
 
 import java.io._
-import java.nio.ByteBuffer
+import java.nio._
+import java.nio.channels._
 import java.nio.charset._
-import java.nio.file.FileSystems
+import java.nio.file._
 import java.util.zip.GZIPOutputStream
 import scala.collection.mutable
 import scala.io.Source
@@ -331,6 +332,10 @@ trait FS extends Serializable {
       ""
   }
 
+  final def openNoCompressionNio(filename: String): SeekableByteChannel = openNoCompressionNio(parseUrl(filename))
+
+  def openNoCompressionNio(url: URL): SeekableByteChannel
+
   final def openNoCompression(filename: String): SeekableDataInputStream = openNoCompression(parseUrl(filename))
 
   def openNoCompression(url: URL): SeekableDataInputStream
@@ -447,6 +452,12 @@ trait FS extends Serializable {
 
   def open(url: URL, gzAsBGZ: Boolean): InputStream =
     open(url, getCodecFromPath(url.getPath, gzAsBGZ))
+
+  def openNio(filename: String, gzAsBGZ: Boolean): SeekableByteChannel = {
+    val url = parseUrl(filename)
+    assert(getCodecFromPath(url.getPath, gzAsBGZ) == null)
+    openNoCompressionNio(url)
+  }
 
   final def create(filename: String): OutputStream = create(parseUrl(filename))
 

@@ -1,10 +1,13 @@
 package is.hail.io
 
 import java.io._
+import java.nio._
+import java.nio.channels._
 import is.hail.annotations._
 import is.hail.asm4s._
 import is.hail.backend.ExecuteContext
 import is.hail.expr.ir.{EmitClassBuilder, EmitFunctionBuilder}
+import is.hail.io._
 import is.hail.types.encoded._
 import is.hail.types.physical._
 import is.hail.types.virtual._
@@ -31,7 +34,7 @@ final case class TypedCodecSpec(_eType: EType, _vType: Type, _bufferSpec: Buffer
 
   def buildDecoder(ctx: ExecuteContext, requestedType: Type): (PType, (InputStream, HailClassLoader) => Decoder) = {
     val (rt, bufferToDecoder) = encodedType.buildDecoder(ctx, requestedType)
-    (rt, (in: InputStream, theHailClassLoader: HailClassLoader) => bufferToDecoder(_bufferSpec.buildInputBuffer(in), theHailClassLoader))
+    (rt, (in: InputStream, theHailClassLoader: HailClassLoader) =>bufferToDecoder(_bufferSpec.buildInputBuffer(in), theHailClassLoader))
   }
 
   def buildStructDecoder(ctx: ExecuteContext, requestedType: TStruct): (PStruct, (InputStream, HailClassLoader) => Decoder) = {
@@ -39,7 +42,19 @@ final case class TypedCodecSpec(_eType: EType, _vType: Type, _bufferSpec: Buffer
     pType -> makeDec
   }
 
-  def buildCodeInputBuffer(is: Code[InputStream]): Code[InputBuffer] = _bufferSpec.buildCodeInputBuffer(is)
+  def buildDecoderNio(ctx: ExecuteContext, requestedType: Type): (PType, (SeekableByteChannel, HailClassLoader) => Decoder) = {
+    val (rt, bufferToDecoder) = encodedType.buildDecoder(ctx, requestedType)
+    (rt, (in: SeekableByteChannel, theHailClassLoader: HailClassLoader) => bufferToDecoder(_bufferSpec.buildInputBuffer(in), theHailClassLoader))
+  }
+
+  def buildStructDecoderNio(ctx: ExecuteContext, requestedType: TStruct): (PStruct, (SeekableByteChannel, HailClassLoader) => Decoder) = {
+    val (pType: PStruct, makeDec) = buildDecoderNio(ctx, requestedType)
+    pType -> makeDec
+  }
+
+  override def buildCodeInputBuffer(is: Code[InputStream]): Code[InputBuffer] = _bufferSpec.buildCodeInputBuffer(is)
+
+  def buildCodeInputBufferNio(is: Code[SeekableByteChannel]): Code[InputBuffer] = _bufferSpec.buildCodeInputBufferNio(is)
 
   def buildCodeOutputBuffer(os: Code[OutputStream]): Code[OutputBuffer] = _bufferSpec.buildCodeOutputBuffer(os)
 }

@@ -1,5 +1,6 @@
 package is.hail.io.compress
 
+import java.nio._
 import net.jpountz.lz4.{ LZ4Compressor, LZ4Factory, LZ4FastDecompressor }
 
 object LZ4 {
@@ -24,6 +25,11 @@ class LZ4 private (
   }
 
   def decompress(decomp: Array[Byte], decompOff: Int, decompLen: Int, comp: Array[Byte], compOff: Int, compLen: Int) {
+    val compLen2 = decompressor.decompress(comp, compOff, decomp, decompOff, decompLen)
+    assert(compLen2 == compLen)
+  }
+
+  def decompress(decomp: ByteBuffer, decompOff: Int, decompLen: Int, comp: ByteBuffer, compOff: Int, compLen: Int) {
     val compLen2 = decompressor.decompress(comp, compOff, decomp, decompOff, decompLen)
     assert(compLen2 == compLen)
   }

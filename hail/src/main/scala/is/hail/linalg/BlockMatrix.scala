@@ -2214,11 +2214,12 @@ class BlockMatrixCachedPartFile(
     assert(isTranspose, "BlockMatrix must be saved in row-major format")
     in.skipBytes(startRow * cols * 8)
     val doublesToRead = math.min(cacheCapacity, (rows - startRow) * cols)
-    in.readDoubles(cache, 0, doublesToRead)
-    cacheIndex = 0
-    cacheEnd = doublesToRead
-    fileIndex = startRow * cols + doublesToRead
-    log.info(s"fileIndex 1 $fileIndex")
+    ???
+    // in.readDoubles(cache, 0, doublesToRead)
+    // cacheIndex = 0
+    // cacheEnd = doublesToRead
+    // fileIndex = startRow * cols + doublesToRead
+    // log.info(s"fileIndex 1 $fileIndex")
   }
 
   private[this] def fillCache(): Unit = {
@@ -2234,14 +2235,15 @@ class BlockMatrixCachedPartFile(
       assert(isTranspose, "BlockMatrix must be saved in row-major format")
 
       in.skipBytes(8 * fileIndex)
-      val doublesToRead = math.min(
-        cacheCapacity - startWritingAt,
-        rows * cols - fileIndex)
-      in.readDoubles(cache, startWritingAt, doublesToRead)
-      cacheEnd = doublesToRead + startWritingAt
-      var i = 0
-      fileIndex += doublesToRead
-      assert(doublesToRead > 0)
+      ???
+      // val doublesToRead = math.min(
+      //   cacheCapacity - startWritingAt,
+      //   rows * cols - fileIndex)
+      // in.readDoubles(cache, startWritingAt, doublesToRead)
+      // cacheEnd = doublesToRead + startWritingAt
+      // var i = 0
+      // fileIndex += doublesToRead
+      // assert(doublesToRead > 0)
     }
   }
 

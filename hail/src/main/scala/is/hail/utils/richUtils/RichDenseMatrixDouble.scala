@@ -32,10 +32,11 @@ object RichDenseMatrixDouble {
     val isTranspose = in.readBoolean()
 
     val data = new Array[Double](rows * cols)
-    in.readDoubles(data)
+    ???
+    // in.readDoubles(data)
 
-    new BDM[Double](rows, cols, data,
-      offset = 0, majorStride = if (isTranspose) cols else rows, isTranspose = isTranspose)
+    // new BDM[Double](rows, cols, data,
+    //   offset = 0, majorStride = if (isTranspose) cols else rows, isTranspose = isTranspose)
   }
 
   def read(fs: FS, path: String, bufferSpec: BufferSpec): BDM[Double] = {

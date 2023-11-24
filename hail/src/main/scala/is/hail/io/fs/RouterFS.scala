@@ -1,5 +1,8 @@
 package is.hail.io.fs
 
+import java.nio._
+import java.nio.channels._
+
 object RouterFSURL {
   def apply(fs: FS)(_url: fs.URL): RouterFSURL = RouterFSURL(_url, fs)
 }
@@ -40,6 +43,8 @@ class RouterFS(fss: IndexedSeq[FS]) extends FS {
   override def createCachedNoCompression(url: URL): PositionedDataOutputStream = url.fs.createCachedNoCompression(url.url)
 
   def openNoCompression(url: URL): SeekableDataInputStream = url.fs.openNoCompression(url.url)
+
+  def openNoCompressionNio(url: URL): SeekableByteChannel = url.fs.openNoCompressionNio(url.url)
 
   def createNoCompression(url: URL): PositionedDataOutputStream = url.fs.createNoCompression(url.url)
 

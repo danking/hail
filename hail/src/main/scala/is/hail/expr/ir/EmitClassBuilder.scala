@@ -18,6 +18,8 @@ import is.hail.variant.ReferenceGenome
 import org.apache.spark.TaskContext
 
 import java.io._
+import java.nio._
+import java.nio.channels._
 import java.lang.reflect.InvocationTargetException
 import scala.collection.mutable
 import scala.language.existentials
@@ -246,6 +248,14 @@ trait WrappedEmitClassBuilder[C] extends WrappedEmitModuleBuilder {
   def open(path: Code[String], checkCodec: Code[Boolean]): Code[InputStream] =
     Code.newInstance[java.io.BufferedInputStream, InputStream](
       getFS.invoke[String, Boolean, InputStream]("open", path, checkCodec))
+
+  def openUnbufferedNio(path: Code[String], checkCodec: Code[Boolean]): Code[SeekableByteChannel] =
+    // FIXME: Unbuffer?
+    getFS.invoke[String, Boolean, SeekableByteChannel]("openNio", path, checkCodec)
+
+  def openNio(path: Code[String], checkCodec: Code[Boolean]): Code[SeekableByteChannel] =
+    // FIXME: Buffer?
+    getFS.invoke[String, Boolean, SeekableByteChannel]("openNio", path, checkCodec)
 
   def createUnbuffered(path: Code[String]): Code[OutputStream] =
     getFS.invoke[String, OutputStream]("create", path)

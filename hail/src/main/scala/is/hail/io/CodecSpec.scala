@@ -1,6 +1,8 @@
 package is.hail.io
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream, OutputStream}
+import java.nio._
+import java.nio.channels._
 import is.hail.annotations.{Region, RegionValue}
 import is.hail.asm4s.{Code, HailClassLoader, theHailClassLoaderForSparkWorkers}
 import is.hail.backend.ExecuteContext
@@ -33,6 +35,8 @@ trait AbstractTypedCodecSpec extends Spec {
 
   def buildDecoder(ctx: ExecuteContext, requestedType: Type): (PType, (InputStream, HailClassLoader) => Decoder)
 
+  def buildDecoderNio(ctx: ExecuteContext, requestedType: Type): (PType, (SeekableByteChannel, HailClassLoader) => Decoder)
+
   def encode(ctx: ExecuteContext, t: PType, offset: Long): Array[Byte] = {
     val baos = new ByteArrayOutputStream()
     encode(ctx, t, offset, baos)
@@ -61,7 +65,10 @@ trait AbstractTypedCodecSpec extends Spec {
     (pt, dec(bais, ctx.theHailClassLoader).readRegionValue(region))
   }
 
-  def buildCodeInputBuffer(is: Code[InputStream]): Code[InputBuffer]
+  def buildCodeInputBuffer(is: Code[InputStream]): Code[InputBuffer] =
+    buildCodeInputBufferNio(Code.newInstance[FakeSeekableByteChannelInputStream, InputStream](is))
+
+  def buildCodeInputBufferNio(is: Code[SeekableByteChannel]): Code[InputBuffer]
 
   def buildCodeOutputBuffer(os: Code[OutputStream]): Code[OutputBuffer]
 

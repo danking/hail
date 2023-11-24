@@ -1,6 +1,9 @@
 package is.hail.io
 
 import java.io._
+import java.nio._
+import java.nio.channels._
+import java.nio.file._
 import java.util
 import java.util.UUID
 import java.util.function.Supplier
@@ -10,6 +13,7 @@ import is.hail.io.compress.LZ4
 import is.hail.utils._
 
 import com.github.luben.zstd.{Zstd, ZstdDecompressCtx}
+import org.apache.commons.codec.binary.Hex
 
 trait InputBuffer extends Closeable {
   def close(): Unit
@@ -18,13 +22,7 @@ trait InputBuffer extends Closeable {
 
   def readByte(): Byte
 
-  def read(buf: Array[Byte], toOff: Int, n: Int) = {
-    var i = 0
-    while (i < n) {
-      buf(toOff + i) = readByte()
-      i += 1
-    }
-  }
+  def read(buf: ByteBuffer, toOff: Int, n: Int)
 
   def readInt(): Int
 
@@ -35,8 +33,6 @@ trait InputBuffer extends Closeable {
   def readDouble(): Double
 
   def readBytes(toRegion: Region, toOff: Long, n: Int): Unit
-
-  def readBytesArray(n: Int): Array[Byte]
 
   def skipBoolean(): Unit = skipByte()
 
@@ -52,17 +48,13 @@ trait InputBuffer extends Closeable {
 
   def skipBytes(n: Int): Unit
 
-  def readDoubles(to: Array[Double], off: Int, n: Int): Unit
+  def readDoubles(to: DoubleBuffer, off: Int, n: Int): Unit = ???
 
-  def readDoubles(to: Array[Double]): Unit = readDoubles(to, 0, to.length)
+  def readDoubles(to: DoubleBuffer): Unit = ???
 
   def readBoolean(): Boolean = readByte() != 0
 
-  def readUTF(): String = {
-    val n = readInt()
-    val a = readBytesArray(n)
-    new String(a, utfCharset)
-  }
+  def readUTF(): String
 }
 
 trait InputBlockBuffer extends Spec with Closeable {
@@ -70,105 +62,7 @@ trait InputBlockBuffer extends Spec with Closeable {
 
   def seek(offset: Long)
 
-  def skipBytesReadRemainder(n0: Int, buf: Array[Byte]): Int = {
-    var n = n0
-    var b = 0
-    while (n > 0) {
-      b = readBlock(buf)
-      n -= b
-    }
-    if (n < 0) {
-      System.arraycopy(buf, b + n, buf, 0, -n)
-      return -n
-    } else {
-      return 0
-    }
-  }
-
-  def readBlock(buf: Array[Byte]): Int
-}
-
-final class StreamInputBuffer(in: InputStream) extends InputBuffer {
-  private[this] val buff = new Array[Byte](8)
-
-  def close(): Unit = in.close()
-
-  def seek(offset: Long) = in.asInstanceOf[ByteTrackingInputStream].seek(offset)
-
-  def readByte(): Byte = {
-    in.readFully(buff, 0, 1)
-    Memory.loadByte(buff, 0)
-  }
-
-  override def read(buf: Array[Byte], toOff: Int, n: Int): Unit = {
-    in.readFully(buf, toOff, n)
-  }
-
-  def readInt(): Int = {
-    in.readFully(buff, 0, 4)
-    Memory.loadInt(buff, 0)
-  }
-
-  def readLong(): Long = {
-    in.readFully(buff)
-    Memory.loadLong(buff, 0)
-  }
-
-  def readFloat(): Float = {
-    in.readFully(buff, 0, 4)
-    Memory.loadFloat(buff, 0)
-  }
-
-  def readDouble(): Double = {
-    in.readFully(buff)
-    Memory.loadDouble(buff, 0)
-  }
-
-  def readBytes(toRegion: Region, toOff: Long, n: Int): Unit = {
-    Region.storeBytes(toOff, readBytesArray(n))
-  }
-
-  def readBytesArray(n: Int): Array[Byte] = {
-    Array.tabulate(n)(_ => readByte())
-  }
-
-  def skipByte(): Unit = {
-    val bytesRead = in.skip(1)
-    assert(bytesRead == 1L)
-  }
-
-  def skipInt(): Unit = {
-    val bytesRead = in.skip(4)
-    assert(bytesRead == 4L)
-  }
-
-  def skipLong(): Unit = {
-    val bytesRead = in.skip(8)
-    assert(bytesRead == 8L)
-  }
-
-  def skipFloat(): Unit = {
-    val bytesRead = in.skip(4)
-    assert(bytesRead == 4L)
-  }
-
-  def skipDouble(): Unit = {
-    val bytesRead = in.skip(8)
-    assert(bytesRead == 8L)
-  }
-
-  def skipBytes(n: Int): Unit = {
-    val bytesRead = in.skip(n)
-    assert(bytesRead == n)
-  }
-
-  def readDoubles(to: Array[Double], off: Int, n: Int): Unit = {
-    var i = 0
-    while (i < n) {
-      to(off + i) = readDouble()
-      i += 1
-    }
-  }
+  def readBlock(buf: ByteBuffer): Int
 }
 
 final class MemoryInputBuffer(mb: MemoryBuffer) extends InputBuffer {
@@ -206,7 +100,100 @@ final class MemoryInputBuffer(mb: MemoryBuffer) extends InputBuffer {
 
   def skipBytes(n: Int): Unit = mb.skipBytes(n)
 
-  def readDoubles(to: Array[Double], off: Int, n: Int): Unit = ???
+  def read(buf: ByteBuffer, toOff: Int, n: Int): Unit = ???
+
+  def readUTF(): String = ???
+}
+
+final class StreamInputBuffer(private[this] val in: SeekableByteChannel) extends InputBuffer {
+  private[this] val BUF_SIZE = 32 * 1024
+  private[this] val buf = ByteBuffer.allocateDirect(BUF_SIZE)
+  buf.order(ByteOrder.nativeOrder()) // AFAICT: Hail uses little-endian (least-significant first,
+                                     // aka backwards), is that intentional or an accident?
+  buf.limit(0)
+
+  def close(): Unit = in.close()
+
+  def seek(offset: Long): Unit = {
+    in.position(offset)
+    buf.limit(buf.position())
+  }
+
+  private[this] def require(n: Int): Unit = {
+    assert(n < BUF_SIZE/2)
+    if (buf.remaining() < n) {
+      buf.compact()
+      in.read(buf)
+      buf.flip()
+    }
+  }
+
+  def readByte(): Byte = {
+    require(1)
+    buf.get()
+  }
+
+  def read(buf: ByteBuffer, toOff: Int, n: Int) = ???
+
+  def readInt(): Int = {
+    require(4)
+    buf.getInt()
+  }
+
+  def readLong(): Long = {
+    require(8)
+    buf.getLong()
+  }
+
+  def readFloat(): Float = {
+    require(4)
+    buf.getFloat()
+  }
+
+  def readDouble(): Double = {
+    require(8)
+    buf.getDouble()
+  }
+
+  // FIXME: regions need to use buffers.
+  def readBytes(toRegion: Region, toOff: Long, n: Int): Unit = ???
+
+  def skipByte(): Unit = {
+    require(1)
+    buf.position(buf.position() + 1)
+  }
+
+  def skipInt(): Unit = {
+    require(4)
+    buf.position(buf.position() + 4)
+  }
+
+  def skipLong(): Unit = {
+    require(8)
+    buf.position(buf.position() + 8)
+  }
+
+  def skipFloat(): Unit = {
+    require(4)
+    buf.position(buf.position() + 4)
+  }
+
+  def skipDouble(): Unit = {
+    require(8)
+    buf.position(buf.position() + 8)
+  }
+
+  def skipBytes(n: Int): Unit = {
+    if (n < buf.remaining()) {
+      buf.position(buf.position() + n)
+    } else {
+      val excessSkips = n - buf.remaining()
+      in.position(in.position() + excessSkips)
+      buf.limit(buf.position())
+    }
+  }
+
+  def readUTF(): String = ???
 }
 
 final class LEB128InputBuffer(in: InputBuffer) extends InputBuffer {
@@ -220,7 +207,7 @@ final class LEB128InputBuffer(in: InputBuffer) extends InputBuffer {
     in.readByte()
   }
 
-  override def read(buf: Array[Byte], toOff: Int, n: Int) = in.read(buf, toOff, n)
+  override def read(buf: ByteBuffer, toOff: Int, n: Int) = ???
 
   def readInt(): Int = {
     var b: Byte = readByte()
@@ -252,8 +239,6 @@ final class LEB128InputBuffer(in: InputBuffer) extends InputBuffer {
 
   def readBytes(toRegion: Region, toOff: Long, n: Int): Unit = in.readBytes(toRegion, toOff, n)
 
-  def readBytesArray(n: Int): Array[Byte] = in.readBytesArray(n)
-
   def skipByte(): Unit = in.skipByte()
 
   def skipInt() {
@@ -274,118 +259,25 @@ final class LEB128InputBuffer(in: InputBuffer) extends InputBuffer {
 
   def skipBytes(n: Int): Unit = in.skipBytes(n)
 
-  def readDoubles(to: Array[Double], toOff: Int, n: Int): Unit = in.readDoubles(to, toOff, n)
-}
-
-final class TracingInputBuffer(
-  private[this] val in: InputBuffer
-) extends InputBuffer {
-  private[this] val filename = s"tracing-input-buffer-${UUID.randomUUID}"
-  private[this] val logfile = new FileOutputStream(filename, true)
-  log.info(s"tracing to $filename")
-
-  def close(): Unit = in.close()
-
-  def seek(offset: Long): Unit = ???
-
-  def readByte(): Byte = {
-    val x = in.readByte()
-    logfile.write(x)
-    x
-  }
-
-  override def read(buf: Array[Byte], toOff: Int, n: Int) = {
-    var i = 0
-    while (i < n) {
-      buf(toOff + i) = readByte()
-      i += 1
-    }
-  }
-
-  def readInt(): Int = {
-    val bytes = readBytesArray(4)
-    Memory.loadInt(bytes, 0)
-  }
-
-  def readLong(): Long = {
-    val bytes = readBytesArray(8)
-    Memory.loadLong(bytes, 0)
-  }
-
-  def readFloat(): Float = {
-    val bytes = readBytesArray(4)
-    Memory.loadFloat(bytes, 0)
-  }
-
-  def readDouble(): Double = {
-    val bytes = readBytesArray(8)
-    Memory.loadDouble(bytes, 0)
-  }
-
-  def readBytes(toRegion: Region, toOff: Long, n: Int): Unit = {
-    Region.storeBytes(toOff, readBytesArray(n))
-  }
-
-  def readBytesArray(n: Int): Array[Byte] = {
-    Array.tabulate(n)(_ => readByte())
-  }
-
-  override def skipBoolean(): Unit = skipByte()
-
-  def skipByte(): Unit = {
-    readBytesArray(1)
-  }
-
-  def skipInt(): Unit = {
-    readBytesArray(4)
-  }
-
-  def skipLong(): Unit = {
-    readBytesArray(8)
-  }
-
-  def skipFloat(): Unit = {
-    readBytesArray(4)
-  }
-
-  def skipDouble(): Unit = {
-    readBytesArray(8)
-  }
-
-  def skipBytes(n: Int): Unit = {
-    readBytesArray(n)
-  }
-
-  def readDoubles(to: Array[Double], off: Int, n: Int): Unit = {
-    var i = 0
-    while (i < n) {
-      to(off + i) = readDouble()
-      i += 1
-    }
-  }
-
-  override def readDoubles(to: Array[Double]): Unit = readDoubles(to, 0, to.length)
-
-  override def readBoolean(): Boolean = readByte() != 0
-
-  override def readUTF(): String = {
-    val s = in.readUTF()
-    logfile.write(s.getBytes(utfCharset))
-    s
-  }
+  def readUTF(): String = ???
 }
 
 final class BlockingInputBuffer(blockSize: Int, in: InputBlockBuffer) extends InputBuffer {
-  private[this] val buf = new Array[Byte](blockSize)
-  private[this] var end: Int = 0
-  private[this] var off: Int = 0
+  private[this] val buf = ByteBuffer.allocateDirect(blockSize * 2) // FIXME: This should really be a funciton of my InputBlockBuffer
+  buf.order(ByteOrder.nativeOrder()) // AFAICT: Hail uses little-endian (least-significant first,
+                                     // aka backwards), is that intentional or an accident?
+  buf.limit(0)
 
   private[this] def ensure(n: Int) {
-    if (off == end) {
-      end = in.readBlock(buf)
-      off = 0
+    // System.err.println(s"ensure $n ${buf.remaining()}")
+    if (buf.remaining() < n) {
+      buf.compact()
+      // FIXME: do I need a loop here?
+      val len = in.readBlock(buf)
+      assert(len != -1)
+      buf.flip()
     }
-    assert(off + n <= end)
+    assert(buf.remaining() >= n)
   }
 
   def close() {
@@ -393,171 +285,137 @@ final class BlockingInputBuffer(blockSize: Int, in: InputBlockBuffer) extends In
   }
 
   def seek(offset: Long): Unit = {
+    // System.err.println(s"seek $offset ")
     in.seek(offset)
-    end = in.readBlock(buf)
-    off = (offset & 0xFFFF).asInstanceOf[Int]
-    assert(off <= end)
+    buf.limit(buf.position())
   }
 
   def readByte(): Byte = {
     ensure(1)
-    val b = Memory.loadByte(buf, off)
-    off += 1
-    b
+    val x = buf.get()
+    // System.err.println(s"readByte $x")
+    x
   }
 
   def readInt(): Int = {
     ensure(4)
-    val i = Memory.loadInt(buf, off)
-    off += 4
-    i
+    val x = buf.getInt()
+    // System.err.println(s"readInt $x")
+    x
   }
 
   def readLong(): Long = {
     ensure(8)
-    val l = Memory.loadLong(buf, off)
-    off += 8
-    l
+    val x = buf.getLong()
+    // System.err.println(s"readLong $x")
+    x
   }
 
   def readFloat(): Float = {
     ensure(4)
-    val f = Memory.loadFloat(buf, off)
-    off += 4
-    f
+    val x = buf.getFloat()
+    // System.err.println(s"readFloat $x")
+    x
   }
 
   def readDouble(): Double = {
     ensure(8)
-    val d = Memory.loadDouble(buf, off)
-    off += 8
-    d
+    val x = buf.getDouble()
+    // System.err.println(s"readDouble $x")
+    x
   }
 
-  def readBytes(toRegion: Region, toOff0: Long, n0: Int) {
-    assert(n0 >= 0)
-    var toOff = toOff0
-    var n = n0
-
-    while (n > 0) {
-      if (end == off) {
-        end = in.readBlock(buf)
-        off = 0
-      }
-      val p = math.min(end - off, n)
-      assert(p > 0)
-      Region.storeBytes(toOff, buf, off, p)
-      toOff += p
-      n -= p
-      off += p
-    }
+  def readBytes(toRegion: Region, toOff0: Long, n0: Int) = {
+    val bytes = new Array[Byte](n0)
+    ensure(n0)
+    buf.get(bytes)
+    // System.err.println(s"readBytes $n0 " + Hex.encodeHexString(bytes))
+    Region.storeBytes(toOff0, bytes)
   }
 
-  override def read(arr: Array[Byte], toOff0: Int, n0: Int) {
-    var toOff = toOff0;
-    var n = n0
-
-    while (n > 0) {
-      if (end == off) {
-        end = in.readBlock(buf)
-        off = 0
-      }
-      val p = math.min(end - off, n)
-      assert(p > 0)
-      System.arraycopy(buf, off, arr, toOff, p)
-      toOff += p
-      n -= p
-      off += p
-    }
-  }
-
-  def readBytesArray(n: Int): Array[Byte] = {
-    var arr = new Array[Byte](n)
-    read(arr, 0, n)
-    arr
-  }
+  override def read(arr: ByteBuffer, toOff0: Int, n0: Int) = ???
 
   def skipByte() {
     ensure(1)
-    off += 1
+    buf.position(buf.position() + 1)
+    // System.err.println(s"skipByte")
   }
 
   def skipInt() {
     ensure(4)
-    off += 4
+    buf.position(buf.position() + 4)
+    // System.err.println(s"skipInt")
   }
 
   def skipLong() {
     ensure(8)
-    off += 8
+    buf.position(buf.position() + 8)
+    // System.err.println(s"skipLong")
   }
 
   def skipFloat() {
     ensure(4)
-    off += 4
+    buf.position(buf.position() + 4)
+    // System.err.println(s"skipFloat")
   }
 
   def skipDouble() {
     ensure(8)
-    off += 8
+    buf.position(buf.position() + 8)
+    // System.err.println(s"skipDouble")
   }
 
   def skipBytes(n0: Int) {
-    var n = n0
-    if (off + n > end) {
-      n -= (end - off)
-      off = end
-      end = in.skipBytesReadRemainder(n, buf)
-      off = 0
-    } else {
-      off += n
+    var remaining = buf.remaining() - n0
+    // System.err.println(s"skipping $n0 while ${buf.remaining()} ${remaining}")
+    while (remaining < 0) {
+      buf.clear()
+      val nRead = in.readBlock(buf)
+      assert(nRead != -1)
+      buf.flip()
+      remaining = nRead + remaining
+      // System.err.println(s"skipping $n0, read $nRead $remaining")
     }
+    buf.position(buf.limit() - remaining)
   }
 
-  def readDoubles(to: Array[Double], toOff0: Int, n0: Int) {
-    assert(toOff0 >= 0)
-    assert(n0 >= 0)
-    assert(toOff0 <= to.length - n0)
-    var toOff = toOff0
-    var n = n0
-
-    while (n > 0) {
-      if (end == off) {
-        end = in.readBlock(buf)
-        off = 0
-      }
-      val p = math.min(end - off, n << 3) >>> 3
-      assert(p > 0)
-      Memory.memcpy(to, toOff, buf, off, p)
-      toOff += p
-      n -= p
-      off += (p << 3)
-    }
-  }
+  def readUTF(): String = ???
 }
 
-final class StreamBlockInputBuffer(in: InputStream) extends InputBlockBuffer {
-  private[this] val lenBuf = new Array[Byte](4)
-
+final class StreamBlockInputBuffer(in: SeekableByteChannel) extends InputBlockBuffer {
   def close() {
     in.close()
   }
 
   // this takes a virtual offset and will seek the underlying stream to offset >> 16
-  def seek(offset: Long): Unit = in.asInstanceOf[ByteTrackingInputStream].seek(offset >> 16)
+  def seek(offset: Long): Unit = in.position(offset >> 16) // FIXME: is this really the correct thing to do?
 
-  def readBlock(buf: Array[Byte]): Int = {
-    in.readFully(lenBuf, 0, 4)
-    val len = Memory.loadInt(lenBuf, 0)
-    assert(len >= 0)
-    assert(len <= buf.length)
-    in.readFully(buf, 0, len)
+  def readBlock(buf: ByteBuffer): Int = {
+    assert(buf.remaining() >= 4)
+    val limit = buf.limit()
+    val pos = buf.position()
+
+    buf.limit(buf.position() + 4)
+    readExactly(4, buf, in)
+    buf.position(pos)
+    val len = buf.getInt()
+    assert(len > 0, s"$pos, $len, $limit")
+
+    assert(limit - pos >= len)
+    buf.position(pos)
+    buf.limit(pos + len)
+    readExactly(len, buf, in)
+    buf.limit(limit)
+    // System.err.println(s"SBIB read $len, original $pos $limit ${buf.position()} ${buf.limit()}")
     len
   }
 }
 
 final class LZ4InputBlockBuffer(lz4: LZ4, blockSize: Int, in: InputBlockBuffer) extends InputBlockBuffer {
-  private[this] val comp = new Array[Byte](4 + lz4.maxCompressedLength(blockSize))
+  private[this] val comp = ByteBuffer.allocateDirect(8 + lz4.maxCompressedLength(blockSize))
+  comp.order(ByteOrder.nativeOrder()) // AFAICT: Hail uses little-endian (least-significant first,
+                                      // aka backwards), is that intentional or an accident?
+  comp.limit(0)
 
   def close() {
     in.close()
@@ -565,42 +423,22 @@ final class LZ4InputBlockBuffer(lz4: LZ4, blockSize: Int, in: InputBlockBuffer) 
 
   def seek(offset: Long): Unit = in.seek(offset)
 
-  override def skipBytesReadRemainder(n0: Int, buf: Array[Byte]): Int = {
-    var n = n0
-    while (n > 0) {
-      val blockLen = in.readBlock(comp)
-      if (blockLen == -1) {
-        return -1
-      } else {
-        val compLen = blockLen - 4
-        val decompLen = Memory.loadInt(comp, 0)
-        if (decompLen > n) {
-          lz4.decompress(buf, 0, decompLen, comp, 4, compLen)
-          System.arraycopy(buf, n, buf, 0, decompLen - n)
-        }
-        n -= decompLen
-      }
-    }
-    return -n
-  }
-
-  def readBlock(buf: Array[Byte]): Int = {
-    val blockLen = in.readBlock(comp)
-    val result = if (blockLen == -1) {
-      -1
-    } else {
-      val compLen = blockLen - 4
-      val decompLen = Memory.loadInt(comp, 0)
-      lz4.decompress(buf, 0, decompLen, comp, 4, compLen)
-      decompLen
-    }
-    result
+  def readBlock(buf: ByteBuffer): Int = {
+    comp.clear()
+    val compLen = in.readBlock(comp) - 4  // 4 bytes used by decompressed length
+    assert(compLen != -1)
+    comp.flip()
+    val decompLen = comp.getInt()
+    lz4.decompress(buf, buf.position(), decompLen, comp, comp.position(), compLen)
+    decompLen
   }
 }
 
 final class LZ4SizeBasedCompressingInputBlockBuffer(lz4: LZ4, blockSize: Int, in: InputBlockBuffer) extends InputBlockBuffer {
-  private[this] val comp = new Array[Byte](8 + lz4.maxCompressedLength(blockSize))
-  private[this] var lim = 0
+  private[this] val comp = ByteBuffer.allocateDirect(8 + lz4.maxCompressedLength(blockSize))
+  comp.order(ByteOrder.nativeOrder()) // AFAICT: Hail uses little-endian (least-significant first,
+                                      // aka backwards), is that intentional or an accident?
+  comp.limit(0)
 
   def close() {
     in.close()
@@ -608,26 +446,26 @@ final class LZ4SizeBasedCompressingInputBlockBuffer(lz4: LZ4, blockSize: Int, in
 
   def seek(offset: Long): Unit = in.seek(offset)
 
-  def readBlock(buf: Array[Byte]): Int = {
+  def readBlock(buf: ByteBuffer): Int = {
+    comp.clear()
     val blockLen = in.readBlock(comp)
-    val result = if (blockLen == -1) {
-      -1
-    } else {
-      val flag = Memory.loadInt(comp, 0)
-      flag match {
-        case 0 =>
-          System.arraycopy(comp, 4, buf, 0, blockLen - 4)
-          blockLen - 4
-        case 1 =>
-          val compLen = blockLen - 8
-          val decompLen = Memory.loadInt(comp, 4)
-          lz4.decompress(buf, 0, decompLen, comp, 8, compLen)
-          decompLen
-        case _ => throw new RuntimeException(s"bad flag: $flag")
-      }
+    assert(blockLen != -1)
+    comp.flip()
+    val flag = comp.getInt()
+
+    val decompLen = flag match {
+      case 0 =>
+        buf.put(comp)
+        blockLen - 4
+      case 1 =>
+        val compLen = blockLen - 8
+        val decompLen = comp.getInt()
+        lz4.decompress(buf, buf.position(), decompLen, comp, comp.position(), compLen)
+        decompLen
+      case _ => throw new RuntimeException(s"bad flag: $flag")
     }
-    lim = result
-    result
+
+    decompLen
   }
 }
 
@@ -637,7 +475,10 @@ object ZstdDecompressLib {
 
 final class ZstdInputBlockBuffer(blockSize: Int, in: InputBlockBuffer) extends InputBlockBuffer {
   private[this] val zstd = ZstdDecompressLib.instance.get
-  private[this] val comp = new Array[Byte](4 + Zstd.compressBound(blockSize).toInt)
+  private[this] val comp = ByteBuffer.allocateDirect(4 + Zstd.compressBound(blockSize).toInt)
+  comp.order(ByteOrder.nativeOrder()) // AFAICT: Hail uses little-endian (least-significant first,
+                                      // aka backwards), is that intentional or an accident?
+  comp.limit(0)
 
   def close(): Unit = {
     in.close()
@@ -645,22 +486,28 @@ final class ZstdInputBlockBuffer(blockSize: Int, in: InputBlockBuffer) extends I
 
   def seek(offset: Long): Unit = in.seek(offset)
 
-  def readBlock(buf: Array[Byte]): Int = {
+  def readBlock(buf: ByteBuffer): Int = {
+    comp.clear()
     val blockLen = in.readBlock(comp)
-    if (blockLen == -1) {
-      blockLen
-    } else {
-      val compLen = blockLen - 4
-      val decompLen = Memory.loadInt(comp, 0)
-      zstd.decompressByteArray(buf, 0, decompLen, comp, 4, compLen)
-      decompLen
-    }
+    assert(blockLen != -1)
+    comp.flip()
+    // System.err.println(s"comp ${comp.position()} ${comp.limit()} $blockLen buf: ${buf.position()} ${buf.limit()} ${buf.capacity()}")
+    val compLen = blockLen - 4
+    val decompLen = comp.getInt()
+    // System.err.println(s"decompLen $decompLen")
+
+    zstd.decompress(buf, comp)
+
+    decompLen
   }
 }
 
 final class ZstdSizedBasedInputBlockBuffer(blockSize: Int, in: InputBlockBuffer) extends InputBlockBuffer {
   private[this] val zstd = ZstdDecompressLib.instance.get
-  private[this] val comp = new Array[Byte](4 + Zstd.compressBound(blockSize).toInt)
+  private[this] val comp = ByteBuffer.allocateDirect(4 + Zstd.compressBound(blockSize).toInt)
+  comp.order(ByteOrder.nativeOrder()) // AFAICT: Hail uses little-endian (least-significant first,
+                                      // aka backwards), is that intentional or an accident?
+  comp.limit(0)
 
   def close(): Unit = {
     in.close()
@@ -668,21 +515,26 @@ final class ZstdSizedBasedInputBlockBuffer(blockSize: Int, in: InputBlockBuffer)
 
   def seek(offset: Long): Unit = in.seek(offset)
 
-  def readBlock(buf: Array[Byte]): Int = {
+  def readBlock(buf: ByteBuffer): Int = {
+    comp.clear()
     val blockLen = in.readBlock(comp)
-    if (blockLen == -1) {
-      blockLen
+    // System.err.println(s"comp ${comp.position()} ${comp.limit()} $blockLen $in")
+    assert(blockLen != -1)
+    comp.flip()
+    // System.err.println(s"comp ${comp.position()} ${comp.limit()} $blockLen buf: ${buf.position()} ${buf.limit()} ${buf.capacity()}")
+    val compLen = blockLen - 4
+    val decomp = comp.getInt()
+
+    val decompLen = if (decomp % 2 == 0) {
+      buf.put(comp)
+      compLen
     } else {
-      val compLen = blockLen - 4
-      val decomp = Memory.loadInt(comp, 0)
-      if (decomp % 2 == 0) {
-        System.arraycopy(comp, 4, buf, 0, compLen)
-        compLen
-      } else {
-        val decompLen = decomp >>> 1
-        zstd.decompressByteArray(buf, 0, decompLen, comp, 4, compLen)
-        decompLen
-      }
+      val decompLen = decomp >>> 1
+      // System.err.println(s"decompLen $decompLen")
+      zstd.decompress(buf, comp)
+      decompLen
     }
+
+    decompLen
   }
 }

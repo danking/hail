@@ -56,6 +56,8 @@ object RelationalSpec {
     val jv = readMetadata(fs, path)
     val references = readReferences(fs, path, jv)
 
+    // System.err.println(s"reading $path using $fs got $jv")
+
     (jv \ "name").extract[String] match {
       case "TableSpec" => TableSpec.fromJValue(fs, path, jv)
       case "MatrixTableSpec" => MatrixTableSpec.fromJValue(fs, path, jv)

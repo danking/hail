@@ -138,17 +138,13 @@ class LocalBackend(
     collection: IndexedSeq[(Array[Byte], Int)],
     stageIdentifier: String,
     dependency: Option[TableStageDependency] = None
-  )(f: (Array[Byte], HailTaskContext, HailClassLoader, FS) => Array[Byte])
-  : (Option[Throwable], IndexedSeq[(Array[Byte], Int)]) = {
+  )(
+    f: (Array[Byte], HailTaskContext, HailClassLoader, FS) => Array[Byte]
+  ): IndexedSeq[(Array[Byte], Int)] = {
     val stageId = nextStageId()
-    runAllKeepFirstError(MoreExecutors.sameThreadExecutor) {
-      collection.map { case (c, i) =>
-        (
-          () => using(new LocalTaskContext(i, stageId)) {
-            f(c, _, theHailClassLoader, fs)
-          },
-          i
-        )
+    collection.map { case (c, i) =>
+      using(new LocalTaskContext(i, stageId)) { ctx =>
+        (f(c, ctx, theHailClassLoader, fs), i)
       }
     }
   }

@@ -62,45 +62,40 @@ class BackendUtils(mods: Array[(String, (HailClassLoader, FS, HailTaskContext, R
         )
 
         val t = System.nanoTime()
-        val (failureOpt, successes) =
+        val results =
           remainingContexts match {
             case Array((context, k)) if backend.canExecuteParallelTasksOnDriver =>
-              Try {
-                using(new LocalTaskContext(k, 0)) { htc =>
-                  using(htc.getRegionPool().getRegion()) { r =>
-                    val run = f(theDriverHailClassLoader, fs, htc, r)
-                    val res = is.hail.services.retryTransientErrors {
-                      run(r, context, globals)
-                    }
-                    FastSeq(res -> k)
+              using(new LocalTaskContext(k, 0)) { htc =>
+                using(htc.getRegionPool().getRegion()) { r =>
+                  val run = f(theDriverHailClassLoader, fs, htc, r)
+                  val res = is.hail.services.retryTransientErrors {
+                    run(r, context, globals)
                   }
+                  FastSeq(res -> k)
                 }
               }
-                .fold(t => (Some(t), IndexedSeq.empty), (None, _))
 
             case _ =>
               val globalsBC = backend.broadcast(globals)
               val fsConfigBC = backend.broadcast(fs.getConfiguration())
-              val (failureOpt, successes) =
-                backend.parallelizeAndComputeWithIndex(backendContext, fs, remainingContexts, stageName, tsd) {
-                  (ctx, htc, theHailClassLoader, fs) =>
-                    val fsConfig = fsConfigBC.value
-                    val gs = globalsBC.value
-                    fs.setConfiguration(fsConfig)
-                    htc.getRegionPool().scopedRegion { region =>
-                      f(theHailClassLoader, fs, htc, region)(region, ctx, gs)
-                    }
+              backend.parallelizeAndComputeWithIndex(backendContext, fs, remainingContexts, stageName, tsd) {
+                (ctx, htc, theHailClassLoader, fs) =>
+                val fsConfig = fsConfigBC.value
+                val gs = globalsBC.value
+                fs.setConfiguration(fsConfig)
+                htc.getRegionPool().scopedRegion { region =>
+                  f(theHailClassLoader, fs, htc, region)(region, ctx, gs)
                 }
-              (failureOpt, successes)
+              }
           }
 
         log.info(s"[collectDArray|$stageName]: executed ${remainingContexts.length} tasks " +
           s"in ${formatTime(System.nanoTime() - t)}"
         )
 
-        val results = merge[(Array[Byte], Int)](cachedResults, successes.sortBy(_._2), _._2 < _._2)
-        semhash.foreach(s => backendContext.executionCache.put(s, results))
-        failureOpt.foreach(throw _)
+        // val results = merge[(Array[Byte], Int)](cachedResults, successes.sortBy(_._2), _._2 < _._2)
+        // semhash.foreach(s => backendContext.executionCache.put(s, results))
+        // failureOpt.foreach(throw _)
 
         results
       }

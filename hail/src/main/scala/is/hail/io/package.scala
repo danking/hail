@@ -1,6 +1,8 @@
 package is.hail
 
 import java.io.OutputStreamWriter
+import java.nio._
+import java.nio.channels._
 import java.nio.charset._
 
 import is.hail.asm4s._
@@ -25,6 +27,21 @@ package object io {
       } { sb += ',' }
 
       out.write(sb.result())
+    }
+  }
+
+  def readExactly(n: Int, buf: ByteBuffer, in: ReadableByteChannel): Unit = {
+    assert(buf.remaining() == n)
+    var nRead = in.read(buf)
+    if (nRead == -1) {
+      throw new RuntimeException(s"unexpected end of block $nRead $n")
+    }
+    while (nRead != n) {
+      val next = in.read(buf)
+      if (next == -1) {
+        throw new RuntimeException(s"unexpected end of block $nRead $n")
+      }
+      nRead += next
     }
   }
 }

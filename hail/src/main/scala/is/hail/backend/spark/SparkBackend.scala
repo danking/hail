@@ -378,15 +378,16 @@ class SparkBackend(
     contexts: IndexedSeq[(Array[Byte], Int)],
     stageIdentifier: String,
     dependency: Option[TableStageDependency] = None
-  )(f: (Array[Byte], HailTaskContext, HailClassLoader, FS) => Array[Byte])
-  : (Option[Throwable], IndexedSeq[(Array[Byte], Int)]) = {
+  )(
+    f: (Array[Byte], HailTaskContext, HailClassLoader, FS) => Array[Byte]
+  ): IndexedSeq[(Array[Byte], Int)] = {
 
     val sparkDeps =
       for {rvdDep <- dependency.toIndexedSeq; dep <- rvdDep.deps}
         yield new AnonymousDependency(dep.asInstanceOf[RVDDependency].rvd.crdd.rdd)
 
     val rdd =
-      new RDD[(Try[Array[Byte]], Int)](sc, sparkDeps) {
+      new RDD[(Array[Byte], Int)](sc, sparkDeps) {
 
         /* Spark insists that `Partition.index` is indeed the index that partition
          * appears in the result of `RDD.getPartitions`.
@@ -406,19 +407,19 @@ class SparkBackend(
           for {((data, index), rddIndex) <- contexts.zipWithIndex.toArray}
             yield TaggedRDDPartition(data, index, rddIndex)
 
-        override def compute(partition: Partition, context: TaskContext): Iterator[(Try[Array[Byte]], Int)] = {
+        override def compute(partition: Partition, context: TaskContext): Iterator[(Array[Byte], Int)] = {
           val sp = partition.asInstanceOf[TaggedRDDPartition]
           val fs = new HadoopFS(null)
-          val result = Try(f(sp.data, SparkTaskContext.get(), theHailClassLoaderForSparkWorkers, fs))
+          val result = f(sp.data, SparkTaskContext.get(), theHailClassLoaderForSparkWorkers, fs)
           Iterator.single((result, sp.tag))
         }
       }
 
-    val buffer = new ArrayBuffer[(Array[Byte], Int)](contexts.length)
-    rdd.collect().foldLeft((Option.empty[Throwable], buffer)) {
-      case ((err, buffer), (Success(v), index)) => (err, buffer += ((v, index)))
-      case ((err, buffer), (Failure(t), _)) => (err.orElse(Some(t)), buffer)
-    }
+    // val buffer = new ArrayBuffer[(Array[Byte], Int)](contexts.length)
+    rdd.collect()// .foldLeft((Option.empty[Throwable], buffer)) {
+    //   case ((err, buffer), (Success(v), index)) => (err, buffer += ((v, index)))
+    //   case ((err, buffer), (Failure(t), _)) => (err.orElse(Some(t)), buffer)
+    // }
   }
 
   def defaultParallelism: Int = sc.defaultParallelism

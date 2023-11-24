@@ -20,7 +20,9 @@ import org.json4s.jackson.JsonMethods
 import org.json4s.Formats
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, FileNotFoundException, OutputStream}
-import java.nio.file.Paths
+import java.nio._
+import java.nio.channels._
+import java.nio.file._
 import java.time.Duration
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
@@ -264,6 +266,8 @@ class AzureStorageFS(val credentialsJSON: Option[String] = None) extends FS {
   def getContainerClient(url: URL): BlobContainerClient = retryTransientErrors {
     serviceClientCache.getServiceClient(url).getBlobContainerClient(url.container)
   }
+
+  def openNoCompressionNio(url: URL): SeekableByteChannel = ???
 
   def openNoCompression(url: URL): SeekableDataInputStream = handlePublicAccessError(url) {
     val blobClient: BlobClient = getBlobClient(url)

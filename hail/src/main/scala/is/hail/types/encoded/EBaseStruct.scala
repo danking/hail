@@ -183,8 +183,8 @@ final case class EBaseStruct(fields: IndexedSeq[EField], override val required: 
   def _asIdent: String = {
     val sb = new StringBuilder
     sb.append("struct_of_")
-    types.foreachBetween { ty =>
-      sb.append(ty.asIdent)
+    fields.foreachBetween { field =>
+      sb.append(field.name.replaceAll("[^A-Za-z0-9]+", "") + "_" + field.typ.asIdent)
     } {
       sb.append("AND")
     }

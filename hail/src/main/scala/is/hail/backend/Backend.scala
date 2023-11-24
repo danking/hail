@@ -80,8 +80,9 @@ abstract class Backend {
     collection: IndexedSeq[(Array[Byte], Int)],
     stageIdentifier: String,
     dependency: Option[TableStageDependency] = None
-  )(f: (Array[Byte], HailTaskContext, HailClassLoader, FS) => Array[Byte])
-  : (Option[Throwable], IndexedSeq[(Array[Byte], Int)])
+  )(
+    f: (Array[Byte], HailTaskContext, HailClassLoader, FS) => Array[Byte]
+  ): IndexedSeq[(Array[Byte], Int)]
 
   def stop(): Unit
 

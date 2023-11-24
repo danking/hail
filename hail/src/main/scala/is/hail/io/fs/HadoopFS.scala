@@ -6,6 +6,9 @@ import org.apache.hadoop.fs.{EtagSource, FSDataInputStream, FSDataOutputStream}
 import org.apache.hadoop.io.MD5Hash
 
 import java.io._
+import java.nio._
+import java.nio.channels._
+import java.nio.file._
 import java.security.MessageDigest
 import java.util.Base64
 import scala.util.Try
@@ -104,6 +107,21 @@ class HadoopFS(private[this] var conf: SerializableHadoopConfiguration) extends 
     val os = url.hadoopFs.create(url.hadoopPath)
     new WrappedPositionedDataOutputStream(
       HadoopFS.toPositionedOutputStream(os))
+  }
+
+  def openNoCompressionNio(url: URL): SeekableByteChannel = {
+    try {
+      // url.hadoopFs.open(url.hadoopPath)
+      // FIXME: obviouslly need to detect when we are in HDFS and do something special
+      // System.err.println(s"Opening ${url.path}")
+      FileChannel.open(Paths.get(url.path))
+    } catch {
+      case e: FileNotFoundException =>
+        if (isDir(url))
+          throw new FileNotFoundException(s"'$url' is a directory (or native Table/MatrixTable)")
+        else
+          throw e
+    }
   }
 
   def openNoCompression(url: URL): SeekableDataInputStream = {
