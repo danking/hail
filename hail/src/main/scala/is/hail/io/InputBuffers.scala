@@ -125,6 +125,7 @@ final class StreamInputBuffer(private[this] val in: SeekableByteChannel) extends
       buf.compact()
       in.read(buf)
       buf.flip()
+      assert(buf.remaining() >= n) //FIXME
     }
   }
 
@@ -383,6 +384,22 @@ final class BlockingInputBuffer(blockSize: Int, in: InputBlockBuffer) extends In
 }
 
 final class StreamBlockInputBuffer(in: SeekableByteChannel) extends InputBlockBuffer {
+  private[this] val BUF_SIZE = 8 * 1024 * 1024
+  private[this] val buf = ByteBuffer.allocateDirect(BUF_SIZE) // FIXME: what *should* be done here
+  buf.order(ByteOrder.nativeOrder()) // AFAICT: Hail uses little-endian (least-significant first,
+                                     // aka backwards), is that intentional or an accident?
+  buf.limit(0)
+
+  private[this] def require(n: Int): Unit = {
+    assert(n < BUF_SIZE/2)
+    if (buf.remaining() < n) {
+      buf.compact()
+      in.read(buf)
+      buf.flip()
+      assert(buf.remaining() >= n) //FIXME
+    }
+  }
+
   def close() {
     in.close()
   }
@@ -390,24 +407,16 @@ final class StreamBlockInputBuffer(in: SeekableByteChannel) extends InputBlockBu
   // this takes a virtual offset and will seek the underlying stream to offset >> 16
   def seek(offset: Long): Unit = in.position(offset >> 16) // FIXME: is this really the correct thing to do?
 
-  def readBlock(buf: ByteBuffer): Int = {
-    assert(buf.remaining() >= 4)
-    val limit = buf.limit()
-    val pos = buf.position()
-
-    buf.limit(buf.position() + 4)
-    readExactly(4, buf, in)
-    buf.position(pos)
-    val len = buf.getInt()
-    assert(len > 0, s"$pos, $len, $limit")
-
-    assert(limit - pos >= len)
-    buf.position(pos)
-    buf.limit(pos + len)
-    readExactly(len, buf, in)
-    buf.limit(limit)
-    // System.err.println(s"SBIB read $len, original $pos $limit ${buf.position()} ${buf.limit()}")
-    len
+  def readBlock(dst: ByteBuffer): Int = {
+    require(4)
+    val blockLen = buf.getInt()
+    assert(blockLen > 0)
+    require(blockLen)
+    val lim = buf.limit()
+    buf.limit(buf.position() + blockLen)
+    dst.put(buf)
+    buf.limit(lim)
+    blockLen
   }
 }
 
