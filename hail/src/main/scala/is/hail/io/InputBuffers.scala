@@ -277,8 +277,8 @@ final class BlockingInputBuffer(blockSize: Int, in: InputBlockBuffer) extends In
       val len = in.readBlock(buf)
       assert(len != -1)
       buf.flip()
+      assert(buf.remaining() >= n)
     }
-    assert(buf.remaining() >= n)
   }
 
   def close() {
