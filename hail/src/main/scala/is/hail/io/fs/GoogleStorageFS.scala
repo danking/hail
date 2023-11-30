@@ -201,7 +201,7 @@ class GoogleStorageFS(
   }
 
   def openNoCompression(url: URL): SeekableDataInputStream = retryTransientErrors {
-    val is: SeekableInputStream = new FSSeekableInputStream {
+    val is: SeekableInputStream = new FSSeekableInputStream(url.toString) {
       private[this] var reader: ReadChannel = null
       private[this] var options: Option[Seq[BlobSourceOption]] = None
 

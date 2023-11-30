@@ -199,7 +199,7 @@ abstract class FSSeekableInputStream(
 
   def getPosition: Long = pos
 
-  def toString: String = s"<FSSeekableInputStream($debugMessage) getPosition=$getPosition eof=$eof closed=$closed bb.position=${bb.position} bb.limit=${bb.limit()}>"
+  override def toString: String = s"<FSSeekableInputStream($debugMessage) getPosition=$getPosition eof=$eof closed=$closed bb.position=${bb.position} bb.limit=${bb.limit()}>"
 }
 
 abstract class FSPositionedOutputStream(val capacity: Int) extends OutputStream with Positioned {
