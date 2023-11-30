@@ -89,6 +89,8 @@ trait InputBlockBuffer extends Spec with Closeable {
 }
 
 final class StreamInputBuffer(in: InputStream) extends InputBuffer {
+  def toString: String = s"StreamInputBuffer($in)"
+
   private[this] val buff = new Array[Byte](8)
 
   def close(): Unit = in.close()
@@ -172,6 +174,7 @@ final class StreamInputBuffer(in: InputStream) extends InputBuffer {
 }
 
 final class MemoryInputBuffer(mb: MemoryBuffer) extends InputBuffer {
+  def toString: String = s"MemoryInputBuffer($mb)"
   def close() {}
 
   def seek(offset: Long) = ???
@@ -210,6 +213,8 @@ final class MemoryInputBuffer(mb: MemoryBuffer) extends InputBuffer {
 }
 
 final class LEB128InputBuffer(in: InputBuffer) extends InputBuffer {
+  def toString: String = s"LEB128InputBuffer($in)"
+
   def close() {
     in.close()
   }
@@ -376,6 +381,8 @@ final class TracingInputBuffer(
 }
 
 final class BlockingInputBuffer(blockSize: Int, in: InputBlockBuffer) extends InputBuffer {
+  def toString: String = s"BlockingInputBuffer($blockSize, $in)"
+
   private[this] val buf = new Array[Byte](blockSize)
   private[this] var end: Int = 0
   private[this] var off: Int = 0
@@ -537,6 +544,8 @@ final class BlockingInputBuffer(blockSize: Int, in: InputBlockBuffer) extends In
 }
 
 final class StreamBlockInputBuffer(in: InputStream) extends InputBlockBuffer {
+  def toString: String = s"StreamBlockInputBuffer($in)"
+
   private[this] val lenBuf = new Array[Byte](4)
 
   def close() {
@@ -557,6 +566,8 @@ final class StreamBlockInputBuffer(in: InputStream) extends InputBlockBuffer {
 }
 
 final class LZ4InputBlockBuffer(lz4: LZ4, blockSize: Int, in: InputBlockBuffer) extends InputBlockBuffer {
+  def toString: String = s"LZ4InputBlockBuffer($lz4, $blockSize, $in)"
+
   private[this] val comp = new Array[Byte](4 + lz4.maxCompressedLength(blockSize))
 
   def close() {
@@ -599,6 +610,8 @@ final class LZ4InputBlockBuffer(lz4: LZ4, blockSize: Int, in: InputBlockBuffer) 
 }
 
 final class LZ4SizeBasedCompressingInputBlockBuffer(lz4: LZ4, blockSize: Int, in: InputBlockBuffer) extends InputBlockBuffer {
+  def toString: String = s"LZ4SizeBasedCompressingInputBlockBuffer($lz4, $blockSize, $in)"
+
   private[this] val comp = new Array[Byte](8 + lz4.maxCompressedLength(blockSize))
   private[this] var lim = 0
 
@@ -636,6 +649,8 @@ object ZstdDecompressLib {
 }
 
 final class ZstdInputBlockBuffer(blockSize: Int, in: InputBlockBuffer) extends InputBlockBuffer {
+  def toString: String = s"ZstdInputBlockBuffer($blockSize, $in)"
+
   private[this] val zstd = ZstdDecompressLib.instance.get
   private[this] val comp = new Array[Byte](4 + Zstd.compressBound(blockSize).toInt)
 
@@ -659,6 +674,8 @@ final class ZstdInputBlockBuffer(blockSize: Int, in: InputBlockBuffer) extends I
 }
 
 final class ZstdSizedBasedInputBlockBuffer(blockSize: Int, in: InputBlockBuffer) extends InputBlockBuffer {
+  def toString: String = s"ZstdSizedBasedInputBlockBuffer($blockSize, $in)"
+
   private[this] val zstd = ZstdDecompressLib.instance.get
   private[this] val comp = new Array[Byte](4 + Zstd.compressBound(blockSize).toInt)
 

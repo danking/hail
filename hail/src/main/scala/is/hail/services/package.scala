@@ -184,6 +184,7 @@ package object services {
         case e: Exception =>
           tries += 1
           val delay = delayMsForTry(tries)
+          log.warn(s"Encountered $tries transient errors, most recent one was $e. Delay is $delay.")
           if (tries <= 5 && isLimitedRetriesError(e)) {
             log.warn(
               s"A limited retry error has occured. We will automatically retry " +
@@ -191,8 +192,6 @@ package object services {
                 s"$delay). The most recent error was $e.")
           } else if (!isTransientError(e)) {
             throw e
-          } else if (tries % 10 == 0) {
-            log.warn(s"Encountered $tries transient errors, most recent one was $e.")
           }
           Thread.sleep(delay)
       }

@@ -134,7 +134,9 @@ object FSUtil {
   }
 }
 
-abstract class FSSeekableInputStream extends InputStream with Seekable {
+abstract class FSSeekableInputStream(
+  debugMessage: String = null
+) extends InputStream with Seekable {
   protected[this] var closed: Boolean = false
   private[this] var pos: Long = 0
   private[this] var eof: Boolean = false
@@ -196,6 +198,8 @@ abstract class FSSeekableInputStream extends InputStream with Seekable {
   }
 
   def getPosition: Long = pos
+
+  def toString: String = s"<FSSeekableInputStream($debugMessage) getPosition=$getPosition eof=$eof closed=$closed bb.position=${bb.position} bb.limit=${bb.limit()}>"
 }
 
 abstract class FSPositionedOutputStream(val capacity: Int) extends OutputStream with Positioned {
