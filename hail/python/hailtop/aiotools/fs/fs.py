@@ -23,6 +23,14 @@ async def with_exception(f: Callable[P, Awaitable[T]], *args: P.args, **kwargs: 
 
 class FileStatus(abc.ABC):
     @abc.abstractmethod
+    def name(self) -> str:
+        pass
+
+    @abc.abstractmethod
+    def url(self) -> str:
+        pass
+
+    @abc.abstractmethod
     async def size(self) -> int:
         pass
 

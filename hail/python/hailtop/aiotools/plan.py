@@ -81,9 +81,22 @@ async def extract(x: FileListEntry) -> Tuple[str, str, bool, int]:
 async def listfiles(fs: AsyncFS, x: str) -> List[Tuple[str, str, bool, int]]:
     try:
         it = await fs.listfiles(x)
-        return [await extract(x) async for x in it]
-    except FileNotFoundError:
+        contents = [await extract(x) async for x in it]
+    except (FileNotFoundError, NotADirectoryError):
         return []
+
+    try:
+        single_file_stat = await fs.statfile(x)
+        contents.append((
+            single_file_stat.name(),
+            single_file_stat.url(),
+            False,
+            await single_file_stat.size()
+        ))
+    except FileNotFoundError:
+        pass
+
+    return contents
 
 
 async def find_all_copy_pairs(

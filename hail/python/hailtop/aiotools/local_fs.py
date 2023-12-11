@@ -18,9 +18,16 @@ from .fs import (FileStatus, FileListEntry, MultiPartCreate, AsyncFS, AsyncFSURL
 
 
 class LocalStatFileStatus(FileStatus):
-    def __init__(self, stat_result: os.stat_result):
+    def __init__(self, stat_result: os.stat_result, url: str):
         self._stat_result = stat_result
         self._items = None
+        self._url = url
+
+    def name(self) -> str:
+        return os.path.basename(self._url)
+
+    def url(self) -> str:
+        return self._url
 
     async def size(self) -> int:
         return self._stat_result.st_size
@@ -66,7 +73,7 @@ class LocalFileListEntry(FileListEntry):
         if self._status is None:
             if await self.is_dir():
                 raise IsADirectoryError()
-            self._status = LocalStatFileStatus(await blocking_to_async(self._thread_pool, self._entry.stat))
+            self._status = LocalStatFileStatus(await blocking_to_async(self._thread_pool, self._entry.stat), await self.url())
         return self._status
 
 
@@ -281,7 +288,7 @@ class LocalAsyncFS(AsyncFS):
         stat_result = await blocking_to_async(self._thread_pool, os.stat, path)
         if stat.S_ISDIR(stat_result.st_mode):
             raise FileNotFoundError(f'is directory: {url}')
-        return LocalStatFileStatus(stat_result)
+        return LocalStatFileStatus(stat_result, path)
 
     # entries has no type hint because the return type of os.scandir
     # appears to be a private type, posix.ScandirIterator.
