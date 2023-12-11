@@ -18,6 +18,10 @@ except ImportError as e:
         pass
 
 
+class PlanError(ValueError):
+    pass
+
+
 async def plan(
     folder: str,
     copy: List[Tuple[str, str]],
@@ -35,8 +39,7 @@ async def plan(
 
     async with RouterAsyncFS(gcs_kwargs=gcs_kwargs) as fs:
         if any(await asyncio.gather(fs.isfile(folder), fs.isdir(folder.rstrip('/') + '/'))):
-            print(f'plan folder already exists: {folder}')
-            sys.exit(1)
+            raise PlanError(f'plan folder already exists: {folder}', 1)
 
         await fs.mkdir(folder)
 
@@ -81,22 +84,21 @@ async def extract(x: FileListEntry) -> Tuple[str, str, bool, int]:
 async def listfiles(fs: AsyncFS, x: str) -> List[Tuple[str, str, bool, int]]:
     try:
         it = await fs.listfiles(x)
-        contents = [await extract(x) async for x in it]
+        return [await extract(x) async for x in it]
     except (FileNotFoundError, NotADirectoryError):
         return []
 
+async def statfile(fs: AsyncFS, x: str) -> Optional[Tuple[str, str, bool, int]]:
     try:
         single_file_stat = await fs.statfile(x)
-        contents.append((
+        return (
             single_file_stat.name(),
             single_file_stat.url(),
             False,
             await single_file_stat.size()
-        ))
+        )
     except FileNotFoundError:
-        pass
-
-    return contents
+        return None
 
 
 async def find_all_copy_pairs(
@@ -112,7 +114,43 @@ async def find_all_copy_pairs(
     sema: asyncio.Semaphore,
 ) -> Tuple[int, int]:
     async with sema:
-        srcfiles, dstfiles = await asyncio.gather(listfiles(fs, src), listfiles(fs, dst))
+        srcstat, srcfiles, dststat, dstfiles = await asyncio.gather(
+            statfile(fs, src),
+            listfiles(fs, src),
+            statfile(fs, dst),
+            listfiles(fs, dst),
+        )
+
+        print((srcstat, srcfiles, dststat, dstfiles))
+
+        if srcstat and srcfiles:
+            raise PlanError(f'Source is both a directory and a file. This is not supported. {src}', 1)
+        if dststat and dstfiles:
+            raise PlanError(f'Destination is both a directory and a file. This is not supported. {dst}', 1)
+        if srcstat and dstfiles:
+            raise PlanError(f'Source is a file but destination is a directory. This is not supported. {src} -> {dst}', 1)
+        if srcfiles and dststat:
+            raise PlanError(f'Source is a directory but destination is a file. This is not supported. {src} -> {dst}', 1)
+        if srcstat:
+            assert len(srcfiles) == 0
+            assert len(dstfiles) == 0
+            srcname, srcurl, srcisdir, srcsize = srcstat
+            if dststat:
+                dstname, dsturl, dstisdir, dstsize = dststat
+                if srcsize == dstsize:
+                    await matches.write((srcurl + '\t' + dsturl + '\n').encode('utf-8'))
+                    return 0, 0
+                else:
+                    await differs.write((srcurl + '\t' + dsturl + '\t' + str(srcsize) + '\t' + str(dstsize) + '\n').encode('utf-8'))
+                    return 0, 0
+            else:
+                await srconly.write((srcurl + '\n').encode('utf-8'))
+                await plan.write((srcurl + '\t' + dst + '\n').encode('utf-8'))
+                return 1, srcsize
+        elif dststat:
+            await dstonly.write((dst + '\n').encode('utf-8'))
+            return 0, 0
+
         srcfiles.sort(key=lambda x: x[0])
         dstfiles.sort(key=lambda x: x[0])
 

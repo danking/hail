@@ -18,6 +18,10 @@ except ImportError as e:
         pass
 
 
+class SyncError(ValueError):
+    pass
+
+
 async def sync(
     plan_folder: str,
     gcs_requester_pays_project: Optional[str],
@@ -30,8 +34,7 @@ async def sync(
 
     async with RouterAsyncFS(gcs_kwargs=gcs_kwargs, s3_kwargs=s3_kwargs) as fs:
         if not all(await asyncio.gather(*(fs.exists(os.path.join(plan_folder, x)) for x in ('matches', 'differs', 'srconly', 'dstonly', 'plan', 'summary')))):
-            print('Run hailctl fs sync --make-plan first.')
-            sys.exit(1)
+            raise SyncError('Run hailctl fs sync --make-plan first.', 1)
         results = (await fs.read(os.path.join(plan_folder, 'summary'))).decode('utf-8')
         n_files, n_bytes = (int(x) for x in results.split('\t'))
         await copy(
@@ -54,6 +57,5 @@ async def iterate_plan_file(plan_folder: str, fs: AsyncFS):
             continue
         parts = line.strip().split('\t')
         if len(parts) != 2:
-            print(f'Malformed plan line, {lineno}, must have exactly one tab: {line}')
-            sys.exit(1)
+            raise SyncError(f'Malformed plan line, {lineno}, must have exactly one tab: {line}', 1)
         yield parts

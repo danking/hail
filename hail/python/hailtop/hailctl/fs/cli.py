@@ -2,9 +2,10 @@ from typing import Optional, List, Tuple, cast
 import asyncio
 import typer
 import click
+import sys
 
-from hailtop.aiotools.plan import plan
-from hailtop.aiotools.sync import sync as aiotools_sync
+from hailtop.aiotools.plan import plan, PlanError
+from hailtop.aiotools.sync import sync as aiotools_sync, SyncError
 
 
 app_without_click = typer.Typer(
@@ -67,7 +68,11 @@ def sync(
         raise typer.Exit(1)
 
     if make_plan:
-        asyncio.run(plan(make_plan, copy, gcs_requester_pays_project, verbose, max_parallelism))
+        try:
+            asyncio.run(plan(make_plan, copy, gcs_requester_pays_project, verbose, max_parallelism))
+        except PlanError as err:
+            print(err.args[0])
+            sys.exit(err.args[1])
     if use_plan:
         if copy:
             print('Do not specify --copy with --use-plan. Create the plan with --make-plan then call --use-plan without any --copy.')
