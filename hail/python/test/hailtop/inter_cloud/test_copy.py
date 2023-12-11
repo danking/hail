@@ -52,7 +52,13 @@ async def sync_tool(fs, sema, transfer):
     await sync('plan1', None, True, max_parallelism)
 
 
-COPY_TOOLS = [copy_tool, sync_tool]
+@pytest.fixture(params=['remote', 'local'])
+def copy_tool(request):
+    if request.param == 'copy_tool':
+        return copy_tool
+    if request.param == 'sync_tool':
+        return sync_tool
+    raise ValueError('bad: ' + request.param)
 
 
 class DidNotRaiseError(Exception):
@@ -85,26 +91,26 @@ class RaisesOrObjectStore:
 
 
 @pytest.mark.asyncio
-async def test_copy_doesnt_exist(copy_test_context):
+async def test_copy_doesnt_exist(copy_test_context, copy_tool):
     sema, fs, src_base, dest_base = copy_test_context
 
     with pytest.raises(FileNotFoundError):
-        await Copier.copy(fs, sema, Transfer(f'{src_base}a', dest_base))
+        await copy_tool(fs, sema, Transfer(f'{src_base}a', dest_base))
 
 
 @pytest.mark.asyncio
-async def test_copy_file(copy_test_context):
+async def test_copy_file(copy_test_context, copy_tool):
     sema, fs, src_base, dest_base = copy_test_context
 
     await create_test_file(fs, 'src', src_base, 'a')
 
-    await Copier.copy(fs, sema, Transfer(f'{src_base}a', dest_base.rstrip('/')))
+    await copy_tool(fs, sema, Transfer(f'{src_base}a', dest_base.rstrip('/')))
 
     await expect_file(fs, f'{dest_base}a', 'src/a')
 
 
 @pytest.mark.asyncio
-async def test_copy_large_file(copy_test_context):
+async def test_copy_large_file(copy_test_context, copy_tool):
     sema, fs, src_base, dest_base = copy_test_context
 
     # mainly needs to be larger than the transfer block size (8K)
@@ -112,7 +118,7 @@ async def test_copy_large_file(copy_test_context):
     async with await fs.create(f'{src_base}a') as f:
         await f.write(contents)
 
-    await Copier.copy(fs, sema, Transfer(f'{src_base}a', dest_base.rstrip('/')))
+    await copy_tool(fs, sema, Transfer(f'{src_base}a', dest_base.rstrip('/')))
 
     async with await fs.open(f'{dest_base}a') as f:
         copy_contents = await f.read()
