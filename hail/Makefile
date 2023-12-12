@@ -218,7 +218,6 @@ pytest-qob: upload-qob-jar upload-qob-test-resources install-editable
             $(PYTEST_TARGET) \
             $(PYTEST_ARGS)
 
-
 .PHONY: doctest
 doctest: $(PYTHON_VERSION_INFO) $(INIT_SCRIPTS)
 doctest: python/README.md $(FAST_PYTHON_JAR) $(FAST_PYTHON_JAR_EXTRA_CLASSPATH)
@@ -246,6 +245,25 @@ doctest: python/README.md $(FAST_PYTHON_JAR) $(FAST_PYTHON_JAR_EXTRA_CLASSPATH)
             $(PYTEST_TARGET) \
             $(PYTEST_ARGS)
 
+.PHONY: pytest-inter-cloud
+pytest-inter-cloud: install-editable
+	export HAIL_TEST_GCS_BUCKET=hail-test-ezlis \
+	export HAIL_TEST_S3_BUCKET=hail-test-dy5rg \
+	export HAIL_TEST_AZURE_ACCOUNT=hailtest \
+	export HAIL_TEST_AZURE_CONTAINER=hail-test-4nxei \
+	export HAIL_TEST_AZURE_RESGRP=hail-dev \
+	export HAIL_TEST_AZURE_SUBID=22cd45fe-f996-4c51-af67-ef329d977519 \
+	python3 -m pytest \
+	        -Werror:::hail -Werror:::hailtop -Werror::ResourceWarning \
+	        --log-cli-level=INFO \
+	        -s \
+	        -r A \
+	        -vv \
+	        --instafail \
+	        --durations=50 \
+	        --timeout=120 \
+	        test/hailtop/inter_cloud \
+	        $(PYTEST_ARGS)
 
 .PHONY: copy-py-files
 copy-py-files: $(PYTHON_VERSION_INFO) $(INIT_SCRIPTS) $(PY_FILES) $(PYTHON_JAR)

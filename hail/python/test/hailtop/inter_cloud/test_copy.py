@@ -38,7 +38,7 @@ async def expect_file(fs, path, expected):
     assert actual == expected, (actual, expected)
 
 
-async def copy_tool(fs, sema, transfer):
+async def copier_copy(fs, sema, transfer):
     await Copier.copy(fs, sema, transfer)
 
 
@@ -55,7 +55,7 @@ async def sync_tool(fs, sema, transfer):
 @pytest.fixture(params=['remote', 'local'])
 def copy_tool(request):
     if request.param == 'copy_tool':
-        return copy_tool
+        return copier_copy
     if request.param == 'sync_tool':
         return sync_tool
     raise ValueError('bad: ' + request.param)
