@@ -52,11 +52,11 @@ async def sync_tool(fs, sema, transfer):
     await sync('plan1', None, True, max_parallelism)
 
 
-@pytest.fixture(params=['remote', 'local'])
+@pytest.fixture(params=['Copier.copy', 'hailctl_sync'])
 def copy_tool(request):
-    if request.param == 'copy_tool':
+    if request.param == 'Copier.copy':
         return copier_copy
-    if request.param == 'sync_tool':
+    if request.param == 'hailctl_sync':
         return sync_tool
     raise ValueError('bad: ' + request.param)
 

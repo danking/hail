@@ -247,12 +247,12 @@ doctest: python/README.md $(FAST_PYTHON_JAR) $(FAST_PYTHON_JAR_EXTRA_CLASSPATH)
 
 .PHONY: pytest-inter-cloud
 pytest-inter-cloud: install-editable
-	export HAIL_TEST_GCS_BUCKET=hail-test-ezlis \
-	export HAIL_TEST_S3_BUCKET=hail-test-dy5rg \
-	export HAIL_TEST_AZURE_ACCOUNT=hailtest \
-	export HAIL_TEST_AZURE_CONTAINER=hail-test-4nxei \
-	export HAIL_TEST_AZURE_RESGRP=hail-dev \
-	export HAIL_TEST_AZURE_SUBID=22cd45fe-f996-4c51-af67-ef329d977519 \
+	cd python && HAIL_TEST_GCS_BUCKET=hail-test-ezlis \
+	HAIL_TEST_S3_BUCKET=hail-test-dy5rg \
+	HAIL_TEST_AZURE_ACCOUNT=hailtest \
+	HAIL_TEST_AZURE_CONTAINER=hail-test-4nxei \
+	HAIL_TEST_AZURE_RESGRP=hail-dev \
+	HAIL_TEST_AZURE_SUBID=22cd45fe-f996-4c51-af67-ef329d977519 \
 	python3 -m pytest \
 	        -Werror:::hail -Werror:::hailtop -Werror::ResourceWarning \
 	        --log-cli-level=INFO \
