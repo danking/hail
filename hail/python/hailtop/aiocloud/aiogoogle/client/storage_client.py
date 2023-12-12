@@ -3,6 +3,7 @@ from typing import (Tuple, Any, Set, Optional, MutableMapping, Dict, AsyncIterat
                     List, Coroutine, ClassVar)
 from types import TracebackType
 from multidict import CIMultiDictProxy  # pylint: disable=unused-import
+import contextlib
 import sys
 import logging
 import asyncio
@@ -62,9 +63,25 @@ class InsertObjectStream(WritableStream):
                  it: FeedableAsyncIterable[bytes],
                  request_task: asyncio.Task[aiohttp.ClientResponse]):
         super().__init__()
+        self._exit_stack = contextlib.AsyncExitStack()
+
         self._it = it
+        self._exit_stack.push_async_callback(self.cleanup_task, request_task)
         self._request_task = request_task
         self._value = None
+
+    async def cleanup_task(self, task: asyncio.Task):
+        print(f'cleaning up {task}')
+        if task.done() and not task.cancelled():
+            if exc := task.exception():
+                print(f'raising {exc}')
+                raise exc
+        else:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     async def write(self, b):
         assert not self.closed
@@ -72,26 +89,24 @@ class InsertObjectStream(WritableStream):
         fut = asyncio.ensure_future(self._it.feed(b))
         try:
             await asyncio.wait([fut, self._request_task], return_when=asyncio.FIRST_COMPLETED)
-            if fut.done() and not fut.cancelled():
-                if exc := fut.exception():
-                    raise exc
+            if fut.done() and not fut.exception() and not fut.cancelled():
                 return len(b)
-            raise ValueError('request task finished early')
+            assert self._request_task.done()
+            if not self._request_task.cancelled():
+                if exc := self._request_task.exception():
+                    raise ValueError('request task raised exception before data was completely written') from exc
+                raise ValueError('request task finished early')
+            raise ValueError('request task was cancelled')
         finally:
-            fut.cancel()
+            if not fut.done() or fut.exception():
+                self._exit_stack.push_async_callback(self.cleanup_task, fut)
 
     async def _wait_closed(self):
         fut = asyncio.ensure_future(self._it.stop())
-        try:
-            await asyncio.wait([fut, self._request_task], return_when=asyncio.FIRST_COMPLETED)
-            async with await self._request_task as resp:
-                self._value = await resp.json()
-        finally:
-            if fut.done() and not fut.cancelled():
-                if exc := fut.exception():
-                    raise exc
-            else:
-                fut.cancel()
+        self._exit_stack.push_async_callback(self.cleanup_task, fut)
+        async with await self._request_task as resp:
+            self._value = await resp.json()
+        await self._exit_stack.aclose()
 
 
 class _TaskManager:
@@ -356,6 +371,7 @@ class GoogleStorageClient(GoogleBaseClient):
                 f'https://storage.googleapis.com/upload/storage/v1/b/{bucket}/o',
                 retry=False,
                 **kwargs))
+            print(f'InsertObjectStream {bucket}/{name}')
             return InsertObjectStream(it, request_task)
 
         # Write using resumable uploads.  See:
@@ -368,6 +384,7 @@ class GoogleStorageClient(GoogleBaseClient):
             **kwargs
         ) as resp:
             session_url = resp.headers['Location']
+        print(f'ResumableInsertObjectStream {bucket}/{name}')
         return ResumableInsertObjectStream(self._session, session_url, chunk_size)
 
     async def get_object(self, bucket: str, name: str, **kwargs) -> GetObjectStream:

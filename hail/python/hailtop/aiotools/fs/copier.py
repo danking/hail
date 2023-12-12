@@ -241,6 +241,7 @@ class SourceCopier:
                             source_report.finish_bytes(written)
                             n -= len(b)
         except Exception as e:
+            print(f'exception {return_exceptions} {e}')
             if return_exceptions:
                 source_report.set_exception(e)
             else:
