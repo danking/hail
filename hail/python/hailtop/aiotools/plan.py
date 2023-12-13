@@ -24,7 +24,8 @@ class PlanError(ValueError):
 
 async def plan(
     folder: str,
-    copy: List[Tuple[str, str]],
+    copy_to: List[Tuple[str, str]],
+    copy_into: List[Tuple[str, str]],
     gcs_requester_pays_project: Optional[str],
     verbose: bool,
     max_parallelism: int,
@@ -38,6 +39,16 @@ async def plan(
     total_n_bytes = 0
 
     async with RouterAsyncFS(gcs_kwargs=gcs_kwargs) as fs:
+        def create_copy_into(copy_into_tuple: Tuple[str, str]) -> Tuple[str, str]:
+            src, dest = copy_into_tuple
+            src_url = fs.parse_url(src)
+            dest_url = fs.parse_url(dest)
+            src_basename = os.path.basename(src_url.path)
+            destination_file = dest_url.with_new_path_component(src_basename)
+            return (src, str(destination_file))
+
+        copy = [*copy_to, *(create_copy_into(x) for x in copy_into)]
+
         if any(await asyncio.gather(fs.isfile(folder), fs.isdir(folder.rstrip('/') + '/'))):
             raise PlanError(f'plan folder already exists: {folder}', 1)
 
@@ -121,16 +132,16 @@ async def find_all_copy_pairs(
             listfiles(fs, dst),
         )
 
-        print((srcstat, srcfiles, dststat, dstfiles))
-
         if srcstat and srcfiles:
             raise PlanError(f'Source is both a directory and a file. This is not supported. {src}', 1)
         if dststat and dstfiles:
             raise PlanError(f'Destination is both a directory and a file. This is not supported. {dst}', 1)
         if srcstat and dstfiles:
-            raise PlanError(f'Source is a file but destination is a directory. This is not supported. {src} -> {dst}', 1)
+            raise PlanError(f'Source is a file but destination is a directory. This is not supported. {src} -> {dst}', 1) from (
+                IsADirectoryError(dst))
         if srcfiles and dststat:
-            raise PlanError(f'Source is a directory but destination is a file. This is not supported. {src} -> {dst}', 1)
+            raise PlanError(f'Source is a directory but destination is a file. This is not supported. {src} -> {dst}', 1) from (
+                IsADirectoryError(src))
         if srcstat:
             assert len(srcfiles) == 0
             assert len(dstfiles) == 0
@@ -147,9 +158,9 @@ async def find_all_copy_pairs(
                 await srconly.write((srcurl + '\n').encode('utf-8'))
                 await plan.write((srcurl + '\t' + dst + '\n').encode('utf-8'))
                 return 1, srcsize
-        elif dststat:
-            await dstonly.write((dst + '\n').encode('utf-8'))
-            return 0, 0
+        elif not srcfiles:
+            assert srcstat is None
+            raise PlanError(f'Source is neither a folder nor a file: {src}') from FileNotFoundError(src)
 
         srcfiles.sort(key=lambda x: x[0])
         dstfiles.sort(key=lambda x: x[0])

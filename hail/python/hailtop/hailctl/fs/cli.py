@@ -1,8 +1,9 @@
 from typing import Optional, List, Tuple, cast
 import asyncio
-import typer
 import click
+import os
 import sys
+import typer
 
 from hailtop.aiotools.plan import plan, PlanError
 from hailtop.aiotools.sync import sync as aiotools_sync, SyncError
@@ -24,8 +25,16 @@ def callback():
 
 @click.command()
 @click.option(
-    '--copy',
-    help='Pairs of source and destination URL. May be specified multiple times.',
+    '--copy-to',
+    help='Pairs of source and destination URL. May be specified multiple times. The destination is always treated as a file. See --copy-into to copy into a directory',
+    type=(str, str),
+    required=False,
+    multiple=True,
+    default=(),
+)
+@click.option(
+    '--copy-into',
+    help='Copies the source path into the target path. The target must not be a file.',
     type=(str, str),
     required=False,
     multiple=True,
@@ -37,7 +46,8 @@ def callback():
 @click.option('--use-plan', help='The plan to execute. Must exist.', type=str, required=False)
 @click.option('--gcs-requester-pays-project', help='The Google project to which to charge egress costs.', type=str, required=False)
 def sync(
-    copy: List[Tuple[str, str]],
+    copy_to: List[Tuple[str, str]],
+    copy_into: List[Tuple[str, str]],
     verbose: bool,
     max_parallelism: int,
     make_plan: Optional[str] = None,
@@ -69,7 +79,13 @@ def sync(
 
     if make_plan:
         try:
-            asyncio.run(plan(make_plan, copy, gcs_requester_pays_project, verbose, max_parallelism))
+            asyncio.run(plan(
+                make_plan,
+                copy_to,
+                copy_into,
+                gcs_requester_pays_project,
+                verbose,
+                max_parallelism))
         except PlanError as err:
             print(err.args[0])
             sys.exit(err.args[1])
