@@ -19,10 +19,9 @@ import scala.concurrent.duration.{Duration, MILLISECONDS}
 import scala.concurrent.{Future, Await, ExecutionContext}
 import scala.util.control.NonFatal
 
-class ServiceTaskContext(val partitionId: Int) extends HailTaskContext {
-  override def stageId(): Int = 0
 
-  override def attemptNumber(): Int = 0
+class ServiceTaskContext(val partitionId: Int, val attemptNumber: Int) extends HailTaskContext {
+  override def stageId(): Int = 0
 }
 
 object WorkerTimer {
@@ -166,14 +165,32 @@ object Worker {
         new ServiceBackend(null, null, new HailClassLoader(getClass().getClassLoader()), null, None, null, null, null, null))
     }
 
-    val result = using(new ServiceTaskContext(i)) { htc =>
-      try {
+    val result = try {
+      using(new ServiceTaskContext(i, 0)) { htc =>
         retryTransientErrors {
           Right(f(context, htc, theHailClassLoader, fs))
         }
-      } catch {
-        case NonFatal(err) => Left(err)
       }
+    } catch {
+      case NonFatal(err) =>
+        log.error(
+          "Per-partition code encountered a non-fatal, non-transient runtime exception. Retrying entire partition.",
+          err
+        )
+        try {
+          using(new ServiceTaskContext(i, 1)) { htc =>
+            retryTransientErrors {
+              Right(f(context, htc, theHailClassLoader, fs))
+            }
+          }
+        } catch {
+          case NonFatal(err) =>
+            log.error(
+              "Per-partition code encountered a *second* non-fatal, non-transient runtime exception. Failing.",
+              err
+            )
+            Left(err)
+        }
     }
 
     timer.end("executeFunction")
