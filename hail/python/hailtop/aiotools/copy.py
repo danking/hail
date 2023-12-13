@@ -81,7 +81,7 @@ async def copy(*,
                s3_kwargs: Optional[dict] = None,
                transfers: List[Transfer],
                verbose: bool = False,
-               totals: Optional[Tuple[int, int]] = None
+               totals: Optional[Tuple[int, int]] = None,
                ) -> None:
     with ThreadPoolExecutor() as thread_pool:
         if max_simultaneous_transfers is None:
@@ -173,6 +173,8 @@ async def main() -> None:
     parser.add_argument('-v', '--verbose', action='store_const',
                         const=True, default=False,
                         help='show logging information')
+    parser.add_argument('--timeout', type=str, default=None,
+                        help='show logging information')
     args = parser.parse_args()
 
     if args.verbose:
@@ -183,11 +185,27 @@ async def main() -> None:
     if args.files is None or args.files == '-':
         args.files = sys.stdin.read()
     files = json.loads(args.files)
-    gcs_kwargs = {'gcs_requester_pays_configuration': requester_pays_project}
+
+    timeout = args.timeout
+    if timeout:
+        timeout = float(timeout)
+    print(timeout)
+    gcs_kwargs = {
+        'gcs_requester_pays_configuration': requester_pays_project,
+        'timeout': timeout,
+    }
+    azure_kwargs = {
+        'timeout': timeout,
+    }
+    s3_kwargs = {
+        'timeout': timeout,
+    }
 
     await copy_from_dict(
         max_simultaneous_transfers=args.max_simultaneous_transfers,
         gcs_kwargs=gcs_kwargs,
+        azure_kwargs=azure_kwargs,
+        s3_kwargs=s3_kwargs,
         files=files,
         verbose=args.verbose
     )

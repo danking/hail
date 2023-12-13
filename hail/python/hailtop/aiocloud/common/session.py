@@ -1,6 +1,6 @@
 from contextlib import AsyncExitStack
 from types import TracebackType
-from typing import Optional, Type, TypeVar, Mapping, Union
+from typing import Optional, Type, TypeVar, Mapping, Union, Dict, Any
 import time
 import aiohttp
 import abc
@@ -67,6 +67,12 @@ class RateLimitedSession(BaseSession):
             del self._session
 
 
+def coerce_timeout(kwargs: Dict[str, Any]):
+    timeout = kwargs.get('timeout')
+    if timeout and isinstance(timeout, float) or isinstance(timeout, int):
+        kwargs['timeout'] = aiohttp.ClientTimeout(timeout)
+
+
 class Session(BaseSession):
     def __init__(self,
                  *,
@@ -82,6 +88,7 @@ class Session(BaseSession):
             self._http_session = http_session
         else:
             self._owns_http_session = True
+            coerce_timeout(kwargs)
             self._http_session = httpx.ClientSession(**kwargs)
         self._credentials = credentials
 
@@ -95,6 +102,8 @@ class Session(BaseSession):
             for k, v in self._params.items():
                 if k not in request_params:
                     request_params[k] = v
+
+        coerce_timeout(kwargs)
 
         # retry by default
         retry = kwargs.pop('retry', True)

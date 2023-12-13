@@ -110,16 +110,12 @@ class WritableStream(abc.ABC):
         return self._closed
 
     async def __aenter__(self) -> 'WritableStream':
-        print(f'aenter {self}')
         return self
 
     async def __aexit__(
             self, exc_type: Optional[Type[BaseException]] = None,
             exc_value: Optional[BaseException] = None,
             exc_traceback: Optional[TracebackType] = None) -> None:
-        print(f'aexit {self}')
-        import traceback
-        traceback.print_stack()
         await self.wait_closed()
 
 

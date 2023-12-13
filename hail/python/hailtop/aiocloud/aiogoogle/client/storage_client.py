@@ -71,10 +71,8 @@ class InsertObjectStream(WritableStream):
         self._value = None
 
     async def cleanup_task(self, task: asyncio.Task):
-        print(f'cleaning up {task}')
         if task.done() and not task.cancelled():
             if exc := task.exception():
-                print(f'raising {exc}')
                 raise exc
         else:
             task.cancel()
@@ -85,6 +83,7 @@ class InsertObjectStream(WritableStream):
 
     async def write(self, b):
         assert not self.closed
+        assert not self._request_task.done()
 
         fut = asyncio.ensure_future(self._it.feed(b))
         try:
@@ -104,9 +103,11 @@ class InsertObjectStream(WritableStream):
     async def _wait_closed(self):
         fut = asyncio.ensure_future(self._it.stop())
         self._exit_stack.push_async_callback(self.cleanup_task, fut)
-        async with await self._request_task as resp:
-            self._value = await resp.json()
-        await self._exit_stack.aclose()
+        try:
+            async with await self._request_task as resp:
+                self._value = await resp.json()
+        finally:
+            await self._exit_stack.aclose()
 
 
 class _TaskManager:
@@ -371,7 +372,6 @@ class GoogleStorageClient(GoogleBaseClient):
                 f'https://storage.googleapis.com/upload/storage/v1/b/{bucket}/o',
                 retry=False,
                 **kwargs))
-            print(f'InsertObjectStream {bucket}/{name}')
             return InsertObjectStream(it, request_task)
 
         # Write using resumable uploads.  See:
@@ -384,7 +384,6 @@ class GoogleStorageClient(GoogleBaseClient):
             **kwargs
         ) as resp:
             session_url = resp.headers['Location']
-        print(f'ResumableInsertObjectStream {bucket}/{name}')
         return ResumableInsertObjectStream(self._session, session_url, chunk_size)
 
     async def get_object(self, bucket: str, name: str, **kwargs) -> GetObjectStream:

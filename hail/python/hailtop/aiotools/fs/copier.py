@@ -227,6 +227,7 @@ class SourceCopier:
                          this_part_size: int,
                          part_creator: MultiPartCreate,
                          return_exceptions: bool) -> None:
+        total_written = 0
         try:
             async with self.xfer_sema.acquire_manager(min(Copier.BUFFER_SIZE, this_part_size)):
                 async with await self.router_fs.open_from(srcfile, part_number * part_size, length=this_part_size) as srcf:
@@ -238,10 +239,10 @@ class SourceCopier:
                                 raise UnexpectedEOFError()
                             written = await destf.write(b)
                             assert written == len(b)
-                            source_report.finish_bytes(written)
+                            total_written += written
                             n -= len(b)
+            source_report.finish_bytes(total_written)
         except Exception as e:
-            print(f'exception {return_exceptions} {e}')
             if return_exceptions:
                 source_report.set_exception(e)
             else:

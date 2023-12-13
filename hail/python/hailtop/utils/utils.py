@@ -476,7 +476,6 @@ async def bounded_gather2_raise_exceptions(
             try:
                 return await pf()
             except Exception as exc:
-                print(f'bounded gather {exc}')
                 raise exc
 
     tasks = [asyncio.create_task(run_with_sema(pf)) for pf in pfs]
