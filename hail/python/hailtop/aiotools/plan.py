@@ -160,7 +160,7 @@ async def find_all_copy_pairs(
                 return 1, srcsize
         elif not srcfiles:
             assert srcstat is None
-            raise PlanError(f'Source is neither a folder nor a file: {src}') from FileNotFoundError(src)
+            raise PlanError(f'Source is neither a folder nor a file: {src}', 1) from FileNotFoundError(src)
 
         srcfiles.sort(key=lambda x: x[0])
         dstfiles.sort(key=lambda x: x[0])
@@ -217,6 +217,7 @@ async def find_all_copy_pairs(
                 assert srcname >= dstname
                 dstidx += 1
                 progress.update(tid, advance=1)
+                print((1, srcf, dstf, srcidx, dstidx, srcfiles, dstfiles))
                 await dstonly.write((dsturl + '\n').encode('utf-8'))
         while srcidx < len(srcfiles):
             srcf = srcfiles[srcidx]
@@ -241,6 +242,7 @@ async def find_all_copy_pairs(
             dstf = dstfiles[dstidx]
             dstname, dsturl, dstisdir, dstsize = dstf
 
+            print((2, dstidx, dstf))
             await dstonly.write((dsturl + '\n').encode('utf-8'))
             dstidx += 1
             progress.update(tid, advance=1)

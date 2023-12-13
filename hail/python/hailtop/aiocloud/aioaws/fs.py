@@ -65,7 +65,7 @@ class S3HeadObjectFileStatus(FileStatus):
         self._url = url
 
     def name(self) -> str:
-        return os.path.basename(self._url)
+        return os.path.basename(self._url.rstrip('/'))
 
     def url(self) -> str:
         return self._url
@@ -93,7 +93,7 @@ class S3ListFilesFileStatus(FileStatus):
         self._url = url
 
     def name(self) -> str:
-        return os.path.basename(self._url)
+        return os.path.basename(self._url.rstrip('/'))
 
     def url(self) -> str:
         return self._url
@@ -165,7 +165,7 @@ class S3FileListEntry(FileListEntry):
         self._status: Optional[S3ListFilesFileStatus] = None
 
     def name(self) -> str:
-        return os.path.basename(self._key)
+        return os.path.basename(self._key.rstrip('/'))
 
     async def url(self) -> str:
         return f's3://{self._bucket}/{self._key}'
