@@ -40,7 +40,7 @@ async def expect_file(fs, path, expected):
     assert actual == expected, (actual, expected)
 
 
-async def copier_copy(fs, sema, transfer):
+async def copier_copy(fs, sema, transfer: Transfer):
     await Copier.copy(fs, sema, transfer)
 
 
@@ -73,8 +73,9 @@ async def sync_tool(fs, sema, transfer: Transfer):
 
     with tempfile.TemporaryDirectory() as folder:
         try:
-            await plan(os.path.join(folder, 'plan'), copy_to, copy_into, None, True, max_parallelism)
-            await sync(os.path.join(folder, 'plan'), None, True, max_parallelism)
+            plan_dir = os.path.join(folder, 'plan')
+            await plan(plan_dir, copy_to, copy_into, None, True, max_parallelism, overwrite_if_size_differs=True)
+            await sync(plan_dir, None, True, max_parallelism)
         except (PlanError, SyncError) as err:
             if err.__cause__:
                 raise err.__cause__
@@ -189,13 +190,13 @@ async def test_copy_file_dest_target_directory_doesnt_exist(copy_test_context, c
 
 
 @pytest.mark.asyncio
-async def test_overwrite_rename_file(copy_test_context):  # hailctl fs sync does not support overwriting
+async def test_overwrite_rename_file(copy_test_context, copy_tool):
     sema, fs, src_base, dest_base = copy_test_context
 
     await create_test_file(fs, 'src', src_base, 'a')
     await create_test_file(fs, 'dest', dest_base, 'x')
 
-    await Copier.copy(fs, sema, Transfer(f'{src_base}a', f'{dest_base}x'))
+    await copy_tool(fs, sema, Transfer(f'{src_base}a', f'{dest_base}x'), )
 
     await expect_file(fs, f'{dest_base}x', 'src/a')
 
@@ -225,8 +226,7 @@ async def test_copy_rename_dir_dest_is_target(copy_test_context, copy_tool):
 
 
 @pytest.mark.asyncio
-async def test_overwrite_rename_dir(copy_test_context):
-    copy_tool = Copier.copy   # hailctl fs sync does not support overwrite
+async def test_overwrite_rename_dir(copy_test_context, copy_tool):
     sema, fs, src_base, dest_base = copy_test_context
 
     await create_test_dir(fs, 'src', src_base, 'a/')
@@ -283,8 +283,7 @@ async def test_copy_dest_target_file_is_dir(copy_test_context, copy_tool):
 
 
 @pytest.mark.asyncio
-async def test_overwrite_file(copy_test_context):
-    copy_tool = Copier.copy  # hailctl fs sync does not support overwriting
+async def test_overwrite_file(copy_test_context, copy_tool):
     sema, fs, src_base, dest_base = copy_test_context
 
     await create_test_file(fs, 'src', src_base, 'a')
@@ -319,8 +318,7 @@ async def test_copy_dir(copy_test_context, copy_tool):
 
 
 @pytest.mark.asyncio
-async def test_overwrite_dir(copy_test_context):
-    copy_tool = Copier.copy  # hailctl fs sync does not support overwrite
+async def test_overwrite_dir(copy_test_context, copy_tool):
     sema, fs, src_base, dest_base = copy_test_context
 
     await create_test_dir(fs, 'src', src_base, 'a/')

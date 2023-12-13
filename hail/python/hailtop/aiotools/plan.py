@@ -29,6 +29,7 @@ async def plan(
     gcs_requester_pays_project: Optional[str],
     verbose: bool,
     max_parallelism: int,
+    overwrite_if_size_differs: bool,
 ):
     if gcs_requester_pays_project:
         gcs_kwargs = {'gcs_requester_pays_configuration': gcs_requester_pays_project}
@@ -71,7 +72,8 @@ async def plan(
                         src,
                         dst,
                         progress,
-                        asyncio.Semaphore(max_parallelism)
+                        asyncio.Semaphore(max_parallelism),
+                        overwrite_if_size_differs,
                     )
                     total_n_files += n_files
                     total_n_bytes += n_bytes
@@ -123,6 +125,7 @@ async def find_all_copy_pairs(
     dst: str,
     progress: Progress,
     sema: asyncio.Semaphore,
+    overwrite_if_size_differs: bool,
 ) -> Tuple[int, int]:
     async with sema:
         srcstat, srcfiles, dststat, dstfiles = await asyncio.gather(
@@ -151,6 +154,9 @@ async def find_all_copy_pairs(
                 if srcsize == dstsize:
                     await matches.write((srcurl + '\t' + dsturl + '\n').encode('utf-8'))
                     return 0, 0
+                elif overwrite_if_size_differs:
+                    await plan.write((srcurl + '\t' + dsturl + '\n').encode('utf-8'))
+                    return 1, srcsize
                 else:
                     await differs.write((srcurl + '\t' + dsturl + '\t' + str(srcsize) + '\t' + str(dstsize) + '\n').encode('utf-8'))
                     return 0, 0
@@ -183,7 +189,7 @@ async def find_all_copy_pairs(
                 if srcisdir and dstisdir:
                     child_directory_tasks.append(
                         asyncio.create_task(find_all_copy_pairs(
-                            fs, matches, differs, srconly, dstonly, plan, srcurl, dsturl, progress, sema
+                            fs, matches, differs, srconly, dstonly, plan, srcurl, dsturl, progress, sema, overwrite_if_size_differs
                         ))
                     )
                 elif srcisdir and not dstisdir:
@@ -193,7 +199,12 @@ async def find_all_copy_pairs(
                 elif srcsize == dstsize:
                     await matches.write((srcurl + '\t' + dsturl + '\n').encode('utf-8'))
                 else:
-                    await differs.write((srcurl + '\t' + dsturl + '\t' + str(srcsize) + '\t' + str(dstsize) + '\n').encode('utf-8'))
+                    if overwrite_if_size_differs:
+                        await plan.write((srcurl + '\t' + os.path.join(dst, srcname) + '\n').encode('utf-8'))
+                        n_files += 1
+                        n_bytes += srcsize
+                    else:
+                        await differs.write((srcurl + '\t' + dsturl + '\t' + str(srcsize) + '\t' + str(dstsize) + '\n').encode('utf-8'))
                 dstidx += 1
                 srcidx += 1
                 progress.update(tid, advance=2)
@@ -203,7 +214,7 @@ async def find_all_copy_pairs(
                         src += '/'
                     child_directory_tasks.append(
                         asyncio.create_task(find_all_copy_pairs(
-                            fs, matches, differs, srconly, dstonly, plan, srcurl, os.path.join(dst, srcurl.removeprefix(src)), progress, sema
+                            fs, matches, differs, srconly, dstonly, plan, srcurl, os.path.join(dst, srcurl.removeprefix(src)), progress, sema, overwrite_if_size_differs
                         ))
                     )
                 else:
@@ -228,7 +239,7 @@ async def find_all_copy_pairs(
                     src += '/'
                 child_directory_tasks.append(
                     asyncio.create_task(find_all_copy_pairs(
-                        fs, matches, differs, srconly, dstonly, plan, srcurl, os.path.join(dst, srcurl.removeprefix(src)), progress, sema
+                        fs, matches, differs, srconly, dstonly, plan, srcurl, os.path.join(dst, srcurl.removeprefix(src)), progress, sema, overwrite_if_size_differs
                     ))
                 )
             else:

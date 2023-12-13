@@ -42,6 +42,7 @@ def callback():
 )
 @click.option('-v', '--verbose', help='The Google project to which to charge egress costs.', is_flag=True, required=False, default=False)
 @click.option('--max-parallelism', help='The maximum number of concurrent requests.', type=int, required=False, default=75)
+@click.option('--overwrite-if-size-differs', help='Overwrite a file at the destination if the source file and destination file differ in size.', type=bool, required=False, default=False)
 @click.option('--make-plan', help='The folder in which to create a new synchronization plan. Must not exist.', type=str, required=False)
 @click.option('--use-plan', help='The plan to execute. Must exist.', type=str, required=False)
 @click.option('--gcs-requester-pays-project', help='The Google project to which to charge egress costs.', type=str, required=False)
@@ -50,15 +51,21 @@ def sync(
     copy_into: List[Tuple[str, str]],
     verbose: bool,
     max_parallelism: int,
+    overwrite_if_size_differs: bool,
     make_plan: Optional[str] = None,
     use_plan: Optional[str] = None,
     gcs_requester_pays_project: Optional[str] = None,
 ):
     '''Synchronize files between one or more pairs of locations.
 
-    If a corresponding file already exists at the destination with the same size in bytes, this
-    command will not copy it. If you want to replace files that have the exact same size in bytes,
-    delete the destination files first. THIS COMMAND DOES NOT CHECK MD5s OR SHAs!
+    If a corresponding file already exists at the destination, this command will *not* copy it. If
+    you want to replace files, delete the destination files first. THIS COMMAND DOES NOT CHECK MD5s
+    OR SHAs! For each pair of matching files present at the source and the destination, if the
+    number of bytes matches the files are added to plan/matches otherwise they are added to
+    plan/differs.
+
+    If you want to replace all destination files which have a corresponding source file with a
+    different size, use --overwrite-if-size-differs.
 
     First generate a plan with --make-plan, then use the plan with --use-plan.
 
@@ -67,11 +74,25 @@ def sync(
 
 
 
-    $ hailctl fs sync --make-plan plan1 --copy gs://gcs-bucket/a s3://s3-bucket/b
+    $ hailctl fs sync --make-plan plan --copy gs://gcs-bucket/a s3://s3-bucket/b
 
 
 
-    $ hailctl fs sync --use-plan plan1
+    $ hailctl fs sync --use-plan plan
+
+
+
+    Copy all the files as above, but replace destination files that differ in size from the
+    corresponding source file:
+
+
+
+    $ hailctl fs sync --make-plan plan --copy gs://gcs-bucket/a s3://s3-bucket/b --overwrite-if-size-differs
+
+
+
+    $ hailctl fs sync --use-plan plan
+
     '''
     if (make_plan is None and use_plan is None) or (make_plan is not None and use_plan is not None) :
         print('Must specify one of --make-plan or --use-plan. See hailctl fs sync --help.')
@@ -85,7 +106,9 @@ def sync(
                 copy_into,
                 gcs_requester_pays_project,
                 verbose,
-                max_parallelism))
+                max_parallelism,
+                overwrite_if_size_differs
+            ))
         except PlanError as err:
             print(err.args[0])
             sys.exit(err.args[1])
