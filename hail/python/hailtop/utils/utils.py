@@ -473,10 +473,7 @@ async def bounded_gather2_raise_exceptions(
     '''
     async def run_with_sema(pf: Callable[[], Awaitable[T]]):
         async with sema:
-            try:
-                return await pf()
-            except Exception as exc:
-                raise exc
+            return await pf()
 
     tasks = [asyncio.create_task(run_with_sema(pf)) for pf in pfs]
 
