@@ -90,8 +90,8 @@ def sync(
             print(err.args[0])
             sys.exit(err.args[1])
     if use_plan:
-        if copy:
-            print('Do not specify --copy with --use-plan. Create the plan with --make-plan then call --use-plan without any --copy.')
+        if copy_to or copy_into:
+            print('Do not specify --copy-to or --copy-into with --use-plan. Create the plan with --make-plan then call --use-plan without any --copy-to and --copy-into.')
             raise typer.Exit(1)
         try:
             asyncio.run(aiotools_sync(use_plan, gcs_requester_pays_project, verbose, max_parallelism))
