@@ -6,7 +6,7 @@ from typing import Optional
 from hailtop import httpx
 from hailtop.config import get_deploy_config
 from hailtop.auth import hail_credentials
-from hailtop.httpx import client_session
+from hailtop import httpx
 
 
 class CIClient:
@@ -19,8 +19,8 @@ class CIClient:
     async def __aenter__(self):
         async with hail_credentials() as credentials:
             headers = await credentials.auth_headers()
-        self._session = client_session(
-            raise_for_status=False, timeout=aiohttp.ClientTimeout(total=60), headers=headers
+        self._session = httpx.client_session(
+            raise_for_status=False, timeout=httpx.get_http_timeout(None, 60), headers=headers
         )  # type: ignore
         return self
 

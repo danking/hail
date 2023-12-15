@@ -4,7 +4,7 @@ from typing import Awaitable, List, TypeVar
 import logging
 import asyncio
 import aiohttp
-from hailtop import aiotools
+from hailtop import aiotools, httpx
 from hailtop.aiocloud import aiogoogle
 
 log = logging.getLogger(__name__)
@@ -110,7 +110,7 @@ async def main():
 
     async with aiogoogle.GoogleContainerClient(
             project=project,
-            timeout=aiohttp.ClientTimeout(total=5)) as client:
+            timeout=httpx.get_http_timeout(None, 5)) as client:
         cleanup_images = CleanupImages(client)
         try:
             await cleanup_images.run()

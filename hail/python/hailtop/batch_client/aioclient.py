@@ -886,7 +886,7 @@ class BatchClient:
         return BatchClient(
             billing_project=billing_project,
             url=url,
-            session=Session(credentials=credentials, http_session=session, timeout=aiohttp.ClientTimeout(total=30)),
+            session=Session(credentials=credentials, http_session=session, timeout=httpx.get_http_timeout(None, 30)),
             headers=headers)
 
     def __init__(self,

@@ -9,7 +9,7 @@ import asyncio
 import urllib.parse
 import aiohttp
 import datetime
-from hailtop import timex
+from hailtop import timex, httpx
 from hailtop.utils import (
     secret_alnum_string, OnlineBoundedGather2,
     TransientError, retry_transient_errors)
@@ -311,7 +311,7 @@ class GoogleStorageClient(GoogleBaseClient):
                  **kwargs):
         if 'timeout' not in kwargs and 'http_session' not in kwargs:
             # Around May 2022, GCS started timing out a lot with our default 5s timeout
-            kwargs['timeout'] = aiohttp.ClientTimeout(total=20)
+            kwargs['timeout'] = httpx.get_http_timeout(None, 20)
         super().__init__('https://storage.googleapis.com/storage/v1', **kwargs)
         self._gcs_requester_pays_configuration = get_gcs_requester_pays_configuration(
             gcs_requester_pays_configuration=gcs_requester_pays_configuration

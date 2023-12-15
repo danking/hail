@@ -9,6 +9,21 @@ import aiohttp.typedefs
 from .utils import async_to_blocking
 from .tls import internal_client_ssl_context, external_client_ssl_context
 from .config.deploy_config import get_deploy_config
+from .config.user_config import configuration_of
+from .config.variables import ConfigVariable
+
+
+def get_http_timeout(
+    argument: Optional[Union[float, int, aiohttp.ClientTimeout]],
+    fallback: Union[float, int]
+) -> aiohttp.ClientTimeout:
+    if isinstance(argument, aiohttp.ClientTimeout):
+        return argument
+
+    timeout = configuration_of(ConfigVariable.HTTP_TIMEOUT, argument, fallback)
+    if isinstance(timeout, str):
+        timeout = float(timeout)
+    return aiohttp.ClientTimeout(total=timeout)
 
 
 class ClientResponseError(aiohttp.ClientResponseError):
@@ -103,13 +118,10 @@ class ClientSession:
 
         assert 'connector' not in kwargs
 
-        if timeout is None:
-            timeout = aiohttp.ClientTimeout(total=5)
-
         self.raise_for_status = raise_for_status
         self.client_session = aiohttp.ClientSession(
             *args,
-            timeout=timeout,
+            timeout=get_http_timeout(timeout, 5),
             raise_for_status=False,
             connector=aiohttp.TCPConnector(ssl=tls),
             **kwargs

@@ -21,6 +21,10 @@ def config_variables():
                 help_msg='Domain of the Batch service',
                 validation=(lambda x: re.fullmatch(r'.+\..+', x) is not None, 'should be valid domain'),
             ),
+            ConfigVariable.HTTP_TIMEOUT: ConfigVariableInfo(
+                help_msg='The timeout, in seconds, for all client-side HTTP requests.',
+                validation=(lambda x: True, ''),
+            ),
             ConfigVariable.GCS_REQUESTER_PAYS_PROJECT: ConfigVariableInfo(
                 help_msg='Project when using requester pays buckets in GCS',
                 validation=(lambda x: re.fullmatch(r'[^:/\s]+', x) is not None, 'should be valid GCS project name'),
