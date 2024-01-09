@@ -10,11 +10,7 @@ assert sys.version_info > (3, 0), sys.version_info
 
 
 def safe_call(*args, **kwargs):
-    try:
-        sp.check_output(args, stderr=sp.STDOUT, **kwargs)
-    except sp.CalledProcessError as e:
-        print(e.output.decode())
-        raise e
+    sp.run(args, check=True, **kwargs)
 
 
 def get_metadata(key):
@@ -33,17 +29,19 @@ def mkdir_if_not_exists(path):
 role = get_metadata('dataproc-role')
 
 if role == 'Master':
+    safe_call('/opt/conda/miniconda3/bin/python3.8', '/opt/conda/default/bin/pip', 'install', 'pip')
+
     # additional packages to install
     pip_pkgs = [
         'setuptools',
         'mkl<2020',
         'lxml<5',
-        'https://github.com/hail-is/jgscm/archive/v0.1.12+hail.zip',
+        'https://github.com/hail-is/jgscm/archive/v0.1.13+hail.zip',
         'ipykernel==4.10.*',
         'ipywidgets==7.5.*',
         'jupyter-console==6.0.*',
         'nbconvert==5.6.*',
-        'notebook==5.7.*',
+        'notebook==6.0.*',
         'qtconsole==4.5.*'
     ]
 
