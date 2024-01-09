@@ -29,7 +29,7 @@ def mkdir_if_not_exists(path):
 role = get_metadata('dataproc-role')
 
 if role == 'Master':
-    safe_call('/opt/conda/miniconda3/bin/python3.8', '/opt/conda/default/bin/pip', 'install', 'pip')
+    safe_call('/opt/conda/miniconda3/bin/python3.8', '/opt/conda/default/bin/pip', 'install', '-U', 'pip')
 
     # additional packages to install
     pip_pkgs = [
