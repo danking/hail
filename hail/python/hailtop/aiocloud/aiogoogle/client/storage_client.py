@@ -814,8 +814,7 @@ class GoogleStorageAsyncFS(AsyncFS):
 
     async def isdir(self, url: str) -> bool:
         bucket, name = self.get_bucket_and_name(url)
-        if name[-1] != '/':
-            name = name + '/'
+        assert not name or name.endswith('/'), name
         params = {'prefix': name, 'delimiter': '/', 'includeTrailingDelimiter': 'true', 'maxResults': 1}
         async for page in await self._storage_client.list_objects(bucket, params=params):
             prefixes = page.get('prefixes')
