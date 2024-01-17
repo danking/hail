@@ -2,6 +2,7 @@ import os
 from typing import Tuple, Any, Set, Optional, MutableMapping, Dict, AsyncIterator, cast, Type, List, Coroutine
 from types import TracebackType
 from multidict import CIMultiDictProxy  # pylint: disable=unused-import
+import contextlib
 import sys
 import logging
 import asyncio
@@ -71,36 +72,51 @@ class PageIterator:
 class InsertObjectStream(WritableStream):
     def __init__(self, it: FeedableAsyncIterable[bytes], request_task: asyncio.Task[aiohttp.ClientResponse]):
         super().__init__()
+        self._exit_stack = contextlib.AsyncExitStack()
+
         self._it = it
+        self._exit_stack.push_async_callback(self.cleanup_task, request_task)
         self._request_task = request_task
         self._value = None
 
+    async def cleanup_task(self, task: asyncio.Task):
+        if task.done() and not task.cancelled():
+            if exc := task.exception():
+                raise exc
+        else:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
     async def write(self, b):
         assert not self.closed
+        assert not self._request_task.done()
 
         fut = asyncio.ensure_future(self._it.feed(b))
         try:
             await asyncio.wait([fut, self._request_task], return_when=asyncio.FIRST_COMPLETED)
-            if fut.done() and not fut.cancelled():
-                if exc := fut.exception():
-                    raise exc
+            if fut.done() and not fut.exception() and not fut.cancelled():
                 return len(b)
-            raise ValueError('request task finished early')
+            assert self._request_task.done()
+            if not self._request_task.cancelled():
+                if exc := self._request_task.exception():
+                    raise ValueError('request task raised exception before data was completely written') from exc
+                raise ValueError('request task finished early')
+            raise ValueError('request task was cancelled')
         finally:
-            fut.cancel()
+            if not fut.done() or fut.exception():
+                self._exit_stack.push_async_callback(self.cleanup_task, fut)
 
     async def _wait_closed(self):
         fut = asyncio.ensure_future(self._it.stop())
+        self._exit_stack.push_async_callback(self.cleanup_task, fut)
         try:
-            await asyncio.wait([fut, self._request_task], return_when=asyncio.FIRST_COMPLETED)
             async with await self._request_task as resp:
                 self._value = await resp.json()
         finally:
-            if fut.done() and not fut.cancelled():
-                if exc := fut.exception():
-                    raise exc
-            else:
-                fut.cancel()
+            await self._exit_stack.aclose()
 
 
 class _TaskManager:
@@ -798,7 +814,8 @@ class GoogleStorageAsyncFS(AsyncFS):
 
     async def isdir(self, url: str) -> bool:
         bucket, name = self.get_bucket_and_name(url)
-        assert not name or name.endswith('/'), name
+        if name[-1] != '/':
+            name = name + '/'
         params = {'prefix': name, 'delimiter': '/', 'includeTrailingDelimiter': 'true', 'maxResults': 1}
         async for page in await self._storage_client.list_objects(bucket, params=params):
             prefixes = page.get('prefixes')
