@@ -1,6 +1,9 @@
 from typing import (
     Any,
+    TypeVar,
     AsyncIterator,
+    ParamSpec,
+    Protocol,
     BinaryIO,
     cast,
     AsyncContextManager,
@@ -355,7 +358,28 @@ class S3AsyncFSURL(AsyncFSURL):
         return f's3://{self._bucket}/{self._path}'
 
 
-class S3AsyncFS(AsyncFS):
+P = ParamSpec('P')
+T_co = TypeVar('T_co', covariant=True)
+
+
+class StrOrURLMethod(Protocol[P, T_co]):
+    def __call__(_self, self, url: Union[str, S3AsyncFSURL], *args: P.args, **kwargs: P.kwargs) -> T_co: ...
+
+
+class URLMethod(Protocol[P, T_co]):
+    def __call__(_self, self, url: S3AsyncFSURL, *args: P.args, **kwargs: P.kwargs) -> T_co: ...
+
+
+def _coerce_url_to_str(fun: URLMethod[P, T_co]) -> StrOrURLMethod[P, T_co]:
+    def wrapped(self, url: Union[str, S3AsyncFSURL], *args: P.args, **kwargs: P.kwargs):
+        if isinstance(url, str):
+            url = S3AsyncFS.parse_url(url)
+        return fun(self, *args, url=url, **kwargs)
+
+    return wrapped
+
+
+class S3AsyncFS(AsyncFS[S3AsyncFSURL]):
     def __init__(
         self,
         thread_pool: Optional[ThreadPoolExecutor] = None,
@@ -429,8 +453,10 @@ class S3AsyncFS(AsyncFS):
 
         return (bucket, name)
 
-    async def open(self, url: str) -> ReadableStream:
-        bucket, name = self.get_bucket_and_name(url)
+    @_coerce_url_to_str
+    async def open(self, url: S3AsyncFSURL) -> ReadableStream:
+        bucket = url._bucket
+        name = url._path
         if name == '':
             raise IsABucketError(url)
         try:

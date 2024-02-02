@@ -246,7 +246,10 @@ class AsyncFSURL(abc.ABC):
         pass
 
 
-class AsyncFS(abc.ABC):
+URL = TypeVar('URL', bound=AsyncFSURL)
+
+
+class AsyncFS(abc.ABC, Generic[URL]):
     FILE = "file"
     DIR = "dir"
 
@@ -272,7 +275,7 @@ class AsyncFS(abc.ABC):
         pass
 
     @abc.abstractmethod
-    async def open(self, url: str) -> ReadableStream:
+    async def open(self, url: Union[str, URL]) -> ReadableStream:
         pass
 
     async def open_from(self, url: str, start: int, *, length: Optional[int] = None) -> ReadableStream:
@@ -435,7 +438,7 @@ class AsyncFS(abc.ABC):
         await self.close()
 
 
-T = TypeVar("T", bound=AsyncFS)
+T = TypeVar("T", bound=AsyncFS[Any])
 
 
 class AsyncFSFactory(abc.ABC, Generic[T]):
