@@ -9,7 +9,7 @@ from .local_fs import LocalAsyncFS
 from hailtop.config import ConfigVariable, configuration_of
 
 
-class RouterAsyncFS(AsyncFS):
+class RouterAsyncFS(AsyncFS[AsyncFSURL]):
     FS_CLASSES: ClassVar[List[type[AsyncFS]]] = [
         LocalAsyncFS,
         aiogoogle.GoogleStorageAsyncFS,
@@ -72,7 +72,7 @@ class RouterAsyncFS(AsyncFS):
             or aioaws.S3AsyncFS.valid_url(url)
         )
 
-    async def _get_fs(self, url: str):
+    async def _get_fs(self, url: AsyncFSURL) -> AsyncFS[AsyncFSURL]:
         if LocalAsyncFS.valid_url(url):
             if self._local_fs is None:
                 self._local_fs = LocalAsyncFS(**self._local_kwargs)
@@ -90,22 +90,23 @@ class RouterAsyncFS(AsyncFS):
                 self._azure_fs = aioazure.AzureAsyncFS(**self._azure_kwargs)
                 self._exit_stack.push_async_callback(self._azure_fs.close)
             return self._azure_fs
-        if aioaws.S3AsyncFS.valid_url(url):
+        # if aioaws.S3AsyncFS.valid_url(url):
+        if isinstance(url, aioaws.S3AsyncFSURL):
             if self._s3_fs is None:
                 self._s3_fs = aioaws.S3AsyncFS(**self._s3_kwargs)
                 self._exit_stack.push_async_callback(self._s3_fs.close)
             return self._s3_fs
         raise ValueError(f'no file system found for url {url}')
 
-    async def open(self, url: str) -> ReadableStream:
+    async def _open(self, url: AsyncFSURL) -> ReadableStream:
         fs = await self._get_fs(url)
         return await fs.open(url)
 
-    async def _open_from(self, url: str, start: int, *, length: Optional[int] = None) -> ReadableStream:
+    async def _open_from(self, url: AsyncFSURL, start: int, *, length: Optional[int] = None) -> ReadableStream:
         fs = await self._get_fs(url)
         return await fs.open_from(url, start, length=length)
 
-    async def create(self, url: str, *, retry_writes: bool = True) -> AsyncContextManager[WritableStream]:
+    async def _create(self, url: AsyncFSURL, *, retry_writes: bool = True) -> AsyncContextManager[WritableStream]:
         fs = await self._get_fs(url)
         return await fs.create(url, retry_writes=retry_writes)
 

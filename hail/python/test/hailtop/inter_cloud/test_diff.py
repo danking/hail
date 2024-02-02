@@ -1,4 +1,4 @@
-from typing import Tuple, AsyncIterator, Dict
+from typing import Tuple, AsyncIterator, Dict, Any
 import secrets
 import os
 import asyncio
@@ -13,7 +13,7 @@ from hailtop.aiotools.router_fs import RouterAsyncFS
 
 
 @pytest.fixture(scope='module')
-async def router_filesystem() -> AsyncIterator[Tuple[asyncio.Semaphore, AsyncFS, Dict[str, str]]]:
+async def router_filesystem() -> AsyncIterator[Tuple[asyncio.Semaphore, AsyncFS[Any], Dict[str, str]]]:
     token = secrets.token_hex(16)
 
     async with RouterAsyncFS() as fs:

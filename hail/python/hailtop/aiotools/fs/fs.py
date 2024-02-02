@@ -20,7 +20,7 @@ import asyncio
 import datetime
 from hailtop.utils import retry_transient_errors, OnlineBoundedGather2
 from .stream import EmptyReadableStream, ReadableStream, WritableStream
-from .exceptions import FileAndDirectoryError
+from .exceptions import FileAndDirectoryError, IsABucketError
 
 
 T = TypeVar("T")
@@ -222,6 +222,10 @@ class AsyncFSURL(abc.ABC):
     def with_root_path(self) -> "AsyncFSURL":
         pass
 
+    @abc.abstractmethod
+    def is_bucket(self) -> bool:
+        pass
+
     def with_new_path_component(self, new_path_component: str) -> "AsyncFSURL":
         if new_path_component == '':
             raise ValueError('new path component must be non-empty')
@@ -246,7 +250,10 @@ class AsyncFSURL(abc.ABC):
         pass
 
 
-class AsyncFS(abc.ABC):
+URL = TypeVar('URL', bound=AsyncFSURL)
+
+
+class AsyncFS(abc.ABC, Generic[URL]):
     FILE = "file"
     DIR = "dir"
 
@@ -268,22 +275,33 @@ class AsyncFS(abc.ABC):
 
     @staticmethod
     @abc.abstractmethod
-    def parse_url(url: str) -> AsyncFSURL:
+    def parse_url(url: str) -> URL:
         pass
+
+    @classmethod
+    def _ensure_url_and_not_bucket(cls, url: Union[str, URL]) -> URL:
+        if isinstance(url, str):
+            url = cls.parse_url(url)
+        if url.is_bucket():
+            raise IsABucketError(str(url))
+        return url
+
+    async def open(self, url: Union[str, URL]) -> ReadableStream:
+        return await self._open(self._ensure_url_and_not_bucket(url))
 
     @abc.abstractmethod
-    async def open(self, url: str) -> ReadableStream:
+    async def _open(self, url: URL) -> ReadableStream:
         pass
 
-    async def open_from(self, url: str, start: int, *, length: Optional[int] = None) -> ReadableStream:
+    async def open_from(self, url: Union[str, URL], start: int, *, length: Optional[int] = None) -> ReadableStream:
+        url = self._ensure_url_and_not_bucket(url)
         if length == 0:
-            fs_url = self.parse_url(url)
-            if fs_url.path.endswith("/"):
-                file_url = str(fs_url.with_path(fs_url.path.rstrip("/")))
-                dir_url = str(fs_url)
+            if url.path.endswith("/"):
+                file_url = str(url.with_path(url.path.rstrip("/")))
+                dir_url = str(url)
             else:
-                file_url = str(fs_url)
-                dir_url = str(fs_url.with_path(fs_url.path + "/"))
+                file_url = str(url)
+                dir_url = str(url.with_path(url.path + "/"))
             isfile, isdir = await asyncio.gather(self.isfile(file_url), self.isdir(dir_url))
             if isfile:
                 if isdir:
@@ -295,11 +313,14 @@ class AsyncFS(abc.ABC):
         return await self._open_from(url, start, length=length)
 
     @abc.abstractmethod
-    async def _open_from(self, url: str, start: int, *, length: Optional[int] = None) -> ReadableStream:
+    async def _open_from(self, url: URL, start: int, *, length: Optional[int] = None) -> ReadableStream:
         pass
 
+    async def create(self, url: Union[str, URL], *, retry_writes: bool = True) -> AsyncContextManager[WritableStream]:
+        return await self._create(self._ensure_url_and_not_bucket(url), retry_writes=retry_writes)
+
     @abc.abstractmethod
-    async def create(self, url: str, *, retry_writes: bool = True) -> AsyncContextManager[WritableStream]:
+    async def _create(self, url: URL, *, retry_writes: bool = True) -> AsyncContextManager[WritableStream]:
         pass
 
     @abc.abstractmethod

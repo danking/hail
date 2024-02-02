@@ -355,7 +355,7 @@ class S3AsyncFSURL(AsyncFSURL):
         return f's3://{self._bucket}/{self._path}'
 
 
-class S3AsyncFS(AsyncFS):
+class S3AsyncFS(AsyncFS[S3AsyncFSURL]):
     def __init__(
         self,
         thread_pool: Optional[ThreadPoolExecutor] = None,
@@ -429,18 +429,18 @@ class S3AsyncFS(AsyncFS):
 
         return (bucket, name)
 
-    async def open(self, url: str) -> ReadableStream:
-        bucket, name = self.get_bucket_and_name(url)
-        if name == '':
-            raise IsABucketError(url)
+    async def _open(self, url: S3AsyncFSURL) -> ReadableStream:
+        bucket = url._bucket
+        name = url._path
         try:
             resp = await blocking_to_async(self._thread_pool, self._s3.get_object, Bucket=bucket, Key=name)
             return blocking_readable_stream_to_async(self._thread_pool, cast(BinaryIO, resp['Body']))
         except self._s3.exceptions.NoSuchKey as e:
             raise FileNotFoundError(url) from e
 
-    async def _open_from(self, url: str, start: int, *, length: Optional[int] = None) -> ReadableStream:
-        bucket, name = self.get_bucket_and_name(url)
+    async def _open_from(self, url: S3AsyncFSURL, start: int, *, length: Optional[int] = None) -> ReadableStream:
+        bucket = url._bucket
+        name = url._path
         range_str = f'bytes={start}-'
         if length is not None:
             assert length >= 1
@@ -457,7 +457,7 @@ class S3AsyncFS(AsyncFS):
                 raise UnexpectedEOFError from e
             raise
 
-    async def create(self, url: str, *, retry_writes: bool = True) -> S3CreateManager:  # pylint: disable=unused-argument
+    async def create(self, url: S3AsyncFSURL, *, retry_writes: bool = True) -> S3CreateManager:  # pylint: disable=unused-argument
         # It may be possible to write a more efficient version of this
         # that takes advantage of retry_writes=False.  Here's the
         # background information:
@@ -498,10 +498,7 @@ class S3AsyncFS(AsyncFS):
         # interface.  This has the disadvantage that the read must
         # complete before the write can begin (unlike the current
         # code, that copies 128MB parts in 256KB chunks).
-        bucket, name = self.get_bucket_and_name(url)
-        if name == '':
-            raise IsABucketError(url)
-        return S3CreateManager(self, bucket, name)
+        return S3CreateManager(self, url._bucket, url._path)
 
     async def multi_part_create(self, sema: asyncio.Semaphore, url: str, num_parts: int) -> MultiPartCreate:
         bucket, name = self.get_bucket_and_name(url)
