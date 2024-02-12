@@ -241,7 +241,7 @@ class SourceCopier:
             if size <= part_size:
 
                 async def _copy_file(srcfile: str, size: int, destfile: str) -> None:
-                    print(srcfile)
+                    print('_copy_file', srcfile)
                     assert not destfile.endswith('/')
 
                     from ..router_fs import RouterAsyncFS
@@ -269,10 +269,13 @@ class SourceCopier:
                     finally:
                         await router_fs.close()
 
-                print(srcfile)
-                return await asyncio.get_running_loop().run_in_executor(
+                print('_copy_file_multi_part_main', srcfile)
+                x = await asyncio.get_running_loop().run_in_executor(
                     self.process_pool, retry_transient_errors, _copy_file, srcfile, size, destfile
                 )
+                assert isinstance(x, int), x
+                print('_copy_file_multi_part_main', x)
+                return x
 
             n_parts, rem = divmod(size, part_size)
             if rem:
@@ -294,7 +297,7 @@ class SourceCopier:
                     part_creator: MultiPartCreate,
                     return_exceptions: bool,
                 ) -> None:
-                    print(srcfile)
+                    print('_copy_part', srcfile)
                     total_written = 0
                     from ..router_fs import RouterAsyncFS
 
@@ -326,8 +329,8 @@ class SourceCopier:
 
                 async def f(i):
                     this_part_size = rem if i == n_parts - 1 and rem else part_size
-                    print(srcfile)
-                    return await asyncio.get_running_loop().run_in_executor(
+                    print('f', srcfile)
+                    x = await asyncio.get_running_loop().run_in_executor(
                         self.process_pool,
                         retry_transient_errors,
                         _copy_part,
@@ -338,6 +341,9 @@ class SourceCopier:
                         part_creator,
                         return_exceptions,
                     )
+                    assert isinstance(x, int), x
+                    print('f', x)
+                    return x
 
                 return sum(
                     await bounded_gather2(
