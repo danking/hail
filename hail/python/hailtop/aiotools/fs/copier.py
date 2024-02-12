@@ -16,7 +16,7 @@ from ...utils import (
     humanize_timedelta_msecs,
 )
 from ..weighted_semaphore import WeightedSemaphore
-from .exceptions import FileAndDirectoryError, UnexpectedEOFError
+from .exceptions import UnexpectedEOFError
 from .fs import MultiPartCreate, FileStatus, AsyncFS, FileListEntry
 
 
@@ -202,7 +202,7 @@ class SourceCopier:
     ):
         # self.router_fs = router_fs
         self.process_pool = process_pool
-        self.xfer_sema = xfer_sema
+        # self.xfer_sema = xfer_sema
         self.src = src
         self.dest = dest
         self.treat_dest_as = treat_dest_as
@@ -211,8 +211,8 @@ class SourceCopier:
         self.src_is_file: Optional[bool] = None
         self.src_is_dir: Optional[bool] = None
 
-        self.pending = 2
-        self.barrier = asyncio.Event()
+        # self.pending = 2
+        # self.barrier = asyncio.Event()
 
     @property
     def router_fs(self):
@@ -220,30 +220,30 @@ class SourceCopier:
 
         return RouterAsyncFS()
 
-    async def release_barrier(self):
-        self.pending -= 1
-        if self.pending == 0:
-            self.barrier.set()
+    # async def release_barrier(self):
+    #     self.pending -= 1
+    #     if self.pending == 0:
+    #         self.barrier.set()
 
     async def _copy_file(self, source_report: SourceReport, srcfile: str, size: int, destfile: str) -> None:
         assert not destfile.endswith('/')
 
-        async with self.xfer_sema.acquire_manager(min(Copier.BUFFER_SIZE, size)):
-            async with await self.router_fs.open(srcfile) as srcf:
-                try:
-                    dest_cm = await self.router_fs.create(destfile, retry_writes=False)
-                except FileNotFoundError:
-                    await self.router_fs.makedirs(os.path.dirname(destfile), exist_ok=True)
-                    dest_cm = await self.router_fs.create(destfile)
+        # async with self.xfer_sema.acquire_manager(min(Copier.BUFFER_SIZE, size)):
+        async with await self.router_fs.open(srcfile) as srcf:
+            try:
+                dest_cm = await self.router_fs.create(destfile, retry_writes=False)
+            except FileNotFoundError:
+                await self.router_fs.makedirs(os.path.dirname(destfile), exist_ok=True)
+                dest_cm = await self.router_fs.create(destfile)
 
-                async with dest_cm as destf:
-                    while True:
-                        b = await srcf.read(Copier.BUFFER_SIZE)
-                        if not b:
-                            return
-                        written = await destf.write(b)
-                        assert written == len(b)
-                        source_report.finish_bytes(written)
+            async with dest_cm as destf:
+                while True:
+                    b = await srcf.read(Copier.BUFFER_SIZE)
+                    if not b:
+                        return
+                    written = await destf.write(b)
+                    assert written == len(b)
+                    source_report.finish_bytes(written)
 
     async def _copy_part(
         self,
@@ -257,22 +257,20 @@ class SourceCopier:
     ) -> None:
         total_written = 0
         try:
-            async with self.xfer_sema.acquire_manager(min(Copier.BUFFER_SIZE, this_part_size)):
-                async with await self.router_fs.open_from(
-                    srcfile, part_number * part_size, length=this_part_size
-                ) as srcf:
-                    async with await part_creator.create_part(
-                        part_number, part_number * part_size, size_hint=this_part_size
-                    ) as destf:
-                        n = this_part_size
-                        while n > 0:
-                            b = await srcf.read(min(Copier.BUFFER_SIZE, n))
-                            if len(b) == 0:
-                                raise UnexpectedEOFError()
-                            written = await destf.write(b)
-                            assert written == len(b)
-                            total_written += written
-                            n -= len(b)
+            # async with self.xfer_sema.acquire_manager(min(Copier.BUFFER_SIZE, this_part_size)):
+            async with await self.router_fs.open_from(srcfile, part_number * part_size, length=this_part_size) as srcf:
+                async with await part_creator.create_part(
+                    part_number, part_number * part_size, size_hint=this_part_size
+                ) as destf:
+                    n = this_part_size
+                    while n > 0:
+                        b = await srcf.read(min(Copier.BUFFER_SIZE, n))
+                        if len(b) == 0:
+                            raise UnexpectedEOFError()
+                        written = await destf.write(b)
+                        assert written == len(b)
+                        total_written += written
+                        n -= len(b)
             source_report.finish_bytes(total_written)
         except Exception as e:
             if return_exceptions:
@@ -373,24 +371,26 @@ class SourceCopier:
         source_report: SourceReport,
         return_exceptions: bool,
     ):
-        try:
-            src = self.src
-            if src.endswith('/'):
-                return
-            try:
-                srcstat = await self.router_fs.statfile(src)
-            except FileNotFoundError:
-                self.src_is_file = False
-                return
-            self.src_is_file = True
-        finally:
-            await self.release_barrier()
+        # try:
+        #     src = self.src
+        #     if src.endswith('/'):
+        #         return
+        #     try:
+        #         srcstat = await self.router_fs.statfile(src)
+        #     except FileNotFoundError:
+        #         self.src_is_file = False
+        #         return
+        #     self.src_is_file = True
+        # finally:
+        #     await self.release_barrier()
 
-        await self.barrier.wait()
+        # await self.barrier.wait()
 
-        if self.src_is_dir:
-            raise FileAndDirectoryError(self.src)
+        # if self.src_is_dir:
+        #     raise FileAndDirectoryError(self.src)
 
+        src = self.src
+        srcstat = await self.router_fs.statfile(src)
         source_report._source_type = AsyncFS.FILE
 
         full_dest, full_dest_type = await self._full_dest()
@@ -402,27 +402,30 @@ class SourceCopier:
         await self._copy_file_multi_part(sema, source_report, src, srcstat, full_dest, return_exceptions)
 
     async def copy_as_dir(self, sema: asyncio.Semaphore, source_report: SourceReport, return_exceptions: bool):
+        src = self.src
+
         async def files_iterator() -> AsyncIterator[FileListEntry]:
             return await self.router_fs.listfiles(src, recursive=True)
 
-        try:
-            src = self.src
-            if not src.endswith('/'):
-                src = src + '/'
+        srcentries: Optional[AsyncIterator[FileListEntry]] = await files_iterator()
 
-            try:
-                srcentries: Optional[AsyncIterator[FileListEntry]] = await files_iterator()
-            except (NotADirectoryError, FileNotFoundError):
-                self.src_is_dir = False
-                return
-            self.src_is_dir = True
-        finally:
-            await self.release_barrier()
+        # try:
+        #     if not src.endswith('/'):
+        #         src = src + '/'
 
-        await self.barrier.wait()
+        #     try:
+        #         srcentries: Optional[AsyncIterator[FileListEntry]] = await files_iterator()
+        #     except (NotADirectoryError, FileNotFoundError):
+        #         self.src_is_dir = False
+        #         return
+        #     self.src_is_dir = True
+        # finally:
+        #     await self.release_barrier()
 
-        if self.src_is_file:
-            raise FileAndDirectoryError(self.src)
+        # await self.barrier.wait()
+
+        # if self.src_is_file:
+        #     raise FileAndDirectoryError(self.src)
 
         source_report._source_type = AsyncFS.DIR
 
@@ -488,16 +491,16 @@ class SourceCopier:
                 if isinstance(result, BaseException):
                     raise result
 
-            assert (self.src_is_file is None) == self.src.endswith('/')
-            assert self.src_is_dir is not None, repr((
-                results,
-                self.src_is_file,
-                self.src_is_dir,
-                self.src,
-                self.dest,
-                self.barrier,
-                self.pending,
-            ))
+            # assert (self.src_is_file is None) == self.src.endswith('/')
+            # assert self.src_is_dir is not None, repr((
+            #     results,
+            #     self.src_is_file,
+            #     self.src_is_dir,
+            #     self.src,
+            #     self.dest,
+            #     # self.barrier,
+            #     self.pending,
+            # ))
             if (self.src_is_file is False or self.src.endswith('/')) and not self.src_is_dir:
                 raise FileNotFoundError(self.src)
 
