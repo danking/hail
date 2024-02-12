@@ -300,7 +300,7 @@ class SourceCopier:
             part_size = router_fs.copy_part_size(destfile)
 
             if size <= part_size:
-                asyncio.get_running_loop().run_in_executor(
+                await asyncio.get_running_loop().run_in_executor(
                     self.process_pool, retry_transient_errors, self._copy_file, source_report, srcfile, size, destfile
                 )
                 return
@@ -319,7 +319,7 @@ class SourceCopier:
 
                 async def f(i):
                     this_part_size = rem if i == n_parts - 1 and rem else part_size
-                    asyncio.get_running_loop().run_in_executor(
+                    await asyncio.get_running_loop().run_in_executor(
                         self.process_pool,
                         retry_transient_errors,
                         self._copy_part,
