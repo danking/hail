@@ -241,6 +241,7 @@ class SourceCopier:
             if size <= part_size:
 
                 async def _copy_file(srcfile: str, size: int, destfile: str) -> None:
+                    print(srcfile)
                     assert not destfile.endswith('/')
 
                     from ..router_fs import RouterAsyncFS
@@ -292,6 +293,7 @@ class SourceCopier:
                     part_creator: MultiPartCreate,
                     return_exceptions: bool,
                 ) -> None:
+                    print(srcfile)
                     total_written = 0
                     from ..router_fs import RouterAsyncFS
 
