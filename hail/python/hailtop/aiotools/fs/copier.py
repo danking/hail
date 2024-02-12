@@ -356,7 +356,7 @@ class SourceCopier:
             pass
 
     async def _full_dest(self):
-        dest_type = self.dest_type_task
+        dest_type = self.dest_type
 
         if self.treat_dest_as == Transfer.DEST_DIR or (
             self.treat_dest_as == Transfer.INFER_DEST and dest_type == AsyncFS.DIR
