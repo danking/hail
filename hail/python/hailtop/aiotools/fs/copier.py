@@ -217,7 +217,7 @@ def _copy_file(srcfile: str, size: int, destfile: str) -> None:
     async def bar():
         return await retry_transient_errors(foo)
 
-    return asyncio.run()
+    return asyncio.run(bar())
 
 
 class SourceCopier:
