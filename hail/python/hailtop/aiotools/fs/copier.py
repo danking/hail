@@ -607,7 +607,7 @@ class Copier:
                 src_report = transfer_report._source_report
                 if isinstance(src, str):
                     assert isinstance(src_report, SourceReport)
-                    await self.copy_source(sema, transfer, src_report, src, dest_type_task, return_exceptions)
+                    await self.copy_source(sema, transfer, src, dest_type_task, return_exceptions)
                 else:
                     assert isinstance(src_report, list)
                     if transfer.treat_dest_as == Transfer.DEST_IS_TARGET:
