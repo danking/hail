@@ -214,7 +214,10 @@ def _copy_file(srcfile: str, size: int, destfile: str) -> None:
         finally:
             await router_fs.close()
 
-    asyncio.run(retry_transient_errors, foo)
+    async def bar():
+        return await retry_transient_errors(foo)
+
+    return asyncio.run()
 
 
 class SourceCopier:
