@@ -214,7 +214,6 @@ class SourceCopier:
         # self.pending = 2
         # self.barrier = asyncio.Event()
 
-    @property
     def router_fs(self):
         from ..router_fs import RouterAsyncFS
 
@@ -228,22 +227,27 @@ class SourceCopier:
     async def _copy_file(self, source_report: SourceReport, srcfile: str, size: int, destfile: str) -> None:
         assert not destfile.endswith('/')
 
-        # async with self.xfer_sema.acquire_manager(min(Copier.BUFFER_SIZE, size)):
-        async with await self.router_fs.open(srcfile) as srcf:
-            try:
-                dest_cm = await self.router_fs.create(destfile, retry_writes=False)
-            except FileNotFoundError:
-                await self.router_fs.makedirs(os.path.dirname(destfile), exist_ok=True)
-                dest_cm = await self.router_fs.create(destfile)
+        router_fs = self.router_fs()
 
-            async with dest_cm as destf:
-                while True:
-                    b = await srcf.read(Copier.BUFFER_SIZE)
-                    if not b:
-                        return
-                    written = await destf.write(b)
-                    assert written == len(b)
-                    source_report.finish_bytes(written)
+        # async with self.xfer_sema.acquire_manager(min(Copier.BUFFER_SIZE, size)):
+        try:
+            async with await router_fs.open(srcfile) as srcf:
+                try:
+                    dest_cm = await router_fs.create(destfile, retry_writes=False)
+                except FileNotFoundError:
+                    await router_fs.makedirs(os.path.dirname(destfile), exist_ok=True)
+                    dest_cm = await router_fs.create(destfile)
+
+                async with dest_cm as destf:
+                    while True:
+                        b = await srcf.read(Copier.BUFFER_SIZE)
+                        if not b:
+                            return
+                        written = await destf.write(b)
+                        assert written == len(b)
+                        source_report.finish_bytes(written)
+        finally:
+            await router_fs.close()
 
     async def _copy_part(
         self,
@@ -256,9 +260,10 @@ class SourceCopier:
         return_exceptions: bool,
     ) -> None:
         total_written = 0
+        router_fs = self.router_fs()
         try:
             # async with self.xfer_sema.acquire_manager(min(Copier.BUFFER_SIZE, this_part_size)):
-            async with await self.router_fs.open_from(srcfile, part_number * part_size, length=this_part_size) as srcf:
+            async with await router_fs.open_from(srcfile, part_number * part_size, length=this_part_size) as srcf:
                 async with await part_creator.create_part(
                     part_number, part_number * part_size, size_hint=this_part_size
                 ) as destf:
@@ -273,6 +278,7 @@ class SourceCopier:
                         n -= len(b)
             source_report.finish_bytes(total_written)
         except Exception as e:
+            await router_fs.close()
             if return_exceptions:
                 source_report.set_exception(e)
             else:
@@ -289,42 +295,46 @@ class SourceCopier:
     ):
         size = await srcstat.size()
 
-        part_size = self.router_fs.copy_part_size(destfile)
-
-        if size <= part_size:
-            asyncio.get_running_loop().run_in_executor(
-                self.process_pool, retry_transient_errors, self._copy_file, source_report, srcfile, size, destfile
-            )
-            return
-
-        n_parts, rem = divmod(size, part_size)
-        if rem:
-            n_parts += 1
-
+        router_fs = self.router_fs()
         try:
-            part_creator = await self.router_fs.multi_part_create(sema, destfile, n_parts)
-        except FileNotFoundError:
-            await self.router_fs.makedirs(os.path.dirname(destfile), exist_ok=True)
-            part_creator = await self.router_fs.multi_part_create(sema, destfile, n_parts)
+            part_size = router_fs.copy_part_size(destfile)
 
-        async with part_creator:
-
-            async def f(i):
-                this_part_size = rem if i == n_parts - 1 and rem else part_size
+            if size <= part_size:
                 asyncio.get_running_loop().run_in_executor(
-                    self.process_pool,
-                    retry_transient_errors,
-                    self._copy_part,
-                    source_report,
-                    part_size,
-                    srcfile,
-                    i,
-                    this_part_size,
-                    part_creator,
-                    return_exceptions,
+                    self.process_pool, retry_transient_errors, self._copy_file, source_report, srcfile, size, destfile
                 )
+                return
 
-            await bounded_gather2(sema, *[functools.partial(f, i) for i in range(n_parts)], cancel_on_error=True)
+            n_parts, rem = divmod(size, part_size)
+            if rem:
+                n_parts += 1
+
+            try:
+                part_creator = await router_fs.multi_part_create(sema, destfile, n_parts)
+            except FileNotFoundError:
+                await router_fs.makedirs(os.path.dirname(destfile), exist_ok=True)
+                part_creator = await router_fs.multi_part_create(sema, destfile, n_parts)
+
+            async with part_creator:
+
+                async def f(i):
+                    this_part_size = rem if i == n_parts - 1 and rem else part_size
+                    asyncio.get_running_loop().run_in_executor(
+                        self.process_pool,
+                        retry_transient_errors,
+                        self._copy_part,
+                        source_report,
+                        part_size,
+                        srcfile,
+                        i,
+                        this_part_size,
+                        part_creator,
+                        return_exceptions,
+                    )
+
+                await bounded_gather2(sema, *[functools.partial(f, i) for i in range(n_parts)], cancel_on_error=True)
+        finally:
+            await router_fs.close()
 
     async def _copy_file_multi_part(
         self,
@@ -390,90 +400,99 @@ class SourceCopier:
         #     raise FileAndDirectoryError(self.src)
 
         src = self.src
-        srcstat = await self.router_fs.statfile(src)
-        source_report._source_type = AsyncFS.FILE
+        router_fs = self.router_fs()
+        try:
+            srcstat = await router_fs.statfile(src)
+            source_report._source_type = AsyncFS.FILE
 
-        full_dest, full_dest_type = await self._full_dest()
-        if full_dest_type == AsyncFS.DIR:
-            raise IsADirectoryError(full_dest)
+            full_dest, full_dest_type = await self._full_dest()
+            if full_dest_type == AsyncFS.DIR:
+                raise IsADirectoryError(full_dest)
 
-        source_report.start_files(1)
-        source_report.start_bytes(await srcstat.size())
-        await self._copy_file_multi_part(sema, source_report, src, srcstat, full_dest, return_exceptions)
+            source_report.start_files(1)
+            source_report.start_bytes(await srcstat.size())
+            await self._copy_file_multi_part(sema, source_report, src, srcstat, full_dest, return_exceptions)
+        finally:
+            await router_fs.close()
 
     async def copy_as_dir(self, sema: asyncio.Semaphore, source_report: SourceReport, return_exceptions: bool):
         src = self.src
+        router_fs = self.router_fs()
 
-        async def files_iterator() -> AsyncIterator[FileListEntry]:
-            return await self.router_fs.listfiles(src, recursive=True)
+        try:
 
-        srcentries: Optional[AsyncIterator[FileListEntry]] = await files_iterator()
+            async def files_iterator() -> AsyncIterator[FileListEntry]:
+                return await router_fs.listfiles(src, recursive=True)
 
-        # try:
-        #     if not src.endswith('/'):
-        #         src = src + '/'
+            srcentries: Optional[AsyncIterator[FileListEntry]] = await files_iterator()
 
-        #     try:
-        #         srcentries: Optional[AsyncIterator[FileListEntry]] = await files_iterator()
-        #     except (NotADirectoryError, FileNotFoundError):
-        #         self.src_is_dir = False
-        #         return
-        #     self.src_is_dir = True
-        # finally:
-        #     await self.release_barrier()
+            # try:
+            #     if not src.endswith('/'):
+            #         src = src + '/'
 
-        # await self.barrier.wait()
+            #     try:
+            #         srcentries: Optional[AsyncIterator[FileListEntry]] = await files_iterator()
+            #     except (NotADirectoryError, FileNotFoundError):
+            #         self.src_is_dir = False
+            #         return
+            #     self.src_is_dir = True
+            # finally:
+            #     await self.release_barrier()
 
-        # if self.src_is_file:
-        #     raise FileAndDirectoryError(self.src)
+            # await self.barrier.wait()
 
-        source_report._source_type = AsyncFS.DIR
+            # if self.src_is_file:
+            #     raise FileAndDirectoryError(self.src)
 
-        full_dest, full_dest_type = await self._full_dest()
-        if full_dest_type == AsyncFS.FILE:
-            raise NotADirectoryError(full_dest)
+            source_report._source_type = AsyncFS.DIR
 
-        async def copy_source(srcentry: FileListEntry) -> None:
-            srcfile = await srcentry.url_maybe_trailing_slash()
-            assert srcfile.startswith(src)
+            full_dest, full_dest_type = await self._full_dest()
+            if full_dest_type == AsyncFS.FILE:
+                raise NotADirectoryError(full_dest)
 
-            # skip files with empty names
-            if srcfile.endswith('/'):
-                return
+            async def copy_source(srcentry: FileListEntry) -> None:
+                srcfile = await srcentry.url_maybe_trailing_slash()
+                assert srcfile.startswith(src)
 
-            relsrcfile = srcfile[len(src) :]
-            assert not relsrcfile.startswith('/')
+                # skip files with empty names
+                if srcfile.endswith('/'):
+                    return
 
-            await self._copy_file_multi_part(
-                sema,
-                source_report,
-                srcfile,
-                await srcentry.status(),
-                url_join(full_dest, relsrcfile),
-                return_exceptions,
-            )
+                relsrcfile = srcfile[len(src) :]
+                assert not relsrcfile.startswith('/')
 
-        async def create_copies() -> Tuple[List[Callable[[], Awaitable[None]]], int]:
-            nonlocal srcentries
-            bytes_to_copy = 0
-            if srcentries is None:
-                srcentries = await files_iterator()
-            try:
-                copy_thunks = []
-                async for srcentry in srcentries:
-                    # In cloud FSes, status and size never make a network request. In local FS, they
-                    # can make system calls on symlinks. This line will be fairly expensive if
-                    # copying a tree with a lot of symlinks.
-                    bytes_to_copy += await (await srcentry.status()).size()
-                    copy_thunks.append(functools.partial(copy_source, srcentry))
-                return (copy_thunks, bytes_to_copy)
-            finally:
-                srcentries = None
+                await self._copy_file_multi_part(
+                    sema,
+                    source_report,
+                    srcfile,
+                    await srcentry.status(),
+                    url_join(full_dest, relsrcfile),
+                    return_exceptions,
+                )
 
-        copies, bytes_to_copy = await retry_transient_errors(create_copies)
-        source_report.start_files(len(copies))
-        source_report.start_bytes(bytes_to_copy)
-        await bounded_gather2(sema, *copies, cancel_on_error=True)
+            async def create_copies() -> Tuple[List[Callable[[], Awaitable[None]]], int]:
+                nonlocal srcentries
+                bytes_to_copy = 0
+                if srcentries is None:
+                    srcentries = await files_iterator()
+                try:
+                    copy_thunks = []
+                    async for srcentry in srcentries:
+                        # In cloud FSes, status and size never make a network request. In local FS, they
+                        # can make system calls on symlinks. This line will be fairly expensive if
+                        # copying a tree with a lot of symlinks.
+                        bytes_to_copy += await (await srcentry.status()).size()
+                        copy_thunks.append(functools.partial(copy_source, srcentry))
+                    return (copy_thunks, bytes_to_copy)
+                finally:
+                    srcentries = None
+
+            copies, bytes_to_copy = await retry_transient_errors(create_copies)
+            source_report.start_files(len(copies))
+            source_report.start_bytes(bytes_to_copy)
+            await bounded_gather2(sema, *copies, cancel_on_error=True)
+        finally:
+            await router_fs.close()
 
     async def copy(self, sema: asyncio.Semaphore, source_report: SourceReport, return_exceptions: bool):
         try:
