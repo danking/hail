@@ -613,6 +613,7 @@ class Copier:
             await dest_type_task if dest_type_task else None,
         )
         async with sema:
+            print(sema)
             return await src_copier.copy(return_exceptions)
 
     async def _copy_one_transfer(
