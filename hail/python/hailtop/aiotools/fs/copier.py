@@ -224,67 +224,6 @@ class SourceCopier:
     #     if self.pending == 0:
     #         self.barrier.set()
 
-    async def _copy_file(self, srcfile: str, size: int, destfile: str) -> None:
-        assert not destfile.endswith('/')
-
-        router_fs = self.router_fs()
-        total_written = 0
-
-        # async with self.xfer_sema.acquire_manager(min(Copier.BUFFER_SIZE, size)):
-        try:
-            async with await router_fs.open(srcfile) as srcf:
-                try:
-                    dest_cm = await router_fs.create(destfile, retry_writes=False)
-                except FileNotFoundError:
-                    await router_fs.makedirs(os.path.dirname(destfile), exist_ok=True)
-                    dest_cm = await router_fs.create(destfile)
-
-                async with dest_cm as destf:
-                    while True:
-                        b = await srcf.read(Copier.BUFFER_SIZE)
-                        if not b:
-                            return
-                        written = await destf.write(b)
-                        assert written == len(b)
-                        total_written += written
-            return total_written
-        finally:
-            await router_fs.close()
-
-    async def _copy_part(
-        self,
-        part_size: int,
-        srcfile: str,
-        part_number: int,
-        this_part_size: int,
-        part_creator: MultiPartCreate,
-        return_exceptions: bool,
-    ) -> None:
-        total_written = 0
-        router_fs = self.router_fs()
-        try:
-            # async with self.xfer_sema.acquire_manager(min(Copier.BUFFER_SIZE, this_part_size)):
-            async with await router_fs.open_from(srcfile, part_number * part_size, length=this_part_size) as srcf:
-                async with await part_creator.create_part(
-                    part_number, part_number * part_size, size_hint=this_part_size
-                ) as destf:
-                    n = this_part_size
-                    while n > 0:
-                        b = await srcf.read(min(Copier.BUFFER_SIZE, n))
-                        if len(b) == 0:
-                            raise UnexpectedEOFError()
-                        written = await destf.write(b)
-                        assert written == len(b)
-                        total_written += written
-                        n -= len(b)
-            return total_written
-        finally:
-            await router_fs.close()
-            # if return_exceptions:
-            #     source_report.set_exception(e)
-            # else:
-            #     raise
-
     async def _copy_file_multi_part_main(
         self,
         srcfile: str,
@@ -300,8 +239,37 @@ class SourceCopier:
             part_size = router_fs.copy_part_size(destfile)
 
             if size <= part_size:
+
+                async def _copy_file(srcfile: str, size: int, destfile: str) -> None:
+                    assert not destfile.endswith('/')
+
+                    from ..router_fs import RouterAsyncFS
+
+                    router_fs = RouterAsyncFS()
+                    total_written = 0
+
+                    try:
+                        async with await router_fs.open(srcfile) as srcf:
+                            try:
+                                dest_cm = await router_fs.create(destfile, retry_writes=False)
+                            except FileNotFoundError:
+                                await router_fs.makedirs(os.path.dirname(destfile), exist_ok=True)
+                                dest_cm = await router_fs.create(destfile)
+
+                            async with dest_cm as destf:
+                                while True:
+                                    b = await srcf.read(Copier.BUFFER_SIZE)
+                                    if not b:
+                                        return
+                                    written = await destf.write(b)
+                                    assert written == len(b)
+                                    total_written += written
+                        return total_written
+                    finally:
+                        await router_fs.close()
+
                 return await asyncio.get_running_loop().run_in_executor(
-                    self.process_pool, retry_transient_errors, self._copy_file, srcfile, size, destfile
+                    self.process_pool, retry_transient_errors, _copy_file, srcfile, size, destfile
                 )
 
             n_parts, rem = divmod(size, part_size)
@@ -316,12 +284,49 @@ class SourceCopier:
 
             async with part_creator:
 
+                async def _copy_part(
+                    part_size: int,
+                    srcfile: str,
+                    part_number: int,
+                    this_part_size: int,
+                    part_creator: MultiPartCreate,
+                    return_exceptions: bool,
+                ) -> None:
+                    total_written = 0
+                    from ..router_fs import RouterAsyncFS
+
+                    router_fs = RouterAsyncFS()
+                    try:
+                        # async with self.xfer_sema.acquire_manager(min(Copier.BUFFER_SIZE, this_part_size)):
+                        async with await router_fs.open_from(
+                            srcfile, part_number * part_size, length=this_part_size
+                        ) as srcf:
+                            async with await part_creator.create_part(
+                                part_number, part_number * part_size, size_hint=this_part_size
+                            ) as destf:
+                                n = this_part_size
+                                while n > 0:
+                                    b = await srcf.read(min(Copier.BUFFER_SIZE, n))
+                                    if len(b) == 0:
+                                        raise UnexpectedEOFError()
+                                    written = await destf.write(b)
+                                    assert written == len(b)
+                                    total_written += written
+                                    n -= len(b)
+                        return total_written
+                    finally:
+                        await router_fs.close()
+                        # if return_exceptions:
+                        #     source_report.set_exception(e)
+                        # else:
+                        #     raise
+
                 async def f(i):
                     this_part_size = rem if i == n_parts - 1 and rem else part_size
                     return await asyncio.get_running_loop().run_in_executor(
                         self.process_pool,
                         retry_transient_errors,
-                        self._copy_part,
+                        _copy_part,
                         part_size,
                         srcfile,
                         i,
