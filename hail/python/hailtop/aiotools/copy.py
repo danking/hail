@@ -5,7 +5,7 @@ import json
 import logging
 import sys
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from rich.progress import Progress, TaskID
 
 from ..utils.utils import sleep_before_try
@@ -86,7 +86,7 @@ async def copy(
     verbose: bool = False,
     totals: Optional[Tuple[int, int]] = None,
 ) -> None:
-    with ThreadPoolExecutor() as thread_pool:
+    with ThreadPoolExecutor() as thread_pool, ProcessPoolExecutor() as process_pool:
         if max_simultaneous_transfers is None:
             max_simultaneous_transfers = 75
         if local_kwargs is None:
@@ -129,7 +129,7 @@ async def copy(
                         bytes_listener = make_listener(progress, bytes_tid)
 
                     copy_report = await Copier.copy(
-                        fs, sema, transfers, files_listener=file_listener, bytes_listener=bytes_listener
+                        fs, sema, transfers, process_pool, files_listener=file_listener, bytes_listener=bytes_listener
                     )
                 if verbose:
                     copy_report.summarize(include_sources=totals is None)

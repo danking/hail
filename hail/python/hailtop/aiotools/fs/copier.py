@@ -4,6 +4,7 @@ import os.path
 import asyncio
 import functools
 import humanize
+from concurrent.futures import Executor
 
 
 from ...utils import (
@@ -190,9 +191,17 @@ class SourceCopier:
     """
 
     def __init__(
-        self, router_fs: AsyncFS, xfer_sema: WeightedSemaphore, src: str, dest: str, treat_dest_as: str, dest_type_task
+        self,
+        router_fs: AsyncFS,
+        process_pool: Executor,
+        xfer_sema: WeightedSemaphore,
+        src: str,
+        dest: str,
+        treat_dest_as: str,
+        dest_type_task,
     ):
         self.router_fs = router_fs
+        self.process_pool = process_pool
         self.xfer_sema = xfer_sema
         self.src = src
         self.dest = dest
@@ -279,7 +288,9 @@ class SourceCopier:
         part_size = self.router_fs.copy_part_size(destfile)
 
         if size <= part_size:
-            await retry_transient_errors(self._copy_file, source_report, srcfile, size, destfile)
+            asyncio.get_running_loop().run_in_executor(
+                self.process_pool, retry_transient_errors, self._copy_file, source_report, srcfile, size, destfile
+            )
             return
 
         n_parts, rem = divmod(size, part_size)
@@ -296,7 +307,9 @@ class SourceCopier:
 
             async def f(i):
                 this_part_size = rem if i == n_parts - 1 and rem else part_size
-                await retry_transient_errors(
+                asyncio.get_running_loop().run_in_executor(
+                    self.process_pool,
+                    retry_transient_errors,
                     self._copy_part,
                     source_report,
                     part_size,
@@ -501,19 +514,21 @@ class Copier:
         fs: AsyncFS,
         sema: asyncio.Semaphore,
         transfer: Union[Transfer, List[Transfer]],
+        process_pool: Executor,
         return_exceptions: bool = False,
         *,
         files_listener: Optional[Callable[[int], None]] = None,
         bytes_listener: Optional[Callable[[int], None]] = None,
     ) -> CopyReport:
-        copier = Copier(fs)
+        copier = Copier(fs, process_pool)
         copy_report = CopyReport(transfer, files_listener=files_listener, bytes_listener=bytes_listener)
         await copier._copy(sema, copy_report, transfer, return_exceptions)
         copy_report.mark_done()
         return copy_report
 
-    def __init__(self, router_fs):
+    def __init__(self, router_fs: AsyncFS, process_pool: Executor):
         self.router_fs = router_fs
+        self.process_pool = process_pool
         # This is essentially a limit on amount of memory in temporary
         # buffers during copying.  We allow ~10 full-sized copies to
         # run concurrently.
@@ -549,7 +564,13 @@ class Copier:
         return_exceptions: bool,
     ):
         src_copier = SourceCopier(
-            self.router_fs, self.xfer_sema, src, transfer.dest, transfer.treat_dest_as, dest_type_task
+            self.router_fs,
+            self.process_pool,
+            self.xfer_sema,
+            src,
+            transfer.dest,
+            transfer.treat_dest_as,
+            dest_type_task,
         )
         await src_copier.copy(sema, source_report, return_exceptions)
 

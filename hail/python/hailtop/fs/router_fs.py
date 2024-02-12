@@ -6,6 +6,7 @@ import os
 import functools
 import glob
 import fnmatch
+from concurrent.futures import ProcessPoolExecutor
 
 from hailtop.aiotools.fs import (
     Copier,
@@ -237,7 +238,8 @@ class RouterFS(FS):
 
         async def _copy():
             sema = asyncio.Semaphore(max_simultaneous_transfers)
-            await Copier.copy(self.afs, sema, transfer)
+            with ProcessPoolExecutor() as process_pool:
+                await Copier.copy(self.afs, sema, transfer, process_pool)
 
         return async_to_blocking(_copy())
 
