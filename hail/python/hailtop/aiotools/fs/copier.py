@@ -277,12 +277,12 @@ class SourceCopier:
                         total_written += written
                         n -= len(b)
             source_report.finish_bytes(total_written)
-        except Exception as e:
+        finally:
             await router_fs.close()
-            if return_exceptions:
-                source_report.set_exception(e)
-            else:
-                raise
+            # if return_exceptions:
+            #     source_report.set_exception(e)
+            # else:
+            #     raise
 
     async def _copy_file_multi_part_main(
         self,
@@ -349,11 +349,11 @@ class SourceCopier:
         try:
             await self._copy_file_multi_part_main(sema, source_report, srcfile, srcstat, destfile, return_exceptions)
             success = True
-        except Exception as e:
-            if return_exceptions:
-                source_report.set_file_error(srcfile, destfile, e)
-            else:
-                raise e
+        # except Exception as e:
+        #     if return_exceptions:
+        #         source_report.set_file_error(srcfile, destfile, e)
+        #     else:
+        #         raise e
         finally:
             source_report.finish_files(1, failed=not success)
 
@@ -498,17 +498,28 @@ class SourceCopier:
         try:
             # gather with return_exceptions=True to make copy
             # deterministic with respect to exceptions
-            results = await asyncio.gather(
-                self.copy_as_file(sema, source_report, return_exceptions),
-                self.copy_as_dir(sema, source_report, return_exceptions),
-                return_exceptions=True,
-            )
+            try:
+                await self.copy_as_file(sema, source_report, return_exceptions)
+                is_file = True
+            except FileNotFoundError:
+                is_file = False
 
-            assert self.pending == 0
+            try:
+                await self.copy_as_dir(sema, source_report, return_exceptions)
+                is_dir = True
+            except (NotADirectoryError, FileNotFoundError):
+                is_dir = False
+            # results = await asyncio.gather(
+            #     self.copy_as_file(sema, source_report, return_exceptions),
+            #     self.copy_as_dir(sema, source_report, return_exceptions),
+            #     # return_exceptions=True,
+            # )
 
-            for result in results:
-                if isinstance(result, BaseException):
-                    raise result
+            # assert self.pending == 0
+
+            # for result in results:
+            #     if isinstance(result, BaseException):
+            #         raise result
 
             # assert (self.src_is_file is None) == self.src.endswith('/')
             # assert self.src_is_dir is not None, repr((
@@ -520,14 +531,16 @@ class SourceCopier:
             #     # self.barrier,
             #     self.pending,
             # ))
-            if (self.src_is_file is False or self.src.endswith('/')) and not self.src_is_dir:
+            if (is_file is False or self.src.endswith('/')) and not is_dir:
                 raise FileNotFoundError(self.src)
+        finally:
+            pass
 
-        except Exception as e:
-            if return_exceptions:
-                source_report.set_exception(e)
-            else:
-                raise e
+        # except Exception as e:
+        #     if return_exceptions:
+        #         source_report.set_exception(e)
+        #     else:
+        #         raise e
 
 
 class Copier:
