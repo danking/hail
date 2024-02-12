@@ -296,7 +296,7 @@ class SourceCopier:
 
         router_fs = self.router_fs()
         try:
-            sema = asyncio.Sempahore(10)
+            sema = asyncio.Semaphore(10)
             part_size = router_fs.copy_part_size(destfile)
 
             if size <= part_size:
@@ -487,7 +487,7 @@ class SourceCopier:
             copies, bytes_to_copy = await retry_transient_errors(create_copies)
             source_report.start_files(len(copies))
             source_report.start_bytes(bytes_to_copy)
-            sema = asyncio.Sempahore(10)
+            sema = asyncio.Semaphore(10)
             await bounded_gather2(sema, *copies, cancel_on_error=True)
         finally:
             await router_fs.close()
