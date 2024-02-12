@@ -18,7 +18,6 @@ from ...utils import (
 from ..weighted_semaphore import WeightedSemaphore
 from .exceptions import FileAndDirectoryError, UnexpectedEOFError
 from .fs import MultiPartCreate, FileStatus, AsyncFS, FileListEntry
-from ..router_fs import RouterAsyncFS
 
 
 class Transfer:
@@ -217,6 +216,8 @@ class SourceCopier:
 
     @property
     def router_fs(self):
+        from ..router_fs import RouterAsyncFS
+
         return RouterAsyncFS()
 
     async def release_barrier(self):
