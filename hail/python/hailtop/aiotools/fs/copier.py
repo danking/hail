@@ -184,6 +184,36 @@ class CopyReport:
                 print(f'  {sr._source}: {sr._files} files, {humanize.naturalsize(sr._bytes)}')
 
 
+async def _copy_file(srcfile: str, size: int, destfile: str) -> None:
+    print('_copy_file', srcfile)
+    assert not destfile.endswith('/')
+
+    from ..router_fs import RouterAsyncFS
+
+    router_fs = RouterAsyncFS()
+    total_written = 0
+
+    try:
+        async with await router_fs.open(srcfile) as srcf:
+            try:
+                dest_cm = await router_fs.create(destfile, retry_writes=False)
+            except FileNotFoundError:
+                await router_fs.makedirs(os.path.dirname(destfile), exist_ok=True)
+                dest_cm = await router_fs.create(destfile)
+
+            async with dest_cm as destf:
+                while True:
+                    b = await srcf.read(Copier.BUFFER_SIZE)
+                    if not b:
+                        return
+                    written = await destf.write(b)
+                    assert written == len(b)
+                    total_written += written
+        return total_written
+    finally:
+        await router_fs.close()
+
+
 class SourceCopier:
     """This class implements copy from a single source.  In general, a
     transfer will have multiple sources, and a SourceCopier will be
@@ -239,36 +269,6 @@ class SourceCopier:
             part_size = router_fs.copy_part_size(destfile)
 
             if size <= part_size:
-
-                async def _copy_file(srcfile: str, size: int, destfile: str) -> None:
-                    print('_copy_file', srcfile)
-                    assert not destfile.endswith('/')
-
-                    from ..router_fs import RouterAsyncFS
-
-                    router_fs = RouterAsyncFS()
-                    total_written = 0
-
-                    try:
-                        async with await router_fs.open(srcfile) as srcf:
-                            try:
-                                dest_cm = await router_fs.create(destfile, retry_writes=False)
-                            except FileNotFoundError:
-                                await router_fs.makedirs(os.path.dirname(destfile), exist_ok=True)
-                                dest_cm = await router_fs.create(destfile)
-
-                            async with dest_cm as destf:
-                                while True:
-                                    b = await srcf.read(Copier.BUFFER_SIZE)
-                                    if not b:
-                                        return
-                                    written = await destf.write(b)
-                                    assert written == len(b)
-                                    total_written += written
-                        return total_written
-                    finally:
-                        await router_fs.close()
-
                 print('_copy_file_multi_part_main', srcfile)
                 x = await asyncio.get_running_loop().run_in_executor(
                     self.process_pool, retry_transient_errors, _copy_file, srcfile, size, destfile
@@ -668,7 +668,7 @@ class Copier:
     ):
         transfer_report = copy_report._transfer_report
         try:
-            print('_copy', transfer)
+            print('_copy', len(transfer))
             if isinstance(transfer, Transfer):
                 assert isinstance(transfer_report, TransferReport)
                 await self._copy_one_transfer(sema, transfer_report, transfer, return_exceptions)
