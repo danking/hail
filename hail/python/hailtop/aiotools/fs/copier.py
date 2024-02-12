@@ -228,6 +228,7 @@ class SourceCopier:
         assert not destfile.endswith('/')
 
         router_fs = self.router_fs()
+        total_written = 0
 
         # async with self.xfer_sema.acquire_manager(min(Copier.BUFFER_SIZE, size)):
         try:
@@ -245,6 +246,8 @@ class SourceCopier:
                             return
                         written = await destf.write(b)
                         assert written == len(b)
+                        total_written += written
+            return total_written
         finally:
             await router_fs.close()
 
@@ -274,6 +277,7 @@ class SourceCopier:
                         assert written == len(b)
                         total_written += written
                         n -= len(b)
+            return total_written
         finally:
             await router_fs.close()
             # if return_exceptions:
@@ -296,10 +300,9 @@ class SourceCopier:
             part_size = router_fs.copy_part_size(destfile)
 
             if size <= part_size:
-                await asyncio.get_running_loop().run_in_executor(
+                return await asyncio.get_running_loop().run_in_executor(
                     self.process_pool, retry_transient_errors, self._copy_file, srcfile, size, destfile
                 )
-                return
 
             n_parts, rem = divmod(size, part_size)
             if rem:
@@ -315,7 +318,7 @@ class SourceCopier:
 
                 async def f(i):
                     this_part_size = rem if i == n_parts - 1 and rem else part_size
-                    await asyncio.get_running_loop().run_in_executor(
+                    return await asyncio.get_running_loop().run_in_executor(
                         self.process_pool,
                         retry_transient_errors,
                         self._copy_part,
@@ -327,7 +330,11 @@ class SourceCopier:
                         return_exceptions,
                     )
 
-                await bounded_gather2(sema, *[functools.partial(f, i) for i in range(n_parts)], cancel_on_error=True)
+                return sum(
+                    await bounded_gather2(
+                        sema, *[functools.partial(f, i) for i in range(n_parts)], cancel_on_error=True
+                    )
+                )
         finally:
             await router_fs.close()
 
@@ -394,7 +401,7 @@ class SourceCopier:
             if full_dest_type == AsyncFS.DIR:
                 raise IsADirectoryError(full_dest)
 
-            await self._copy_file_multi_part(src, srcstat, full_dest, return_exceptions)
+            return await self._copy_file_multi_part(src, srcstat, full_dest, return_exceptions)
         finally:
             await router_fs.close()
 
@@ -478,16 +485,15 @@ class SourceCopier:
             # gather with return_exceptions=True to make copy
             # deterministic with respect to exceptions
             try:
-                await self.copy_as_file(return_exceptions)
-                is_file = True
+                return await self.copy_as_file(return_exceptions)
             except FileNotFoundError:
-                is_file = False
+                pass
 
-            try:
-                await self.copy_as_dir(return_exceptions)
-                is_dir = True
-            except (NotADirectoryError, FileNotFoundError):
-                is_dir = False
+            # try:
+            #     await self.copy_as_dir(return_exceptions)
+            #     is_dir = True
+            # except (NotADirectoryError, FileNotFoundError):
+            #     is_dir = False
             # results = await asyncio.gather(
             #     self.copy_as_file(sema, source_report, return_exceptions),
             #     self.copy_as_dir(sema, source_report, return_exceptions),
@@ -510,8 +516,8 @@ class SourceCopier:
             #     # self.barrier,
             #     self.pending,
             # ))
-            if (is_file is False or self.src.endswith('/')) and not is_dir:
-                raise FileNotFoundError(self.src)
+            # if (is_file is False or self.src.endswith('/')) and not is_dir:
+            #     raise FileNotFoundError(self.src)
         finally:
             pass
 
@@ -591,7 +597,7 @@ class Copier:
             transfer.treat_dest_as,
             await dest_type_task if dest_type_task else None,
         )
-        await src_copier.copy(return_exceptions)
+        return await src_copier.copy(return_exceptions)
 
     async def _copy_one_transfer(
         self, sema: asyncio.Semaphore, transfer_report: TransferReport, transfer: Transfer, return_exceptions: bool
@@ -607,7 +613,9 @@ class Copier:
                 src_report = transfer_report._source_report
                 if isinstance(src, str):
                     assert isinstance(src_report, SourceReport)
-                    await self.copy_source(sema, transfer, src, dest_type_task, return_exceptions)
+                    written = await self.copy_source(sema, transfer, src, dest_type_task, return_exceptions)
+                    src_report.finish_bytes(written)
+                    src_report.finish_files(1, failed=False)
                 else:
                     assert isinstance(src_report, list)
                     if transfer.treat_dest_as == Transfer.DEST_IS_TARGET:
