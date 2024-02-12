@@ -275,12 +275,10 @@ class SourceCopier:
             part_size = router_fs.copy_part_size(destfile)
 
             if size <= part_size:
-                print('_copy_file_multi_part_main', srcfile)
                 x = await asyncio.get_running_loop().run_in_executor(
                     self.process_pool, _copy_file, srcfile, size, destfile
                 )
-                assert isinstance(x, int), x
-                print('_copy_file_multi_part_main', x)
+                print(srcfile, x)
                 return x
 
             n_parts, rem = divmod(size, part_size)
@@ -304,7 +302,6 @@ class SourceCopier:
                         part_creator: MultiPartCreate,
                         return_exceptions: bool,
                     ) -> None:
-                        print('_copy_part', srcfile)
                         total_written = 0
                         from ..router_fs import RouterAsyncFS
 
@@ -336,7 +333,6 @@ class SourceCopier:
 
                     async def f(i):
                         this_part_size = rem if i == n_parts - 1 and rem else part_size
-                        print('f', srcfile)
                         x = await retry_transient_errors(
                             _copy_part,
                             part_size,
@@ -347,7 +343,6 @@ class SourceCopier:
                             return_exceptions,
                         )
                         assert isinstance(x, int), x
-                        print('f', x)
                         return x
 
                     return sum(
@@ -357,7 +352,9 @@ class SourceCopier:
                     )
 
             def bar():
-                return asyncio.run(foo())
+                x = asyncio.run(foo())
+                print(srcfile, x)
+                return x
 
             return await asyncio.get_running_loop().run_in_executor(bar)
         finally:
@@ -689,8 +686,8 @@ class Copier:
             while sema._value > 0 and idx < len(transfer):
                 await asyncio.gather(*[
                     self._copy_one_transfer(sema, r, t, return_exceptions)
-                    for r, t in zip(transfer_report[idx : (idx + 10)], transfer[idx : (idx + 10)])
+                    for r, t in zip(transfer_report[idx : (idx + 100)], transfer[idx : (idx + 100)])
                 ])
-                idx += 10
+                idx += 100
         finally:
             pass
