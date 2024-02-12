@@ -206,7 +206,7 @@ def _copy_file(srcfile: str, size: int, destfile: str) -> None:
                     while True:
                         b = await srcf.read(Copier.BUFFER_SIZE)
                         if not b:
-                            return
+                            return total_written
                         written = await destf.write(b)
                         assert written == len(b)
                         total_written += written
