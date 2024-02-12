@@ -18,6 +18,7 @@ from ...utils import (
 from ..weighted_semaphore import WeightedSemaphore
 from .exceptions import FileAndDirectoryError, UnexpectedEOFError
 from .fs import MultiPartCreate, FileStatus, AsyncFS, FileListEntry
+from ..router_fs import RouterAsyncFS
 
 
 class Transfer:
@@ -200,7 +201,7 @@ class SourceCopier:
         treat_dest_as: str,
         dest_type_task,
     ):
-        self.router_fs = router_fs
+        # self.router_fs = router_fs
         self.process_pool = process_pool
         self.xfer_sema = xfer_sema
         self.src = src
@@ -213,6 +214,10 @@ class SourceCopier:
 
         self.pending = 2
         self.barrier = asyncio.Event()
+
+    @property
+    def router_fs(self):
+        return RouterAsyncFS()
 
     async def release_barrier(self):
         self.pending -= 1
