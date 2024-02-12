@@ -589,7 +589,7 @@ class Copier:
             src,
             transfer.dest,
             transfer.treat_dest_as,
-            await dest_type_task,
+            await dest_type_task if dest_type_task else None,
         )
         await src_copier.copy(return_exceptions)
 
