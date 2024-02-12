@@ -338,7 +338,7 @@ class SourceCopier:
         finally:
             await router_fs.close()
 
-    async def copy_file_multi_part(
+    async def _copy_file_multi_part(
         self,
         srcfile: str,
         srcstat: FileStatus,
