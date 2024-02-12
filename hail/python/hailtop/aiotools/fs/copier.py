@@ -606,7 +606,8 @@ class Copier:
             transfer.treat_dest_as,
             await dest_type_task if dest_type_task else None,
         )
-        return await src_copier.copy(return_exceptions)
+        async with sema:
+            return await src_copier.copy(return_exceptions)
 
     async def _copy_one_transfer(
         self, sema: asyncio.Semaphore, transfer_report: TransferReport, transfer: Transfer, return_exceptions: bool
