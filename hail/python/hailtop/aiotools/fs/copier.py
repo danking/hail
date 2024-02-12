@@ -668,23 +668,19 @@ class Copier:
     ):
         transfer_report = copy_report._transfer_report
         try:
+            print('_copy', transfer)
             if isinstance(transfer, Transfer):
                 assert isinstance(transfer_report, TransferReport)
                 await self._copy_one_transfer(sema, transfer_report, transfer, return_exceptions)
                 return
 
             assert isinstance(transfer_report, list)
-            await bounded_gather2(
-                sema,
-                *[
-                    functools.partial(self._copy_one_transfer, sema, r, t, return_exceptions)
-                    for r, t in zip(transfer_report, transfer)
-                ],
-                return_exceptions=return_exceptions,
-                cancel_on_error=True,
-            )
-        except Exception as e:
-            if return_exceptions:
-                copy_report.set_exception(e)
-            else:
-                raise e
+            idx = 0
+            while sema._value > 0 and idx < len(transfer):
+                await asyncio.gather(*[
+                    self._copy_one_transfer(sema, r, t, return_exceptions)
+                    for r, t in zip(transfer_report[idx : (idx + 10)], transfer[idx : (idx + 10)])
+                ])
+                idx += 10
+        finally:
+            pass
