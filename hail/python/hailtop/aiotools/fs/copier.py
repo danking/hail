@@ -184,34 +184,37 @@ class CopyReport:
                 print(f'  {sr._source}: {sr._files} files, {humanize.naturalsize(sr._bytes)}')
 
 
-async def _copy_file(srcfile: str, size: int, destfile: str) -> None:
-    print('_copy_file', srcfile)
-    assert not destfile.endswith('/')
+def _copy_file(srcfile: str, size: int, destfile: str) -> None:
+    async def foo():
+        print('_copy_file', srcfile)
+        assert not destfile.endswith('/')
 
-    from ..router_fs import RouterAsyncFS
+        from ..router_fs import RouterAsyncFS
 
-    router_fs = RouterAsyncFS()
-    total_written = 0
+        router_fs = RouterAsyncFS()
+        total_written = 0
 
-    try:
-        async with await router_fs.open(srcfile) as srcf:
-            try:
-                dest_cm = await router_fs.create(destfile, retry_writes=False)
-            except FileNotFoundError:
-                await router_fs.makedirs(os.path.dirname(destfile), exist_ok=True)
-                dest_cm = await router_fs.create(destfile)
+        try:
+            async with await router_fs.open(srcfile) as srcf:
+                try:
+                    dest_cm = await router_fs.create(destfile, retry_writes=False)
+                except FileNotFoundError:
+                    await router_fs.makedirs(os.path.dirname(destfile), exist_ok=True)
+                    dest_cm = await router_fs.create(destfile)
 
-            async with dest_cm as destf:
-                while True:
-                    b = await srcf.read(Copier.BUFFER_SIZE)
-                    if not b:
-                        return
-                    written = await destf.write(b)
-                    assert written == len(b)
-                    total_written += written
-        return total_written
-    finally:
-        await router_fs.close()
+                async with dest_cm as destf:
+                    while True:
+                        b = await srcf.read(Copier.BUFFER_SIZE)
+                        if not b:
+                            return
+                        written = await destf.write(b)
+                        assert written == len(b)
+                        total_written += written
+            return total_written
+        finally:
+            await router_fs.close()
+
+    asyncio.run(retry_transient_errors, foo)
 
 
 class SourceCopier:
@@ -271,7 +274,7 @@ class SourceCopier:
             if size <= part_size:
                 print('_copy_file_multi_part_main', srcfile)
                 x = await asyncio.get_running_loop().run_in_executor(
-                    self.process_pool, retry_transient_errors, _copy_file, srcfile, size, destfile
+                    self.process_pool, _copy_file, srcfile, size, destfile
                 )
                 assert isinstance(x, int), x
                 print('_copy_file_multi_part_main', x)
